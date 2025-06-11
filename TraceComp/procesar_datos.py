@@ -28,10 +28,12 @@ def procesar_archivos_wintax(archivos_wintax):
         for var in variables:
             # Gather all values for this variable across files, per index
             values_matrix = []
-            min_len = min(len(d["Datos"][var]) for d in all_data)
+            # 'all_data' already contains only the data dictionaries so we access
+            # the variable directly
+            min_len = min(len(d[var]) for d in all_data)
             for d in all_data:
                 # Convert to float, pad/cut to min_len
-                vals = [float(x) if str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else np.nan for x in d["Datos"][var][:min_len]]
+                vals = [float(x) if str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else np.nan for x in d[var][:min_len]]
                 values_matrix.append(vals)
             # Transpose to get values at each index
             values_matrix = np.array(values_matrix)
