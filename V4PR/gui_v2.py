@@ -183,8 +183,8 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
-    mr_f = 1
-    mr_r = 1
+    mr_f = 1#1.437
+    mr_r = 1#1.328
 
     global_setup["MR_FL"] = mr_f
     global_setup["MR_FR"] = mr_f

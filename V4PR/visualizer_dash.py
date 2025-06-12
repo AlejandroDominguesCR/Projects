@@ -29,7 +29,6 @@ def launch_dash(sol, post, setup_name="Setup"):
     def plot_data():
         graphs = []
 
-
         travel = smooth_signal(post['travel_rel'])
         f_tire = smooth_signal(post['f_tire'])
         heave_filtered = smooth_signal(sol.y[0])
@@ -102,7 +101,6 @@ def launch_dash(sol, post, setup_name="Setup"):
         )
         graphs.append(dcc.Graph(figure=fig_variation))
 
-        
         # Pitch RMS (número)
         pitch_rms = np.sqrt(np.mean(pitch_filtered**2))
         fig_pitch_rms = go.Figure()
@@ -155,20 +153,18 @@ def launch_dash(sol, post, setup_name="Setup"):
             post['gap_bumpstop_RR']
         ])[:, None]  # forma (4,1)
         # compresión más allá del gap (desplazamiento del bump-stop)
-        disp_bump = np.maximum(0.0, travel_rel - gap)  # (4,N)
-        fig_disp_bump = go.Figure([
-            go.Scatter(x=sol.t, y=disp_bump[0] * 1000, name="Bump Disp FL"),
-            go.Scatter(x=sol.t, y=disp_bump[1] * 1000, name="Bump Disp FR"),
-            go.Scatter(x=sol.t, y=disp_bump[2] * 1000, name="Bump Disp RL"),
-            go.Scatter(x=sol.t, y=disp_bump[3] * 1000, name="Bump Disp RR"),
-        ])
-        fig_disp_bump.update_layout(
+        bump_disp = post['bump_disp'] * 1000  # [mm]
+        graphs.append(dcc.Graph(figure=go.Figure([
+            go.Scatter(x=sol.t, y=bump_disp[0], name="Disp Bump FL"),
+            go.Scatter(x=sol.t, y=bump_disp[1], name="Disp Bump FR"),
+            go.Scatter(x=sol.t, y=bump_disp[2], name="Disp Bump RL"),
+            go.Scatter(x=sol.t, y=bump_disp[3], name="Disp Bump RR"),
+        ]).update_layout(
             title="Bump-stop Displacement por rueda [mm]",
             xaxis_title="Tiempo [s]",
             yaxis_title="Desplazamiento bump [mm]"
-        )
-        graphs.append(dcc.Graph(figure=fig_disp_bump))
-        
+        )))
+
         app.layout = html.Div([
             html.H1(f"Resultados 7-Post Rig: {setup_name}"),
             html.H2("Señales dinámicas"),
@@ -226,7 +222,6 @@ def launch_dash_kpis(kpi_data, setup_names):
             continue
 
     # --- KPIs PERSONALIZADOS: Road Noise, Pitch vs Distance, Pitch RMS, Ride Height RMS, Scatter, etc. ---
-
     # ─── 1) Road‐Noise: wheel vertical‐speed RMS [mm/s] ──────────────────────────
     try:
         front_noise_vals, rear_noise_vals = [], []
