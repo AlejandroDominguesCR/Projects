@@ -69,9 +69,9 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         # 3) bumpstop en coordenada muelle␊
         comp = x_spring - gap
         f_bump = bump(np.maximum(0, comp))
-        # 4) rigidez en serie y wheel-rate␊
-        k_tot = 1.0/(1.0/k_s + 1.0/k_i)
-        f_spring = k_tot * MR**2 * x_raw
+        # 4) rigidez en serie y wheel-rate consistente (MR aplicado)␊
+        k_wheel = 1.0 / (1.0/(k_s * MR**2) + 1.0/k_i)
+        f_spring = k_wheel * x_raw
         # 5) velocidad cruda y v_dampe
         v_raw = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
         v_damp = MR * v_raw
