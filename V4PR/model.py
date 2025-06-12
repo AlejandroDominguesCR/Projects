@@ -200,12 +200,19 @@ def compute_static_equilibrium(params):
         F_spring_RR = kRR_eff * x_RR
         F_bump_RR = bumpstop_rear(x_RR - z_RR_free)
 
+        F_arb_front = (params['k_arb_f'] / 2.0) * (x_FL - x_FR)
+        F_arb_rear  = (params['k_arb_r'] / 2.0) * (x_RL - x_RR)
+
         # Fuerzas suspensión
         F_FL = F_spring_FL + F_bump_FL
         F_FR = F_spring_FR + F_bump_FR
         F_RL = F_spring_RL + F_bump_RL
         F_RR = F_spring_RR + F_bump_RR
         
+        F_FL +=  F_arb_front
+        F_FR += -F_arb_front
+        F_RL +=  F_arb_rear
+        F_RR += -F_arb_rear
 
         # Fuerza total vertical (suma fuerzas suspensión - peso)
         R1 = F_FR + F_FL + F_RR + F_RL - Ms * g
