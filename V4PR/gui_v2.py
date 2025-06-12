@@ -1,20 +1,16 @@
 import sys
 import numpy as np
 import pandas as pd
-import json
 import os
+import visualizer_dash
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QScrollArea,
     QLabel, QFileDialog, QTextEdit, QHBoxLayout, QSpinBox, QComboBox, QGroupBox, QTabWidget, QGridLayout, QProgressBar, QLineEdit, QFormLayout, QMessageBox, QListWidget, QAbstractItemView, QTableWidgetItem
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-import visualizer_dash
 from visualizer_dash import export_full_report
 from PyQt5.QtCore import Qt, QMimeData, QTimer, QUrl
 from PyQt5.QtGui import QPixmap, QPalette, QColor, QFont, QIcon, QDoubleValidator, QIntValidator
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from model import run_vehicle_model_simple, postprocess_7dof
 
@@ -183,8 +179,8 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
-    mr_f = 1#1.437
-    mr_r = 1#1.328
+    mr_f = 1.17
+    mr_r = 1.072
 
     global_setup["MR_FL"] = mr_f
     global_setup["MR_FR"] = mr_f

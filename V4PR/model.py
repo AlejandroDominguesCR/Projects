@@ -64,15 +64,15 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
                     k_s, k_i, bump, damper, gap, MR, z_top, z_bot):
         # 1) desplazamiento crudo rueda
         x_raw = z_w - (phi_off + theta_off + h)
-        # 2) convertir a desplazamiento muelle
+        # 2) convertir a desplazamiento muelle␊
         x_spring = MR * x_raw
-        # 3) bumpstop en coordenada muelle
+        # 3) bumpstop en coordenada muelle␊
         comp = x_spring - gap
         f_bump = bump(np.maximum(0, comp))
-        # 4) rigidez en serie y wheel-rate
+        # 4) rigidez en serie y wheel-rate␊
         k_tot = 1.0/(1.0/k_s + 1.0/k_i)
-        f_spring = k_tot * x_spring
-        # 5) velocidad cruda y v_damper
+        f_spring = k_tot * MR**2 * x_raw
+        # 5) velocidad cruda y v_dampe
         v_raw = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
         v_damp = MR * v_raw
         f_damp = damper(v_damp)
@@ -160,19 +160,14 @@ def compute_static_equilibrium(params):
     ktf    = params['ktf']
     ktr    = params['ktr']
 
-    bump_front = params['bumpstop_front']
-    bump_rear  = params['bumpstop_rear']
+    MR_FL = params['MR_FL']; MR_FR = params['MR_FR']
+    MR_RL = params['MR_RL']; MR_RR = params['MR_RR']
 
     # Gaps tal como vienen del JSON (ya incluyen la compresión estática inicial)
     gap_FL = params['gap_bumpstop_FL']
     gap_FR = params['gap_bumpstop_FR']
     gap_RL = params['gap_bumpstop_RL']
     gap_RR = params['gap_bumpstop_RR']
-
-    # Anti-roll bar
-    k_arb_f = params.get('k_arb_f', 0.0)
-    k_arb_r = params.get('k_arb_r', 0.0)
-
 
     def residual(x):
         # Variables: h, phi, theta, zFR, zFL, zRL, zRR
@@ -195,11 +190,16 @@ def compute_static_equilibrium(params):
         params['x_static_RL'] = x_RL
         params['x_static_RR'] = x_RR
 
-        # Rigidez efectiva muelle + bumpstop + rigidez instalación
-        kFR_eff = 1 / (1 / (kFR) + 1 / kinstf)
-        kFL_eff = 1 / (1 / (kFL) + 1 / kinstf)
-        kRR_eff = 1 / (1 / (kRR) + 1 / kinstr)
-        kRL_eff = 1 / (1 / (kRL) + 1 / kinstr)
+        kFL_w = kFL * MR_FL**2
+        kFR_w = kFR * MR_FR**2
+        kRL_w = kRL * MR_RL**2
+        kRR_w = kRR * MR_RR**2
+
+        # Rigidez efectiva + rigidez instalación
+        kFL_eff = 1.0/(1.0/kFL_w + 1.0/kinstf)
+        kFR_eff = 1.0/(1.0/kFR_w + 1.0/kinstf)
+        kRL_eff = 1.0/(1.0/kRL_w + 1.0/kinstr)
+        kRR_eff = 1.0/(1.0/kRR_w + 1.0/kinstr)
 
         # Fuerzas de resorte
         F_spring_FL = kFL_eff * x_FL
@@ -246,7 +246,7 @@ def compute_static_equilibrium(params):
     kf_eff = 1 / (1 / params['kFL'] + 1 / params['kinstf'])
     kr_eff = 1 / (1 / params['kRL'] + 1 / params['kinstr'])
 
-    Wf = W * lf / (lf + lr)
+    Wf = W * lr / (lf + lr)
     Wr = W - Wf
 
     # Travel + z_free + altura sobre suelo (z_ui)
