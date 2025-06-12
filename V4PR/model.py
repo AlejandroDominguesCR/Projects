@@ -71,8 +71,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         f_bump = bump(np.maximum(0, comp))
         # 4) rigidez en serie y wheel-rate
         k_tot = 1.0/(1.0/k_s + 1.0/k_i)
-        k_wheel = k_tot * MR**2
-        f_spring = k_wheel * x_spring
+        f_spring = k_tot * x_spring
         # 5) velocidad cruda y v_damper
         v_raw = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
         v_damp = MR * v_raw
@@ -107,10 +106,10 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     phi_dd = (lr*(F_RR + F_RL) - lf*(F_FR + F_FL)) / Iyy
 
     # Masas no suspendidas
-    zFR_dd = (-F_FR + ktf*(ztrack_FR - zFR)) / mHubF
-    zFL_dd = (-F_FL + ktf*(ztrack_FL - zFL)) / mHubF
-    zRL_dd = (-F_RL + ktr*(ztrack_RL - zRL)) / mHubR
-    zRR_dd = (-F_RR + ktr*(ztrack_RR - zRR)) / mHubR
+    zFR_dd = (-F_FR + ktf*(ztrack_FR - zFR) - mHubF*g) / mHubF
+    zFL_dd = (-F_FL + ktf*(ztrack_FL - zFL) - mHubF*g) / mHubF
+    zRL_dd = (-F_RL + ktr*(ztrack_RL - zRL) - mHubR*g) / mHubR
+    zRR_dd = (-F_RR + ktr*(ztrack_RR - zRR) - mHubR*g) / mHubR
 
     return [
         hdot, h_dd,
@@ -184,16 +183,29 @@ def compute_static_equilibrium(params):
         params['x_static_RR'] = x_RR
 
         # Rigidez efectiva muelle + bumpstop + rigidez instalación
-        kFR_eff = 1 / (1 / (kFR + bumpstop_front(x_FR - z_FR_free)) + 1 / kinstf)
-        kFL_eff = 1 / (1 / (kFL + bumpstop_front(x_FL - z_FL_free)) + 1 / kinstf)
-        kRR_eff = 1 / (1 / (kRR + bumpstop_rear(x_RR - z_RR_free)) + 1 / kinstr)
-        kRL_eff = 1 / (1 / (kRL + bumpstop_rear(x_RL - z_RL_free)) + 1 / kinstr)
+        kFR_eff = 1 / (1 / (kFR) + 1 / kinstf)
+        kFL_eff = 1 / (1 / (kFL) + 1 / kinstf)
+        kRR_eff = 1 / (1 / (kRR) + 1 / kinstr)
+        kRL_eff = 1 / (1 / (kRL) + 1 / kinstr)
+
+        F_spring_FL = kFL_eff * x_FL
+        F_bump_FL = bumpstop_front(x_FL - z_FL_free)
+
+        F_spring_FR = kFR_eff * x_FR
+        F_bump_FR = bumpstop_front(x_FR - z_FR_free)
+        
+        F_spring_RL = kRL_eff * x_RL
+        F_bump_RL = bumpstop_rear(x_RL - z_RL_free)
+
+        F_spring_RR = kRR_eff * x_RR
+        F_bump_RR = bumpstop_rear(x_RR - z_RR_free)
 
         # Fuerzas suspensión
-        F_FR = kFR_eff * x_FR
-        F_FL = kFL_eff * x_FL
-        F_RR = kRR_eff * x_RR
-        F_RL = kRL_eff * x_RL
+        F_FL = F_spring_FL + F_bump_FL
+        F_FR = F_spring_FR + F_bump_FR
+        F_RL = F_spring_RL + F_bump_RL
+        F_RR = F_spring_RR + F_bump_RR
+        
 
         # Fuerza total vertical (suma fuerzas suspensión - peso)
         R1 = F_FR + F_FL + F_RR + F_RL - Ms * g
