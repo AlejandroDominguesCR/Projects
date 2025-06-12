@@ -86,6 +86,11 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     phi_dot_off_f = -lf * phi_dot;  phi_dot_off_r = lr * phi_dot
     theta_dot_off_f = (tF/2) * theta_dot;  theta_dot_off_r = (tR/2) * theta_dot
 
+    x_FL = zFL - (phi_off_f + theta_off_f + h)
+    x_FR = zFR - (phi_off_f - theta_off_f + h)
+    x_RL = zRL - (phi_off_r + theta_off_r + h)
+    x_RR = zRR - (phi_off_r - theta_off_r + h)
+
     # Fuerzas por rueda
     F_FL = wheel_force(zFL, zFLdot, phi_off_f, theta_off_f, phi_dot_off_f, theta_dot_off_f,
                        kFL, kinstf, bump_front, damper_front,
@@ -99,6 +104,14 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     F_RR = wheel_force(zRR, zRRdot, phi_off_r, -theta_off_r, phi_dot_off_r, -theta_dot_off_r,
                        kRR, kinstr, bump_rear, damper_rear,
                        params['gap_bumpstop_RR'], MR_RR, z_top_RR, z_bot_RR)
+    
+    F_arb_front = 0.5 * params['k_arb_f'] * (x_FL - x_FR)
+    F_arb_rear  = 0.5 * params['k_arb_r'] * (x_RL - x_RR)
+
+    F_FL +=  F_arb_front
+    F_FR += -F_arb_front
+    F_RL +=  F_arb_rear
+    F_RR += -F_arb_rear
 
     # Dinámica chasis
     h_dd = (F_FL + F_FR + F_RL + F_RR - Ms*g) / Ms

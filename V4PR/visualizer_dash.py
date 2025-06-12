@@ -128,8 +128,22 @@ def launch_dash(sol, post, setup_name="Setup"):
             yaxis_title="Contact Patch Load RMS [N]"
         )
         graphs.append(dcc.Graph(figure=fig_frh_vs_load))
-        
 
+                # ==== Bumpstop Force por rueda ====
+        f_bump = smooth_signal(post['f_bump'])
+        fig_bump = go.Figure([
+            go.Scatter(x=sol.t, y=f_bump[0], name="Bump FL"),
+            go.Scatter(x=sol.t, y=f_bump[1], name="Bump FR"),
+            go.Scatter(x=sol.t, y=f_bump[2], name="Bump RL"),
+            go.Scatter(x=sol.t, y=f_bump[3], name="Bump RR")
+        ])
+        fig_bump.update_layout(
+            title="Bump-stop Force por rueda [N]",
+            xaxis_title="Tiempo [s]",
+            yaxis_title="Fuerza bump-stop [N]"
+        )
+        graphs.append(dcc.Graph(figure=fig_bump))
+        
         app.layout = html.Div([
             html.H1(f"Resultados 7-Post Rig: {setup_name}"),
             html.H2("Señales dinámicas"),
@@ -598,7 +612,7 @@ def launch_dash_kpis(kpi_data, setup_names):
         legend=dict(x=0.01, y=0.99)
     )
     layout.append(dcc.Graph(figure=fig_psd_damper_mag))
-    
+
     app_kpi.layout = html.Div(layout)
     app_kpi.run(port=8051, debug=False)
 
