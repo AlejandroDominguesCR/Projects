@@ -318,6 +318,13 @@ def run_vehicle_model_simple(t_vec, z_tracks, params):
     # --- Equilibrio estático ---
     h0, phi0, theta0, zFR0, zFL0, zRL0, zRR0 = compute_static_equilibrium(params)
 
+    for corner in ['FL','FR','RL','RR']:
+        # gap original (xFreeGap JSON) en global_setup['gap_bumpstop_'+corner]
+        gap0 = params[f'gap_bumpstop_{corner}']
+        xstat = params[f'x_static_{corner}']     # compresión estática [m]
+        # holgura remanente: ya con el coche asentado
+        params[f'gap_bumpstop_{corner}'] = max(0.0, gap0 - xstat)
+
     # Travel estático (referencia para topes reales)
     x_FL_static = zFL0 - (-lf * phi0 + (tf / 2) * theta0 + h0)
     x_FR_static = zFR0 - (-lf * phi0 - (tf / 2) * theta0 + h0)
@@ -607,6 +614,14 @@ def postprocess_7dof(sol, params, z_tracks, t_vec):
     front_load_rms = np.sqrt(np.mean(f_tire[:2, :]**2))
     rear_load_rms  = np.sqrt(np.mean(f_tire[2:, :]**2))
 
+        # 7) Agregar gaps al post
+    gaps = {
+        'gap_bumpstop_FL': params['gap_bumpstop_FL'],
+        'gap_bumpstop_FR': params['gap_bumpstop_FR'],
+        'gap_bumpstop_RL': params['gap_bumpstop_RL'],
+        'gap_bumpstop_RR': params['gap_bumpstop_RR']
+    }
+
     # ──────────────────────────────────────────────────────────────────────────────
     # 6) Road‐noise: RMS de velocidad vertical de rueda [mm/s]
     # ──────────────────────────────────────────────────────────────────────────────
@@ -716,6 +731,13 @@ def postprocess_7dof(sol, params, z_tracks, t_vec):
         'f_tire_variation':   f_tire_variation,       # (4,)
         'f_tire_variation_front': f_tire_variation_front,  # scalar
         'f_tire_variation_rear':  f_tire_variation_rear,   # scalar
+    
+            # --- Bump-stop Gaps ---
+        'gap_bumpstop_FL':    params['gap_bumpstop_FL'],
+        'gap_bumpstop_FR':    params['gap_bumpstop_FR'],
+        'gap_bumpstop_RL':    params['gap_bumpstop_RL'],
+        'gap_bumpstop_RR':    params['gap_bumpstop_RR'],
+
 
         # --- RMS de fuerzas de neumático front/rear ---
         'front_load_rms':       front_load_rms,       # [N]
