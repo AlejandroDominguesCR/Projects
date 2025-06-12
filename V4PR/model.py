@@ -2,7 +2,6 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 from scipy.signal import welch
-import random
 from scipy.optimize import fsolve
 
 def tope_fuerza(x, topout, bottomout, k_tope=1e6):
@@ -48,6 +47,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     # Top/bottom en coordenada muelle: aplicar MR a stroke/2
     MR_FL = params['MR_FL']; MR_FR = params['MR_FR']
     MR_RL = params['MR_RL']; MR_RR = params['MR_RR']
+
     z_top_FL    = MR_FL * (x_FL_static - stroke_FL/2)
     z_bot_FL    = MR_FL * (x_FL_static + stroke_FL/2)
     z_top_FR    = MR_FR * (x_FR_static - stroke_FR/2)

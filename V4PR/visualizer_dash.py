@@ -143,6 +143,31 @@ def launch_dash(sol, post, setup_name="Setup"):
             yaxis_title="Fuerza bump-stop [N]"
         )
         graphs.append(dcc.Graph(figure=fig_bump))
+
+                # ==== Bumpstop Displacement por rueda ====
+        # post['travel_rel'] es (4,N): travel relativo al valor estático
+        travel_rel = smooth_signal(post['travel_rel'])
+        # extraemos gap_bumpstop de post (debe venir del postprocess)
+        gap = np.array([  # en metros
+            post['gap_bumpstop_FL'],
+            post['gap_bumpstop_FR'],
+            post['gap_bumpstop_RL'],
+            post['gap_bumpstop_RR']
+        ])[:, None]  # forma (4,1)
+        # compresión más allá del gap (desplazamiento del bump-stop)
+        disp_bump = np.maximum(0.0, travel_rel - gap)  # (4,N)
+        fig_disp_bump = go.Figure([
+            go.Scatter(x=sol.t, y=disp_bump[0] * 1000, name="Bump Disp FL"),
+            go.Scatter(x=sol.t, y=disp_bump[1] * 1000, name="Bump Disp FR"),
+            go.Scatter(x=sol.t, y=disp_bump[2] * 1000, name="Bump Disp RL"),
+            go.Scatter(x=sol.t, y=disp_bump[3] * 1000, name="Bump Disp RR"),
+        ])
+        fig_disp_bump.update_layout(
+            title="Bump-stop Displacement por rueda [mm]",
+            xaxis_title="Tiempo [s]",
+            yaxis_title="Desplazamiento bump [mm]"
+        )
+        graphs.append(dcc.Graph(figure=fig_disp_bump))
         
         app.layout = html.Div([
             html.H1(f"Resultados 7-Post Rig: {setup_name}"),
