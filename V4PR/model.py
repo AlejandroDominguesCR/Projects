@@ -48,14 +48,14 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     MR_FL = params['MR_FL']; MR_FR = params['MR_FR']
     MR_RL = params['MR_RL']; MR_RR = params['MR_RR']
 
-    z_top_FL    = MR_FL * (x_FL_static - stroke_FL/2)
-    z_bot_FL    = MR_FL * (x_FL_static + stroke_FL/2)
-    z_top_FR    = MR_FR * (x_FR_static - stroke_FR/2)
-    z_bot_FR    = MR_FR * (x_FR_static + stroke_FR/2)
-    z_top_RL    = MR_RL * (x_RL_static - stroke_RL/2)
-    z_bot_RL    = MR_RL * (x_RL_static + stroke_RL/2)
-    z_top_RR    = MR_RR * (x_RR_static - stroke_RR/2)
-    z_bot_RR    = MR_RR * (x_RR_static + stroke_RR/2)
+    z_top_FL    = (x_FL_static - stroke_FL/2)
+    z_bot_FL    = (x_FL_static + stroke_FL/2)
+    z_top_FR    = (x_FR_static - stroke_FR/2)
+    z_bot_FR    = (x_FR_static + stroke_FR/2)
+    z_top_RL    = (x_RL_static - stroke_RL/2)
+    z_bot_RL    = (x_RL_static + stroke_RL/2)
+    z_top_RR    = (x_RR_static - stroke_RR/2)
+    z_bot_RR    = (x_RR_static + stroke_RR/2)
 
     g = 9.81
 
@@ -243,17 +243,29 @@ def compute_static_equilibrium(params):
     W = params['ms'] * g
     lf = params['lf']
     lr = params['lr']
-    kf_eff = 1 / (1 / params['kFL'] + 1 / params['kinstf'])
-    kr_eff = 1 / (1 / params['kRL'] + 1 / params['kinstr'])
+    # Rigideces efectivas de rueda teniendo en cuenta el motion ratio
+    kFL_w = params['kFL'] * MR_FL**2
+    kFR_w = params['kFR'] * MR_FR**2
+    kRL_w = params['kRL'] * MR_RL**2
+    kRR_w = params['kRR'] * MR_RR**2
+
+    kFL_eff = 1 / (1 / kFL_w + 1 / params['kinstf'])
+    kFR_eff = 1 / (1 / kFR_w + 1 / params['kinstf'])
+    kRL_eff = 1 / (1 / kRL_w + 1 / params['kinstr'])
+    kRR_eff = 1 / (1 / kRR_w + 1 / params['kinstr'])
+
+    # Promedio por eje para un valor efectivo global
+    kf_eff = 0.5 * (kFL_eff + kFR_eff)
+    kr_eff = 0.5 * (kRL_eff + kRR_eff)
 
     Wf = W * lr / (lf + lr)
     Wr = W - Wf
 
     # Travel + z_free + altura sobre suelo (z_ui)
-    zFR0 = Wf/(2*kf_eff) + gap_FR
-    zFL0 = Wf/(2*kf_eff) + gap_FL
-    zRR0 = Wr/(2*kr_eff) + gap_RR
-    zRL0 = Wr/(2*kr_eff) + gap_RL
+    zFR0 = Wf / (2 * kFR_eff) + gap_FR
+    zFL0 = Wf / (2 * kFL_eff) + gap_FL
+    zRR0 = Wr / (2 * kRR_eff) + gap_RR
+    zRL0 = Wr / (2 * kRL_eff) + gap_RL
     
     x0 = [h_init, phi_init, theta_init, zFR0, zFL0, zRL0, zRR0]
 
@@ -313,15 +325,19 @@ def run_vehicle_model_simple(t_vec, z_tracks, params):
         'x_FR_static': x_FR_static,
         'x_RL_static': x_RL_static,
         'x_RR_static': x_RR_static,
-        'z_topout_FL': x_FL_static - params['stroke_FL'] / 2,
-        'z_bottomout_FL': x_FL_static + params['stroke_FL'] / 2,
-        'z_topout_FR': x_FR_static - params['stroke_FR'] / 2,
-        'z_bottomout_FR': x_FR_static + params['stroke_FR'] / 2,
-        'z_topout_RL': x_RL_static - params['stroke_RL'] / 2,
-        'z_bottomout_RL': x_RL_static + params['stroke_RL'] / 2,
-        'z_topout_RR': x_RR_static - params['stroke_RR'] / 2,
-        'z_bottomout_RR': x_RR_static + params['stroke_RR'] / 2,
     })
+
+    if params.get('override_bumpstop_positions', False):
+        params.update({
+            'z_topout_FL': x_FL_static - params['stroke_FL'] / 2,
+            'z_bottomout_FL': x_FL_static + params['stroke_FL'] / 2,
+            'z_topout_FR': x_FR_static - params['stroke_FR'] / 2,
+            'z_bottomout_FR': x_FR_static + params['stroke_FR'] / 2,
+            'z_topout_RL': x_RL_static - params['stroke_RL'] / 2,
+            'z_bottomout_RL': x_RL_static + params['stroke_RL'] / 2,
+            'z_topout_RR': x_RR_static - params['stroke_RR'] / 2,
+            'z_bottomout_RR': x_RR_static + params['stroke_RR'] / 2,
+        })
 
     y0 = [h0, 0.0, phi0, 0.0, theta0, 0.0, zFR0, 0.0, zFL0, 0.0, zRL0, 0.0, zRR0, 0.0]
 
