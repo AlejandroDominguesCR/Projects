@@ -85,17 +85,17 @@ def parse_json_setup(json_data):
     kt_f = 373100 #276500
     kt_r = 397900 #282962, 269000
 
-    hRideF = json_data["config"]["chassis"].get("hRideFSetup", 0.0)
-    hRideR = json_data["config"]["chassis"].get("hRideRSetup", 0.0)
-    zCoG = json_data["config"]["chassis"].get("zCoG", 0.0)
+    hRideF = json_data["config"]["chassis"].get("hRideFSetup")
+    hRideR = json_data["config"]["chassis"].get("hRideRSetup")
+    zCoG = json_data["config"]["chassis"].get("zCoG")
 
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    stroke_FL = 0.029
-    stroke_FR = 0.029
-    stroke_RL = 0.059
-    stroke_RR = 0.059
+    stroke_FL = 0.01965
+    stroke_FR = 0.01965
+    stroke_RL = 0.0305
+    stroke_RR = 0.0305
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -149,7 +149,6 @@ def parse_json_setup(json_data):
             "damper_v_comp": damper_v_comp,
             "kt": kt,
             "stroke": stroke,
-            
         }
         params.append(p)
 
@@ -179,8 +178,8 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
-    mr_f = 0.696 #1.437 #1.17
-    mr_r = 0.75 #1.072
+    mr_f = 0.696 #0.696 1.437
+    mr_r = 0.75 #0.75 1.328
 
     global_setup["MR_FL"] = mr_f
     global_setup["MR_FR"] = mr_f
@@ -253,8 +252,8 @@ def prepare_simple_params(params, global_setup):
     kaxle_f = global_setup.get('kVerticalSuspensionComplianceF', 0.0)
     kaxle_r = global_setup.get('kVerticalSuspensionComplianceR', 0.0)
     # Cada esquina “ve” la mitad de la rigidez del eje
-    kinstf = kaxle_f / 2.0
-    kinstr = kaxle_r / 2.0
+    kinstf = kaxle_f / 2
+    kinstr = kaxle_r / 2
 
     # Rigidez de barra estabilizadora (anti roll bar)
     k_arb_f = global_setup.get('kARB_F', 0)
