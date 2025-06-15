@@ -44,11 +44,6 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     x_RL_static = params['x_RL_static']
     x_RR_static = params['x_RR_static']
 
-    # Top/bottom en coordenada muelle: aplicar MR a stroke/2
-    MR_FL = params['MR_FL']; MR_FR = params['MR_FR']
-    MR_RL = params['MR_RL']; MR_RR = params['MR_RR']
-
-    """
     z_top_FL    = (x_FL_static - stroke_FL/2)
     z_bot_FL    = (x_FL_static + stroke_FL/2)
     z_top_FR    = (x_FR_static - stroke_FR/2)
@@ -57,43 +52,25 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     z_bot_RL    = (x_RL_static + stroke_RL/2)
     z_top_RR    = (x_RR_static - stroke_RR/2)
     z_bot_RR    = (x_RR_static + stroke_RR/2)
-    """
-
-    stroke_w_FL = stroke_FL / params['MR_FL']
-    z_top_FL    = x_FL_static - stroke_w_FL/2
-    z_bot_FL    = x_FL_static + stroke_w_FL/2
-    stroke_w_FR = stroke_FR / params['MR_FR']
-    z_top_FR    = x_FR_static - stroke_w_FR/2
-    z_bot_FR    = x_FR_static + stroke_w_FR/2
-    stroke_w_RL = stroke_RL / params['MR_RL']
-    z_top_RL    = x_RL_static - stroke_w_RL/2
-    z_bot_RL    = x_RL_static + stroke_w_RL/2
-    stroke_w_RR = stroke_RR / params['MR_RR']
-    z_top_RR    = x_RR_static - stroke_w_RR/2
-    z_bot_RR    = x_RR_static + stroke_w_RR/2
-
-
+    
     g = 9.81
 
     # Helper para fuerza de rueda con MR en desplazamiento y velocidad
     def wheel_force(z_w, z_w_dot, phi_off, theta_off, phi_dot_off, theta_dot_off,
-                    k_s, k_i, bump, damper, gap, MR, z_top, z_bot):
-        # 1) desplazamiento crudo rueda
+                    k_s, k_i, bump, damper, gap, z_top, z_bot):
+        # 1) desplazamiento de rueda respecto al chasis
         x_raw = z_w - (phi_off + theta_off + h)
-        # 2) convertir a desplazamiento muelle␊
-        x_spring = MR * x_raw
-        # 3) bumpstop en coordenada muelle␊
-        comp = x_spring - gap
+        # 2) bump-stop ya en coordenada rueda
+        comp = x_raw - gap
         f_bump = bump(np.maximum(0, comp))
-        # 4) rigidez en serie y wheel-rate consistente (MR aplicado)␊
-        k_wheel = 1.0 / (1.0/(k_s * MR**2) + 1.0/k_i)
+        # 3) rigidez equivalente muelle + compliance de instalación
+        k_wheel = 1.0 / (1.0 / k_s + 1.0 / k_i)
         f_spring = k_wheel * x_raw
-        # 5) velocidad cruda y v_dampe
+        # 4) amortiguador en coordenada rueda
         v_raw = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
-        v_damp = MR * v_raw
-        f_damp = damper(v_damp)
-        # 6) top-out en coordenada muelle
-        f_stop = tope_fuerza(x_spring, z_top, z_bot)
+        f_damp = damper(v_raw)
+        # 5) topes mecánicos en coordenada rueda
+        f_stop = tope_fuerza(x_raw, z_top, z_bot)
         return f_spring + f_bump + f_damp + f_stop
 
     # Offsets estáticos y dinámicos
@@ -108,18 +85,26 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     x_RR = zRR - (phi_off_r - theta_off_r + h)
 
     # Fuerzas por rueda
-    F_FL = wheel_force(zFL, zFLdot, phi_off_f, theta_off_f, phi_dot_off_f, theta_dot_off_f,
-                       kFL, kinstf, bump_front, damper_front,
-                       params['gap_bumpstop_FL'], MR_FL, z_top_FL, z_bot_FL)
-    F_FR = wheel_force(zFR, zFRdot, phi_off_f, -theta_off_f, phi_dot_off_f, -theta_dot_off_f,
-                       kFR, kinstf, bump_front, damper_front,
-                       params['gap_bumpstop_FR'], MR_FR, z_top_FR, z_bot_FR)
-    F_RL = wheel_force(zRL, zRLdot, phi_off_r, theta_off_r, phi_dot_off_r, theta_dot_off_r,
-                       kRL, kinstr, bump_rear, damper_rear,
-                       params['gap_bumpstop_RL'], MR_RL, z_top_RL, z_bot_RL)
-    F_RR = wheel_force(zRR, zRRdot, phi_off_r, -theta_off_r, phi_dot_off_r, -theta_dot_off_r,
-                       kRR, kinstr, bump_rear, damper_rear,
-                       params['gap_bumpstop_RR'], MR_RR, z_top_RR, z_bot_RR)
+    F_FL = wheel_force(
+        zFL, zFLdot, phi_off_f, theta_off_f, phi_dot_off_f, theta_dot_off_f,
+        kFL, kinstf, bump_front, damper_front,
+        params['gap_bumpstop_FL'], z_top_FL, z_bot_FL
+    )
+    F_FR = wheel_force(
+        zFR, zFRdot, phi_off_f, -theta_off_f, phi_dot_off_f, -theta_dot_off_f,
+        kFR, kinstf, bump_front, damper_front,
+        params['gap_bumpstop_FR'], z_top_FR, z_bot_FR
+    )
+    F_RL = wheel_force(
+        zRL, zRLdot, phi_off_r, theta_off_r, phi_dot_off_r, theta_dot_off_r,
+        kRL, kinstr, bump_rear, damper_rear,
+        params['gap_bumpstop_RL'], z_top_RL, z_bot_RL
+    )
+    F_RR = wheel_force(
+        zRR, zRRdot, phi_off_r, -theta_off_r, phi_dot_off_r, -theta_dot_off_r,
+        kRR, kinstr, bump_rear, damper_rear,
+        params['gap_bumpstop_RR'], z_top_RR, z_bot_RR
+    )
     
     F_arb_front = 0.5 * params['k_arb_f'] * (x_FL - x_FR)
     F_arb_rear  = 0.5 * params['k_arb_r'] * (x_RL - x_RR)
@@ -179,11 +164,6 @@ def compute_static_equilibrium(params):
     ktf    = params['ktf']
     ktr    = params['ktr']
 
-    MR_FL = params.get('MR_FL')
-    MR_FR = params.get('MR_FR')
-    MR_RL = params.get('MR_RL')
-    MR_RR = params.get('MR_RR')
-
     # Gaps tal como vienen del JSON (medidos con el coche en el suelo)
     gap_FL = params['gap_bumpstop_FL']
     gap_FR = params['gap_bumpstop_FR']
@@ -217,10 +197,10 @@ def compute_static_equilibrium(params):
         params['x_static_RR'] = x_RR
 
         # Wheel-rate (muelle trasladado a rueda)
-        kFL_w = kFL * MR_FL**2
-        kFR_w = kFR * MR_FR**2
-        kRL_w = kRL * MR_RL**2
-        kRR_w = kRR * MR_RR**2
+        kFL_w = kFL
+        kFR_w = kFR
+        kRL_w = kRL
+        kRR_w = kRR
 
         # Rigidez efectiva (muelle en serie con instalación)
         kFL_eff = 1.0/(1.0/kFL_w + 1.0/kinstf)
@@ -270,10 +250,10 @@ def compute_static_equilibrium(params):
     Wr     = W * (1.0 - wbal_f)
 
     # Wheel-rates para inicial guess
-    kFL_w = kFL * MR_FL**2
-    kFR_w = kFR * MR_FR**2
-    kRL_w = kRL * MR_RL**2
-    kRR_w = kRR * MR_RR**2
+    kFL_w = kFL
+    kFR_w = kFR
+    kRL_w = kRL
+    kRR_w = kRR
 
     kFL_eff = 1.0/(1.0/kFL_w + 1.0/kinstf)
     kFR_eff = 1.0/(1.0/kFR_w + 1.0/kinstf)
@@ -296,18 +276,19 @@ def compute_static_equilibrium(params):
     # justo después de compute_static_equilibrium(params)
     corners = ['FL','FR','RL','RR']
     x_wheel   = {c: params[f'x_static_{c}']    for c in corners}
-    MR        = {c: params[f'MR_{c}']          for c in corners}
-    k_spring  = {c: params[f'k{c}']            for c in corners}  # ojo: 'kFL','kFR',...
-    k_spring2 = {c: k_spring[c]*MR[c]**2       for c in corners}  # wheel-rate
-
+    k_spring  = {c: params[f'k{c}']            for c in corners}
+    k_spring2 = {c: k_spring[c]                for c in corners}
     print("\n[CHECK SPRING]: compresión de muelle en estático")
     for c in corners:
         x_w     = x_wheel[c]
-        x_s     = MR[c] * x_w          # compresión muelle [m]
-        f_s     = k_spring2[c] * x_w   # fuerza muelle = k_eff * x_wheel
-        print(f"  {c}: travel rueda = {x_w*1e3:6.2f} mm, "
+        x_s     = x_w                 # muelle en coordenada rueda
+        f_s     = k_spring2[c] * x_w
+        print(
+            f"  {c}: travel rueda = {x_w*1e3:6.2f} mm, "
             f"compresión muelle = {x_s*1e3:6.2f} mm, "
-            f"f_spring = {f_s:7.1f} N, ")
+            f"f_spring = {f_s:7.1f} N, "
+        )
+
 
     return sol
 
@@ -663,20 +644,17 @@ def postprocess_7dof(sol, params, z_tracks, t_vec):
     front_signal = (f_tire[0, :]) / 9.81 # 
     rear_signal  = (f_tire[2, :]) / 9.81  # 
 
-    # Usamos FFT unidireccional (solo frecuencias positivas):
-    F_front = np.fft.rfft(front_signal)    # Componente compleja espectral frontal
-    F_rear  = np.fft.rfft(rear_signal)     # Componente compleja espectral trasera
-    f_vals  = np.fft.rfftfreq(N, d=dt)     # Vector de frecuencias (longitud N//2 + 1)
+    f_vals, Pxx_front = welch(front_signal, fs=fs, nperseg=nperseg, noverlap=noverlap)
+    _,      Pxx_rear  = welch(rear_signal,  fs=fs, nperseg=nperseg, noverlap=noverlap)
 
-    # Magnitud lineal y a continuación convertimos a dB (normalizo por (N/2)):
-    mag_front_linear = np.abs(F_front)                     
-    mag_rear_linear  = np.abs(F_rear)
-    mag_front_dB = 20.0 * np.log10(mag_front_linear / (N/2) + 1e-30)
-    mag_rear_dB  = 20.0 * np.log10(mag_rear_linear  / (N/2) + 1e-30)
+    # Magnitud en dB
+    mag_front_dB = 10.0 * np.log10(Pxx_front + 1e-30)
+    mag_rear_dB  = 10.0 * np.log10(Pxx_rear  + 1e-30)
+
 
     # Fase en grados:
-    phase_front_deg = np.angle(F_front, deg=True)
-    phase_rear_deg  = np.angle(F_rear,  deg=True)
+    #phase_front_deg = np.angle(F_front, deg=True)
+    #phase_rear_deg  = np.angle(F_rear,  deg=True)
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 10) Devolver todos los resultados en un diccionario
@@ -772,9 +750,9 @@ def postprocess_7dof(sol, params, z_tracks, t_vec):
 
         'f_psd_load'           : f_vals,             # vector de frecuencias [Hz]
         'psd_load_mag_front'   : mag_front_dB,       # magnitud dB eje frontal
-        'psd_load_phase_front' : phase_front_deg,    # fase [°] eje frontal
+        #'psd_load_phase_front' : phase_front_deg,    # fase [°] eje frontal
         'psd_load_mag_rear'    : mag_rear_dB,        # magnitud dB eje trasero
-        'psd_load_phase_rear'  : phase_rear_deg,     # fase [°] eje trasero
+        #'psd_load_phase_rear'  : phase_rear_deg,     # fase [°] eje trasero
 
     
     }
