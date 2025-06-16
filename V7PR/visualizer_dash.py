@@ -28,7 +28,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         graphs = []
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
-        travel = smooth_signal(post['travel'])
+        travel = smooth_signal(post['travel_rel'])
         #f_spring = smooth_signal(post['f_spring'])
         #f_damper = smooth_signal(post['f_damper'])
         f_tire = smooth_signal(post['f_tire'])
@@ -37,18 +37,8 @@ def launch_dash(sol, post, setup_name="Setup"):
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
 
-        ae_f = post['Fz_aero_front']  # debe venir de tu postprocess_7dof
-        ae_r = post['Fz_aero_rear']
-
-        fz_total = f_tire.copy()
-        # repartimos 50/50 por rueda de cada eje
-        fz_total[0] += ae_f * 0.5  # FL
-        fz_total[1] += ae_f * 0.5  # FR
-        fz_total[2] += ae_r * 0.5  # RL
-        fz_total[3] += ae_r * 0.5  # RR
-
         # Travel absoluto por rueda (incluyendo z_free)
-        x_total = travel + post['z_free'][:, None]
+        x_total = travel #+ post['z_free'][:, None]
         graphs.append(dcc.Graph(figure=go.Figure([
             go.Scatter(x=distance, y=x_total[0] * 1000, name="Travel FL"),
             go.Scatter(x=distance, y=x_total[1] * 1000, name="Travel FR"),
@@ -59,7 +49,48 @@ def launch_dash(sol, post, setup_name="Setup"):
             xaxis_title="distance [m]",
             yaxis_title="Travel [mm]"
         )))
-        
+        """
+        # === Perfil de pista (altura suelo por rueda) ===
+        graphs.append(dcc.Graph(
+            figure=go.Figure([
+                go.Scatter(x=distance, y=post['zt'][0], name="Zp FL"),
+                go.Scatter(x=distance, y=post['zt'][1], name="Zp FR"),
+                go.Scatter(x=distance, y=post['zt'][2], name="Zp RL"),
+                go.Scatter(x=distance, y=post['zt'][3], name="Zp RR"),
+            ]).update_layout(
+                title="Perfil de pista por rueda",
+                xaxis_title="Distance [m]",
+                yaxis_title="Altura suelo (m)"
+            )
+        ))
+        """
+        """
+        # Spring force por rueda
+        graphs.append(dcc.Graph(figure=go.Figure([
+            go.Scatter(x=distance, y=f_spring[0], name="Spring FL"),
+            go.Scatter(x=distance, y=f_spring[1], name="Spring FR"),
+            go.Scatter(x=distance, y=f_spring[2], name="Spring RL"),
+            go.Scatter(x=distance, y=f_spring[3], name="Spring RR"),
+        ]).update_layout(
+            title="Spring Force por rueda [N]",
+            xaxis_title="Distance [m]",
+            yaxis_title="Force [N]"
+        )))
+        """
+
+        """
+        # Damper force por rueda
+        graphs.append(dcc.Graph(figure=go.Figure([
+            go.Scatter(x=distance, y=f_damper[0], name="Damper FL"),
+            go.Scatter(x=distance, y=f_damper[1], name="Damper FR"),
+            go.Scatter(x=distance, y=f_damper[2], name="Damper RL"),
+            go.Scatter(x=distance, y=f_damper[3], name="Damper RR"),
+        ]).update_layout(
+            title="Damper Force por rueda [N]",
+            xaxis_title="Distance [m]",
+            yaxis_title="Force [N]"
+        )))
+        """
         # Heave (filtrado)
         graphs.append(dcc.Graph(figure=go.Figure([
             go.Scatter(x=distance, y=heave_filtered * 1000, name="Heave [mm]")
@@ -91,11 +122,12 @@ def launch_dash(sol, post, setup_name="Setup"):
             )
         # Tire load
         fig_tire = go.Figure([
-            go.Scatter(x=distance, y=fz_total[0], name="FL"),
-            go.Scatter(x=distance, y=fz_total[1], name="FR"),
-            go.Scatter(x=distance, y=fz_total[2], name="RL"),
-            go.Scatter(x=distance, y=fz_total[3], name="RR")
+            go.Scatter(x=distance, y=f_tire[0], name="FL"),
+            go.Scatter(x=distance, y=f_tire[1], name="FR"),
+            go.Scatter(x=distance, y=f_tire[2], name="RL"),
+            go.Scatter(x=distance, y=f_tire[3], name="RR")
         ])
+
         if grip_limited_trace:
             fig_tire.add_trace(grip_limited_trace)
 
@@ -106,21 +138,8 @@ def launch_dash(sol, post, setup_name="Setup"):
         )
 
         graphs.append(dcc.Graph(figure=fig_tire))
-
-        graphs.append(dcc.Graph(
-            figure=go.Figure([
-                go.Scatter(x=distance, y=ae_f, name="Downforce Front"),
-                go.Scatter(x=distance, y=ae_r, name="Downforce Rear"),
-            ]).update_layout(
-                title="Aerodynamic Downforce per Axle [N]",
-                xaxis_title="Distance [m]",
-                yaxis_title="Force [N]"
-            ),
-            style={'height': '300px'},
-            config={'displayModeBar': False}
-        ))
         
-        
+        """
         # === Bumpstop Forces por rueda ===
         graphs.append(dcc.Graph(
             figure=go.Figure([
@@ -137,7 +156,56 @@ def launch_dash(sol, post, setup_name="Setup"):
             style={'height': '300px'},
             config={'displayModeBar': False}
         ))
+        
+        
 
+        # === Velocidad relativa del damper (m/s) ===
+        graphs.append(dcc.Graph(
+            figure=go.Figure([
+                go.Scatter(x=distance, y=v_damper[0], name="Damper Vel FL"),
+                go.Scatter(x=distance, y=v_damper[1], name="Damper Vel FR"),
+                go.Scatter(x=distance, y=v_damper[2], name="Damper Vel RL"),
+                go.Scatter(x=distance, y=v_damper[3], name="Damper Vel RR"),
+            ]).update_layout(
+                title="Damper Speed [m/s]",
+                xaxis_title="Distance [m]",
+                yaxis_title="Speed [m/s]"
+            ),
+            id='damper-speeds',
+            style={'height': '300px'},
+            config={'displayModeBar': False}
+        ))
+
+        """
+
+        # === Tire Load Variation por eje ===
+        variation_front = np.std(f_tire[0:2], axis=0)
+        variation_rear = np.std(f_tire[2:4], axis=0)
+        fig_variation = go.Figure([
+            go.Scatter(x=distance, y=variation_front, mode='markers', name="Front"),
+            go.Scatter(x=distance, y=variation_rear, mode='markers', name="Rear")
+        ])
+        fig_variation.update_layout(title="Tire Load Variation per Axis", xaxis_title="Distance [m]", yaxis_title="STD [N]")
+        graphs.append(dcc.Graph(figure=fig_variation))
+
+        
+        # === Pitch RMS ===
+        pitch_rms = np.sqrt(np.mean(pitch_filtered**2))
+        fig_pitch_rms = go.Figure()
+        fig_pitch_rms.add_trace(go.Indicator(mode="number", value=pitch_rms, title={"text": "Pitch RMS [°]"}))
+        graphs.append(dcc.Graph(figure=fig_pitch_rms))
+
+        """
+        # === PSD del Heave ===
+        from scipy.signal import welch
+        fs = 1 / np.mean(np.diff(sol.t))
+        f_psd, Pxx = welch(sol.y[0], fs=fs, nperseg=256)
+        fig_psd = go.Figure()
+        fig_psd.add_trace(go.Scatter(x=f_psd, y=10*np.log10(Pxx), mode='lines', name='PSD Heave'))
+        fig_psd.update_layout(title="PSD of Heave [dB]", xaxis_title="Frequency [Hz]", yaxis_title="PSD [dB]")
+        graphs.append(dcc.Graph(figure=fig_psd))
+        """
+        """
         # === Ride Height RMS en zonas grip-limited ===
         if 'grip_limited_lateral_mask' in post:
             mask = post['grip_limited_lateral_mask']
@@ -151,6 +219,7 @@ def launch_dash(sol, post, setup_name="Setup"):
             fig_rms_heights.update_layout(title="Ride Height RMS en grip-limited [mm]", yaxis_title="RMS [mm]")
             graphs.append(dcc.Graph(figure=fig_rms_heights))
 
+        """
         # === FRH vs Contact Patch Load (RMS) ===
         frh = (travel[0] + travel[1]) / 2
         frh_rms = np.sqrt(np.mean(frh**2)) * 1000
@@ -437,82 +506,6 @@ def launch_dash_kpis(kpi_data, setup_names):
     except KeyError:
         print("[DEBUG] Faltan datos para el gráfico de RRH RMS")
 
-    # ── 14) Front Load RMS: Braking vs Traction (barras) ────────────────────────
-    try:
-        brake_vals = [k['front_load_rms_brake'] for k in kpi_data]
-        traction_vals = [k['front_load_rms_traction'] for k in kpi_data]
-        fig_brake_vs_traction_f = go.Figure()
-        fig_brake_vs_traction_f.add_trace(go.Bar(
-            name="Braking", x=setup_names, y=brake_vals))
-        fig_brake_vs_traction_f.add_trace(go.Bar(
-            name="Traction", x=setup_names, y=traction_vals))
-        fig_brake_vs_traction_f.update_layout(
-            title="Front Load RMS: Braking vs Traction [N]",
-            xaxis_title="Setup",
-            yaxis_title="Contact Patch Load RMS [N]",
-            barmode="group"
-        )
-        layout.append(dcc.Graph(figure=fig_brake_vs_traction_f))
-    except KeyError:
-        pass
-
-    # ── 15) Rear Load RMS: Braking vs Traction (barras) ────────────────────────
-    try:
-        brake_vals = [k['rear_load_rms_brake'] for k in kpi_data]
-        traction_vals = [k['rear_load_rms_traction'] for k in kpi_data]
-        fig_brake_vs_traction_r = go.Figure()
-        fig_brake_vs_traction_r.add_trace(go.Bar(
-            name="Braking", x=setup_names, y=brake_vals))
-        fig_brake_vs_traction_r.add_trace(go.Bar(
-            name="Traction", x=setup_names, y=traction_vals))
-        fig_brake_vs_traction_r.update_layout(
-            title="Rear Load RMS: Braking vs Traction [N]",
-            xaxis_title="Setup",
-            yaxis_title="Contact Patch Load RMS [N]",
-            barmode="group"
-        )
-        layout.append(dcc.Graph(figure=fig_brake_vs_traction_r))
-    except KeyError:
-        pass
-
-    # ── 16) Contact Patch Load RMS en Frenada (barras Front vs Rear) ───────────
-    try:
-        brake_vals_front = [k['front_load_rms_brake'] for k in kpi_data]
-        brake_vals_rear  = [k['rear_load_rms_brake'] for k in kpi_data]
-        fig_brake = go.Figure()
-        fig_brake.add_trace(go.Bar(
-            name="Front", x=setup_names, y=brake_vals_front))
-        fig_brake.add_trace(go.Bar(
-            name="Rear", x=setup_names, y=brake_vals_rear))
-        fig_brake.update_layout(
-            title="Contact Patch Load RMS en Frenada [N]",
-            xaxis_title="Setup",
-            yaxis_title="CPL RMS [N]",
-            barmode="group"
-        )
-        layout.append(dcc.Graph(figure=fig_brake))
-    except KeyError:
-        pass
-
-    # ── 17) Contact Patch Load RMS en Tracción (barras Front vs Rear) ─────────
-    try:
-        traction_vals_front = [k['front_load_rms_traction'] for k in kpi_data]
-        traction_vals_rear  = [k['rear_load_rms_traction'] for k in kpi_data]
-        fig_traction = go.Figure()
-        fig_traction.add_trace(go.Bar(
-            name="Front", x=setup_names, y=traction_vals_front))
-        fig_traction.add_trace(go.Bar(
-            name="Rear", x=setup_names, y=traction_vals_rear))
-        fig_traction.update_layout(
-            title="Contact Patch Load RMS en Tracción [N]",
-            xaxis_title="Setup",
-            yaxis_title="CPL RMS [N]",
-            barmode="group"
-        )
-        layout.append(dcc.Graph(figure=fig_traction))
-    except KeyError:
-        pass
-
     # ── 10) PSD Heave por eje (Front vs Rear, mm²/Hz) ──────────────────────────
     try:
         fig_psd_axes = go.Figure()
@@ -621,69 +614,183 @@ def launch_dash_kpis(kpi_data, setup_names):
     except Exception as e:
         print(f"[WARNING] Error al generar el PSD de pitch: {e}")
 
-    # 14a) Magnitud (dB) con smoothing
-    fig_psd_load_mag = go.Figure()
-    for k, name in zip(kpi_data, setup_names):
-        if ('f_psd_load' in k and 'psd_load_mag_front' in k and 'psd_load_mag_rear' in k):
-            f_load = np.array(k['f_psd_load'])
-            # Suavizado de la magnitud
-            mag_f_raw = np.array(k['psd_load_mag_front'])
-            mag_r_raw = np.array(k['psd_load_mag_rear'])
-            mag_f = smooth_signal(mag_f_raw, window=51, polyorder=3)
-            mag_r = smooth_signal(mag_r_raw, window=51, polyorder=3)
+    # ── 14) PSD de Carga en Poste Delantero vs Trasero (Magnitud y Fase por separado) ──
+    try:
+        # --------------- 14a) Magnitud (dB) ---------------
+        fig_psd_load_mag = go.Figure()
+        for k, name in zip(kpi_data, setup_names):
+            if (
+                'f_psd_load' in k and
+                'psd_load_mag_front' in k and
+                'psd_load_mag_rear' in k
+            ):
+                f_load = np.array(k['f_psd_load'])            # vector de frecuencias [Hz]
+                mag_f  = np.array(k['psd_load_mag_front'])    # magnitud frontal [dB]
+                mag_r  = np.array(k['psd_load_mag_rear'])     # magnitud trasera [dB]
 
-            fig_psd_load_mag.add_trace(go.Scatter(
-                x=f_load,
-                y=mag_f,
-                mode='lines',
-                name=f"{name} – Mag Front [dB] (suavizado)",
-            ))
-            fig_psd_load_mag.add_trace(go.Scatter(
-                x=f_load,
-                y=mag_r,
-                mode='lines',
-                name=f"{name} – Mag Rear  [dB] (suavizado)",
-            ))
+                # Magnitud frontal
+                fig_psd_load_mag.add_trace(go.Scatter(
+                    x=f_load,
+                    y=mag_f,
+                    mode='lines',
+                    name=f"{name} – Mag Front [dB]",
+                    line=dict(color='dodgerblue')
+                ))
+                # Magnitud trasera
+                fig_psd_load_mag.add_trace(go.Scatter(
+                    x=f_load,
+                    y=mag_r,
+                    mode='lines',
+                    name=f"{name} – Mag Rear  [dB]",
+                    line=dict(color='seagreen')
+                ))
 
-    fig_psd_load_mag.update_layout(
-        title="PSD de Carga – Magnitud (Front vs Rear, Suavizado)",
-        xaxis=dict(title="Frecuencia [Hz]", type="log"),
-        yaxis=dict(title="Magnitud [dB]"),
-        legend=dict(x=1, y=0.99)
-    )
-    layout.append(dcc.Graph(figure=fig_psd_load_mag))
+        fig_psd_load_mag.update_layout(
+            title="PSD de Carga – Magnitud (Front vs Rear)",
+            xaxis=dict(
+                title="Frecuencia [Hz]",
+                type="log",
+                autorange=True
+            ),
+            yaxis=dict(
+                title="Magnitud [dB]",
+                rangemode="tozero"
+            ),
+            legend=dict(
+                x=0.01, y=0.99,
+                bordercolor="LightGray",
+                borderwidth=1
+            ),
+        )
+        layout.append(dcc.Graph(figure=fig_psd_load_mag))
 
-    # 14b) Fase (grados) con smoothing
-    fig_psd_load_phase = go.Figure()
-    for k, name in zip(kpi_data, setup_names):
-        if ('f_psd_load' in k and 'psd_load_phase_front' in k and 'psd_load_phase_rear' in k):
-            f_load   = np.array(k['f_psd_load'])
-            # Suavizado de la fase
-            phase_f_raw = np.array(k['psd_load_phase_front'])
-            phase_r_raw = np.array(k['psd_load_phase_rear'])
-            phase_f = smooth_signal(phase_f_raw, window=51, polyorder=3)
-            phase_r = smooth_signal(phase_r_raw, window=51, polyorder=3)
 
-            fig_psd_load_phase.add_trace(go.Scatter(
-                x=f_load,
-                y=phase_f,
-                mode='lines',
-                name=f"{name} – Phase Front [°] (suavizado)",
-            ))
-            fig_psd_load_phase.add_trace(go.Scatter(
-                x=f_load,
-                y=phase_r,
-                mode='lines',
-                name=f"{name} – Phase Rear  [°] (suavizado)",
-            ))
+        # --------------- 14b) Fase (grados) ---------------
+        fig_psd_load_phase = go.Figure()
+        for k, name in zip(kpi_data, setup_names):
+            if (
+                'f_psd_load' in k and
+                'psd_load_phase_front' in k and
+                'psd_load_phase_rear' in k
+            ):
+                f_load   = np.array(k['f_psd_load'])            # vector de frecuencias [Hz]
+                phase_f  = np.array(k['psd_load_phase_front'])  # fase frontal [°]
+                phase_r  = np.array(k['psd_load_phase_rear'])   # fase trasera [°]
 
-    fig_psd_load_phase.update_layout(
-        title="PSD de Carga – Fase (Front vs Rear, Suavizado)",
-        xaxis=dict(title="Frecuencia [Hz]", type="log"),
-        yaxis=dict(title="Fase [°]"),
-        legend=dict(x=1, y=0.99)
-    )
-    layout.append(dcc.Graph(figure=fig_psd_load_phase))
+                # Fase frontal
+                fig_psd_load_phase.add_trace(go.Scatter(
+                    x=f_load,
+                    y=phase_f,
+                    mode='lines',
+                    name=f"{name} – Phase Front [°]",
+                    line=dict(color='royalblue')
+                ))
+                # Fase trasera
+                fig_psd_load_phase.add_trace(go.Scatter(
+                    x=f_load,
+                    y=phase_r,
+                    mode='lines',
+                    name=f"{name} – Phase Rear  [°]",
+                    line=dict(color='darkgreen')
+                ))
+
+        fig_psd_load_phase.update_layout(
+            title="PSD de Carga – Fase (Front vs Rear)",
+            xaxis=dict(
+                title="Frecuencia [Hz]",
+                type="log",
+                autorange=True
+            ),
+            yaxis=dict(
+                title="Fase [°]",
+                rangemode="tozero"
+            ),
+            legend=dict(
+                x=0.01, y=0.99,
+                bordercolor="LightGray",
+                borderwidth=1
+            ),
+
+        )
+        layout.append(dcc.Graph(figure=fig_psd_load_phase))
+    except Exception as e:
+        print(f"[WARNING] Error al generar el PSD de carga: {e}")
+
+    # ── 14) Front Load RMS: Braking vs Traction (barras) ────────────────────────
+    try:
+        brake_vals = [k['front_load_rms_brake'] for k in kpi_data]
+        traction_vals = [k['front_load_rms_traction'] for k in kpi_data]
+        fig_brake_vs_traction_f = go.Figure()
+        fig_brake_vs_traction_f.add_trace(go.Bar(
+            name="Braking", x=setup_names, y=brake_vals))
+        fig_brake_vs_traction_f.add_trace(go.Bar(
+            name="Traction", x=setup_names, y=traction_vals))
+        fig_brake_vs_traction_f.update_layout(
+            title="Front Load RMS: Braking vs Traction [N]",
+            xaxis_title="Setup",
+            yaxis_title="Contact Patch Load RMS [N]",
+            barmode="group"
+        )
+        layout.append(dcc.Graph(figure=fig_brake_vs_traction_f))
+    except KeyError:
+        pass
+
+    # ── 15) Rear Load RMS: Braking vs Traction (barras) ────────────────────────
+    try:
+        brake_vals = [k['rear_load_rms_brake'] for k in kpi_data]
+        traction_vals = [k['rear_load_rms_traction'] for k in kpi_data]
+        fig_brake_vs_traction_r = go.Figure()
+        fig_brake_vs_traction_r.add_trace(go.Bar(
+            name="Braking", x=setup_names, y=brake_vals))
+        fig_brake_vs_traction_r.add_trace(go.Bar(
+            name="Traction", x=setup_names, y=traction_vals))
+        fig_brake_vs_traction_r.update_layout(
+            title="Rear Load RMS: Braking vs Traction [N]",
+            xaxis_title="Setup",
+            yaxis_title="Contact Patch Load RMS [N]",
+            barmode="group"
+        )
+        layout.append(dcc.Graph(figure=fig_brake_vs_traction_r))
+    except KeyError:
+        pass
+
+    # ── 16) Contact Patch Load RMS en Frenada (barras Front vs Rear) ───────────
+    try:
+        brake_vals_front = [k['front_load_rms_brake'] for k in kpi_data]
+        brake_vals_rear  = [k['rear_load_rms_brake'] for k in kpi_data]
+        fig_brake = go.Figure()
+        fig_brake.add_trace(go.Bar(
+            name="Front", x=setup_names, y=brake_vals_front))
+        fig_brake.add_trace(go.Bar(
+            name="Rear", x=setup_names, y=brake_vals_rear))
+        fig_brake.update_layout(
+            title="Contact Patch Load RMS en Frenada [N]",
+            xaxis_title="Setup",
+            yaxis_title="CPL RMS [N]",
+            barmode="group"
+        )
+        layout.append(dcc.Graph(figure=fig_brake))
+    except KeyError:
+        pass
+
+    # ── 17) Contact Patch Load RMS en Tracción (barras Front vs Rear) ─────────
+    try:
+        traction_vals_front = [k['front_load_rms_traction'] for k in kpi_data]
+        traction_vals_rear  = [k['rear_load_rms_traction'] for k in kpi_data]
+        fig_traction = go.Figure()
+        fig_traction.add_trace(go.Bar(
+            name="Front", x=setup_names, y=traction_vals_front))
+        fig_traction.add_trace(go.Bar(
+            name="Rear", x=setup_names, y=traction_vals_rear))
+        fig_traction.update_layout(
+            title="Contact Patch Load RMS en Tracción [N]",
+            xaxis_title="Setup",
+            yaxis_title="CPL RMS [N]",
+            barmode="group"
+        )
+        layout.append(dcc.Graph(figure=fig_traction))
+    except KeyError:
+        pass
 
     # ────────────────────────────────────────────────────────────────────────────
     app_kpi.layout = html.Div(layout)
@@ -701,6 +808,23 @@ def get_results_figures(sol, post):
     fig_travel.update_layout(title="Suspension Travel [mm]", xaxis_title="Time [s]", yaxis_title="Travel [mm]")
     figures.append(fig_travel)
 
+    """
+    # Spring
+    fig_spring = go.Figure()
+    fig_spring.add_trace(go.Scatter(x=distance, y=np.mean(post['f_spring'][0:2], axis=0), name="Spring Front"))
+    fig_spring.add_trace(go.Scatter(x=distance, y=np.mean(post['f_spring'][2:4], axis=0), name="Spring Rear"))
+    fig_spring.update_layout(title="Spring Force [N]", xaxis_title="Time [s]", yaxis_title="Force [N]")
+    figures.append(fig_spring)
+    """
+
+    """
+    # Damper
+    fig_damper = go.Figure()
+    fig_damper.add_trace(go.Scatter(x=distance, y=np.mean(post['f_damper'][0:2], axis=0), name="Damper Front"))
+    fig_damper.add_trace(go.Scatter(x=distance, y=np.mean(post['f_damper'][2:4], axis=0), name="Damper Rear"))
+    fig_damper.update_layout(title="Damper Force [N]", xaxis_title="Time [s]", yaxis_title="Force [N]")
+    figures.append(fig_damper)
+    """
 
     fig_heave = go.Figure()
     fig_heave.add_trace(go.Scatter(x=distance, y=sol.y[0]*1000, name="Heave"))

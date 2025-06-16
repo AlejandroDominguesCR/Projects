@@ -3,6 +3,9 @@ import numpy as np
 import pandas as pd
 import os
 import visualizer_dash
+import json
+from pathlib import Path
+import traceback
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QScrollArea,
     QLabel, QFileDialog, QTextEdit, QHBoxLayout, QSpinBox, QComboBox, QGroupBox, QTabWidget, QGridLayout, QProgressBar, QLineEdit, QFormLayout, QMessageBox, QListWidget, QAbstractItemView, QTableWidgetItem
@@ -12,8 +15,7 @@ from visualizer_dash import export_full_report
 from PyQt5.QtCore import Qt, QMimeData, QTimer, QUrl
 from PyQt5.QtGui import QPixmap, QPalette, QColor, QFont, QIcon, QDoubleValidator, QIntValidator
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from model import run_vehicle_model_physical, postprocess_7dof
-from scipy.interpolate import interp1d
+from model import run_vehicle_model_simple, run_vehicle_model_physical, postprocess_7dof
 
 def set_dark_theme(app):
     palette = QPalette()
@@ -51,7 +53,7 @@ class DragDropLabel(QLabel):
             self.file_callback(url.toLocalFile())
 
 def parse_json_setup(json_data):
-    import numpy as np
+
     # Extrae masas y parámetros globales
     m_car = json_data["config"]["chassis"]["carRunningMass"]["mCar"]
     wbal_f = json_data["config"]["chassis"]["carRunningMass"]["rWeightBalF"]
@@ -93,10 +95,10 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    stroke_FL = 0.029 #0.01965
-    stroke_FR = 0.029 #0.01965
-    stroke_RL = 0.059 #0.0305
-    stroke_RR = 0.059 #0.0305
+    stroke_FL = 0.01965
+    stroke_FR = 0.01965
+    stroke_RL = 0.0305
+    stroke_RR = 0.0305
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -124,17 +126,13 @@ def parse_json_setup(json_data):
         spring_travel = np.linspace(0, stroke, 100)
         kSpring = spring["kSpring"]
         FSpringPreload = spring.get("FSpringPreload", 0)
-
         spring_force = kSpring * spring_travel + FSpringPreload
-
         bump_x = np.array(bump["xData"])
         bump_f = np.array(bump["FData"])
         bump_gap = bump["xFreeGap"]
-
         bump_force = np.zeros_like(spring_travel)
         bump_indices = spring_travel > bump_gap
         bump_force[bump_indices] = np.interp(spring_travel[bump_indices] - bump_gap, bump_x, bump_f, left=0, right=bump_f[-1])
-        
         total_force = spring_force + bump_force
         p = {
             "ms": ms,
@@ -232,7 +230,6 @@ def parse_json_setup(json_data):
     }
 
     global_setup['aero_polynomials'] = aero_polynomials
-    global_setup['aero_area_ref']    = json_data['config']['aero'].get('ARef', 1.0)
     global_setup['aero_flapAngles'] = aero_poly.get('flapAngles', {})
     global_setup['aero_offsets'] = aero_poly.get('coefficientOffsets', {})
     global_setup['aero_DRS'] = aero_poly.get('DRS', {})
@@ -309,10 +306,10 @@ def prepare_simple_params(params, global_setup):
     # --- Masa suspendida total: suma de las 4 esquinas ---
     ms_total = sum([params[i]['ms'] for i in range(4)])
 
-    stroke_FL = params[0].get("stroke")
-    stroke_FR = params[1].get("stroke")
-    stroke_RL = params[2].get("stroke")
-    stroke_RR = params[3].get("stroke")
+    stroke_FL = params[0].get("stroke", 0.023)
+    stroke_FR = params[1].get("stroke", 0.023)
+    stroke_RL = params[2].get("stroke", 0.049)
+    stroke_RR = params[3].get("stroke", 0.049)
 
     # --- Aerodinámica: interpoladores para ClA y CdA ---
     aero_v = global_setup.get('aero_v', np.array([0]))
@@ -381,10 +378,6 @@ def prepare_simple_params(params, global_setup):
         'aero_CdA': CdA_interp,
         'tire_front': tire_front,
         'tire_rear': tire_rear,
-        'aero_area_ref':    global_setup['aero_area_ref'],
-        'vx':               None,   # se rellenará más abajo con la serie de velocidades
-        'hRideF':           global_setup['hRideF'],
-        'hRideR':           global_setup['hRideR'],
         'aero_polynomials': global_setup['aero_polynomials'],
         'gap_bumpstop_FL': global_setup['gap_bumpstop_FL'],
         'gap_bumpstop_FR': global_setup['gap_bumpstop_FR'],
@@ -397,10 +390,6 @@ def prepare_simple_params(params, global_setup):
     }
 
 def simulate_combo(setup_path, track_path, kt_overrides=None):
-    import json
-    from gui_v2 import parse_json_setup, prepare_simple_params, load_track_channels
-    from model import run_vehicle_model_physical, postprocess_7dof
-    from pathlib import Path
 
     # 1) Carga el JSON original
     with open(setup_path, 'r') as f:
@@ -409,7 +398,6 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
     # 2) Extrae params y global_setup
     params, global_setup = parse_json_setup(setup_data_raw)
     #    'params' es lista de 4 dicts: FL, FR, RL, RR con clave "kt" incl.
-    simple_params['vx'] = np.interp(sol.t, t_vec, vx)
     simple_params = prepare_simple_params(params, global_setup)
 
     # 3) Si el usuario pasó kt_overrides, lo inyectamos:
@@ -437,7 +425,6 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
     return sol, post, setup_path, track_path
 
 def load_track_channels(track_path):
-    import pandas as pd
 
     df = pd.read_csv(track_path)
     columns_required = ['Times', 'Car_Speed', 'Ax', 'Ay', 'rPedal', 'pBrake', 'Zp_FL', 'Zp_FR', 'Zp_RL', 'Zp_RR']
@@ -688,7 +675,6 @@ class SevenPostRigGUI(QWidget):
 
     def load_setup(self, filepath):
         # Carga y muestra los parámetros en el formulario
-        import json
         # 1) Abrir y guardar JSON completo
         with open(filepath, 'r') as f:
             json_data = json.load(f)
@@ -772,7 +758,7 @@ class SevenPostRigGUI(QWidget):
         self.tabs.setCurrentIndex(self.tabs.indexOf(self.params_tab))
 
     def save_params_tab(self):
-        import json
+
 
         # 1) Partimos del JSON completo que guardamos al cargar
         json_data = self.raw_setup_json
@@ -858,9 +844,7 @@ class SevenPostRigGUI(QWidget):
             self.load_setup_params_tab(filepath)
 
     def load_setup_params_tab(self, filepath):
-        import json
-        from PyQt5.QtWidgets import QWidget, QScrollArea, QVBoxLayout, QGroupBox, QFormLayout, QLabel, QLineEdit
-
+  
         with open(filepath, 'r') as f:
             setup_data_raw = json.load(f)
             self.raw_setup_json = setup_data_raw
@@ -937,8 +921,6 @@ class SevenPostRigGUI(QWidget):
         self.tabs.setCurrentIndex(self.tabs.indexOf(self.params_tab))
     
     def save_params_tab(self):
-        import json
-        from PyQt5.QtWidgets import QMessageBox
 
         if not hasattr(self, 'raw_setup_json') or not hasattr(self, 'current_editing_setup'):
             QMessageBox.warning(self, "Error", "No hay ningún setup cargado para guardar.")
@@ -991,8 +973,6 @@ class SevenPostRigGUI(QWidget):
         self.load_setup_params_tab(self.current_editing_setup)
 
     def run_simulation(self):
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-        import traceback
 
         if self.setup_list.count() == 0 or self.track_list.count() == 0:
             self.feedback("❌ Debes añadir al menos un setup y un track.", "error")
