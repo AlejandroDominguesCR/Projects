@@ -28,7 +28,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         graphs = []
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
-        travel = smooth_signal(post['travel_rel'])
+        travel = smooth_signal(post['travel'])
         #f_spring = smooth_signal(post['f_spring'])
         #f_damper = smooth_signal(post['f_damper'])
         f_tire = smooth_signal(post['f_tire'])
@@ -37,8 +37,18 @@ def launch_dash(sol, post, setup_name="Setup"):
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
 
+        ae_f = post['Fz_aero_front']  # debe venir de tu postprocess_7dof
+        ae_r = post['Fz_aero_rear']
+
+        fz_total = f_tire.copy()
+        # repartimos 50/50 por rueda de cada eje
+        fz_total[0] += ae_f * 0.5  # FL
+        fz_total[1] += ae_f * 0.5  # FR
+        fz_total[2] += ae_r * 0.5  # RL
+        fz_total[3] += ae_r * 0.5  # RR
+
         # Travel absoluto por rueda (incluyendo z_free)
-        x_total = travel #+ post['z_free'][:, None]
+        x_total = travel + post['z_free'][:, None]
         graphs.append(dcc.Graph(figure=go.Figure([
             go.Scatter(x=distance, y=x_total[0] * 1000, name="Travel FL"),
             go.Scatter(x=distance, y=x_total[1] * 1000, name="Travel FR"),
@@ -81,12 +91,11 @@ def launch_dash(sol, post, setup_name="Setup"):
             )
         # Tire load
         fig_tire = go.Figure([
-            go.Scatter(x=distance, y=f_tire[0], name="FL"),
-            go.Scatter(x=distance, y=f_tire[1], name="FR"),
-            go.Scatter(x=distance, y=f_tire[2], name="RL"),
-            go.Scatter(x=distance, y=f_tire[3], name="RR")
+            go.Scatter(x=distance, y=fz_total[0], name="FL"),
+            go.Scatter(x=distance, y=fz_total[1], name="FR"),
+            go.Scatter(x=distance, y=fz_total[2], name="RL"),
+            go.Scatter(x=distance, y=fz_total[3], name="RR")
         ])
-
         if grip_limited_trace:
             fig_tire.add_trace(grip_limited_trace)
 
@@ -97,6 +106,19 @@ def launch_dash(sol, post, setup_name="Setup"):
         )
 
         graphs.append(dcc.Graph(figure=fig_tire))
+
+        graphs.append(dcc.Graph(
+            figure=go.Figure([
+                go.Scatter(x=distance, y=ae_f, name="Downforce Front"),
+                go.Scatter(x=distance, y=ae_r, name="Downforce Rear"),
+            ]).update_layout(
+                title="Aerodynamic Downforce per Axle [N]",
+                xaxis_title="Distance [m]",
+                yaxis_title="Force [N]"
+            ),
+            style={'height': '300px'},
+            config={'displayModeBar': False}
+        ))
         
         
         # === Bumpstop Forces por rueda ===
@@ -627,7 +649,7 @@ def launch_dash_kpis(kpi_data, setup_names):
         title="PSD de Carga – Magnitud (Front vs Rear, Suavizado)",
         xaxis=dict(title="Frecuencia [Hz]", type="log"),
         yaxis=dict(title="Magnitud [dB]"),
-        legend=dict(x=0.01, y=0.99)
+        legend=dict(x=1, y=0.99)
     )
     layout.append(dcc.Graph(figure=fig_psd_load_mag))
 
@@ -659,37 +681,9 @@ def launch_dash_kpis(kpi_data, setup_names):
         title="PSD de Carga – Fase (Front vs Rear, Suavizado)",
         xaxis=dict(title="Frecuencia [Hz]", type="log"),
         yaxis=dict(title="Fase [°]"),
-        legend=dict(x=0.01, y=0.99)
+        legend=dict(x=1, y=0.99)
     )
     layout.append(dcc.Graph(figure=fig_psd_load_phase))
-
-    # 14c) PSD de Fuerza del Damper – Magnitud (dB) FL y RL con suavizado
-    fig_psd_damper_mag = go.Figure()
-    for k, name in zip(kpi_data, setup_names):
-        if 'f_psd_damper' in k and 'psd_damper_mag_FL' in k and 'psd_damper_mag_RL' in k:
-            f_damp = np.array(k['f_psd_damper'])
-            mag_FL = smooth_signal(np.array(k['psd_damper_mag_FL']), window=51, polyorder=3)
-            mag_RL = smooth_signal(np.array(k['psd_damper_mag_RL']), window=51, polyorder=3)
-            fig_psd_damper_mag.add_trace(go.Scatter(
-                x=f_damp,
-                y=mag_FL,
-                mode='lines',
-                name=f"{name} – Damper FL [dB] (suavizado)"
-            ))
-            fig_psd_damper_mag.add_trace(go.Scatter(
-                x=f_damp,
-                y=mag_RL,
-                mode='lines',
-                name=f"{name} – Damper RL [dB] (suavizado)"
-            ))
-    fig_psd_damper_mag.update_layout(
-        title="PSD de Fuerza del Damper – Magnitud (FL vs RL, Suavizado)",
-        xaxis=dict(title="Frecuencia [Hz]", type="log"),
-        yaxis=dict(title="Magnitud [dB]"),
-        legend=dict(x=0.01, y=0.99)
-    )
-    layout.append(dcc.Graph(figure=fig_psd_damper_mag))
-
 
     # ────────────────────────────────────────────────────────────────────────────
     app_kpi.layout = html.Div(layout)
@@ -707,23 +701,6 @@ def get_results_figures(sol, post):
     fig_travel.update_layout(title="Suspension Travel [mm]", xaxis_title="Time [s]", yaxis_title="Travel [mm]")
     figures.append(fig_travel)
 
-    """
-    # Spring
-    fig_spring = go.Figure()
-    fig_spring.add_trace(go.Scatter(x=distance, y=np.mean(post['f_spring'][0:2], axis=0), name="Spring Front"))
-    fig_spring.add_trace(go.Scatter(x=distance, y=np.mean(post['f_spring'][2:4], axis=0), name="Spring Rear"))
-    fig_spring.update_layout(title="Spring Force [N]", xaxis_title="Time [s]", yaxis_title="Force [N]")
-    figures.append(fig_spring)
-    """
-
-    """
-    # Damper
-    fig_damper = go.Figure()
-    fig_damper.add_trace(go.Scatter(x=distance, y=np.mean(post['f_damper'][0:2], axis=0), name="Damper Front"))
-    fig_damper.add_trace(go.Scatter(x=distance, y=np.mean(post['f_damper'][2:4], axis=0), name="Damper Rear"))
-    fig_damper.update_layout(title="Damper Force [N]", xaxis_title="Time [s]", yaxis_title="Force [N]")
-    figures.append(fig_damper)
-    """
 
     fig_heave = go.Figure()
     fig_heave.add_trace(go.Scatter(x=distance, y=sol.y[0]*1000, name="Heave"))

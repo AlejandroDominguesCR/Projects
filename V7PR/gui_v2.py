@@ -12,7 +12,8 @@ from visualizer_dash import export_full_report
 from PyQt5.QtCore import Qt, QMimeData, QTimer, QUrl
 from PyQt5.QtGui import QPixmap, QPalette, QColor, QFont, QIcon, QDoubleValidator, QIntValidator
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from model import run_vehicle_model_simple, postprocess_7dof
+from model import run_vehicle_model_physical, postprocess_7dof
+from scipy.interpolate import interp1d
 
 def set_dark_theme(app):
     palette = QPalette()
@@ -92,10 +93,10 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    stroke_FL = 0.01965
-    stroke_FR = 0.01965
-    stroke_RL = 0.0305
-    stroke_RR = 0.0305
+    stroke_FL = 0.029 #0.01965
+    stroke_FR = 0.029 #0.01965
+    stroke_RL = 0.059 #0.0305
+    stroke_RR = 0.059 #0.0305
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -123,13 +124,17 @@ def parse_json_setup(json_data):
         spring_travel = np.linspace(0, stroke, 100)
         kSpring = spring["kSpring"]
         FSpringPreload = spring.get("FSpringPreload", 0)
+
         spring_force = kSpring * spring_travel + FSpringPreload
+
         bump_x = np.array(bump["xData"])
         bump_f = np.array(bump["FData"])
         bump_gap = bump["xFreeGap"]
+
         bump_force = np.zeros_like(spring_travel)
         bump_indices = spring_travel > bump_gap
         bump_force[bump_indices] = np.interp(spring_travel[bump_indices] - bump_gap, bump_x, bump_f, left=0, right=bump_f[-1])
+        
         total_force = spring_force + bump_force
         p = {
             "ms": ms,
@@ -227,6 +232,7 @@ def parse_json_setup(json_data):
     }
 
     global_setup['aero_polynomials'] = aero_polynomials
+    global_setup['aero_area_ref']    = json_data['config']['aero'].get('ARef', 1.0)
     global_setup['aero_flapAngles'] = aero_poly.get('flapAngles', {})
     global_setup['aero_offsets'] = aero_poly.get('coefficientOffsets', {})
     global_setup['aero_DRS'] = aero_poly.get('DRS', {})
@@ -375,6 +381,10 @@ def prepare_simple_params(params, global_setup):
         'aero_CdA': CdA_interp,
         'tire_front': tire_front,
         'tire_rear': tire_rear,
+        'aero_area_ref':    global_setup['aero_area_ref'],
+        'vx':               None,   # se rellenará más abajo con la serie de velocidades
+        'hRideF':           global_setup['hRideF'],
+        'hRideR':           global_setup['hRideR'],
         'aero_polynomials': global_setup['aero_polynomials'],
         'gap_bumpstop_FL': global_setup['gap_bumpstop_FL'],
         'gap_bumpstop_FR': global_setup['gap_bumpstop_FR'],
@@ -389,7 +399,7 @@ def prepare_simple_params(params, global_setup):
 def simulate_combo(setup_path, track_path, kt_overrides=None):
     import json
     from gui_v2 import parse_json_setup, prepare_simple_params, load_track_channels
-    from model import run_vehicle_model_simple, postprocess_7dof
+    from model import run_vehicle_model_physical, postprocess_7dof
     from pathlib import Path
 
     # 1) Carga el JSON original
@@ -399,6 +409,7 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
     # 2) Extrae params y global_setup
     params, global_setup = parse_json_setup(setup_data_raw)
     #    'params' es lista de 4 dicts: FL, FR, RL, RR con clave "kt" incl.
+    simple_params['vx'] = np.interp(sol.t, t_vec, vx)
     simple_params = prepare_simple_params(params, global_setup)
 
     # 3) Si el usuario pasó kt_overrides, lo inyectamos:
@@ -419,7 +430,7 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
     rpedal  = track_data['rpedal']
     pbrake  = track_data['brake']
 
-    sol = run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, simple_params)
+    sol = run_vehicle_model_physical(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, simple_params)
     simple_params['track_name'] = Path(track_path).stem
     post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx)
 
