@@ -226,32 +226,7 @@ def parse_json_setup(json_data):
         'DRS_CDrag': parse_poly(aero_poly.get('DRS', {}).get('CDragBodyDRSPolynomial', [])),
     }
 
-    def flat_map(poly, prefix):
-        mapping = {
-            'Const': f'{prefix}0',
-            'hRideR': f'{prefix}01',
-            'hRideR*hRideR': f'{prefix}02',
-            'hRideR*hRideR*hRideR': f'{prefix}03',
-            'hRideF': f'{prefix}10',
-            'hRideF*hRideR': f'{prefix}11',
-            'hRideF*hRideR*hRideR': f'{prefix}12',
-            'hRideF*hRideF': f'{prefix}20',
-            'hRideF*hRideF*hRideR': f'{prefix}21',
-            'hRideF*hRideF*hRideR*hRideR': f'{prefix}22',
-            'hRideF*hRideF*hRideF': f'{prefix}30',
-            'aFlapF': f'{prefix}flap10',
-            'aFlapF*aFlapF': f'{prefix}flap20',
-            'aFlapR': f'{prefix}flap01',
-            'aFlapR*aFlapR': f'{prefix}flap02',
-        }
-        return {mapping[k]: v for k, v in poly.items() if k in mapping}
-
-    aero_polynomials_flat = {}
-    aero_polynomials_flat.update(flat_map(aero_polynomials.get('CLiftBodyF', {}), 'fa'))
-    aero_polynomials_flat.update(flat_map(aero_polynomials.get('CLiftBodyR', {}), 'ra'))
-    aero_polynomials_flat.update(flat_map(aero_polynomials.get('CDragBody', {}), 'a'))
-
-    global_setup['aero_polynomials_flat'] = aero_polynomials_flat
+    global_setup['aero_polynomials'] = aero_polynomials
     global_setup['aero_flapAngles'] = aero_poly.get('flapAngles', {})
     global_setup['aero_offsets'] = aero_poly.get('coefficientOffsets', {})
     global_setup['aero_DRS'] = aero_poly.get('DRS', {})
@@ -400,7 +375,7 @@ def prepare_simple_params(params, global_setup):
         'aero_CdA': CdA_interp,
         'tire_front': tire_front,
         'tire_rear': tire_rear,
-        'aero_polynomials': global_setup['aero_polynomials_flat'],
+        'aero_polynomials': global_setup['aero_polynomials'],
         'gap_bumpstop_FL': global_setup['gap_bumpstop_FL'],
         'gap_bumpstop_FR': global_setup['gap_bumpstop_FR'],
         'gap_bumpstop_RL': global_setup['gap_bumpstop_RL'],

@@ -79,19 +79,16 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         x_clipped = np.clip(x_raw, z_top, z_bot)
         # Bumpstop (compresión más allá del gap)
         compression = x_raw - gap
-        if compression > 0:
-            k_bump = bump(compression) / compression
-        else:
-            k_bump = 0.0
-        # Resortes en serie: muelle + bumpstop con la compliancia de instalación
-        k_total = 1 / (1/(k_spring + k_bump) + 1/k_inst)
+        f_bump = bump(np.maximum(0, compression))
+        # Resortes en serie: resorte + instalación
+        k_total = 1.0/(1.0/k_spring + 1.0/k_inst)
         f_spring = k_total * x_clipped
         # Amortiguador: velocidad relativa resorte-carrocería
         rel_vel = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
         f_damper = damper(rel_vel)
         # Tope blando como respaldo
         f_stop = tope_fuerza(x_raw, z_top, z_bot)
-        return f_spring + f_damper + f_stop
+        return f_spring + f_bump + f_damper + f_stop
 
     # Cálculo de offsets estáticos y dinámicos
     phi_off_front = -lf * phi
@@ -191,10 +188,10 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     phi_dd   = (lr*(F_RR + F_RL) - lf*(F_FR + F_FL)) / Iyy
 
     # Masas no suspendidas
-    zFR_dd = (-F_FR + params['ktf']*(ztrack_FR - zFR)) / mHubF
-    zFL_dd = (-F_FL + params['ktf']*(ztrack_FL - zFL)) / mHubF
-    zRL_dd = (-F_RL + params['ktr']*(ztrack_RL - zRL)) / mHubR
-    zRR_dd = (-F_RR + params['ktr']*(ztrack_RR - zRR)) / mHubR
+    zFR_dd = (-F_FR + params['ktf']*(ztrack_FR - zFR)) - mHubF*g / mHubF
+    zFL_dd = (-F_FL + params['ktf']*(ztrack_FL - zFL)) - mHubF*g/ mHubF
+    zRL_dd = (-F_RL + params['ktr']*(ztrack_RL - zRL)) - mHubR*g/ mHubR
+    zRR_dd = (-F_RR + params['ktr']*(ztrack_RR - zRR)) - mHubR*g/ mHubR
 
     return [
         hdot, h_dd,
@@ -271,21 +268,6 @@ def compute_static_equilibrium(params, vx=0.0):
     ktf = params['ktf']
     ktr = params['ktr']
 
-    bumpstop_front = params['bumpstop_front']
-    bumpstop_rear = params['bumpstop_rear']
-    damper_front = params['damper_front']
-    damper_rear = params['damper_rear']
-
-    z_FL_free = params['z_FL_free']
-    z_FR_free = params['z_FR_free']
-    z_RL_free = params['z_RL_free']
-    z_RR_free = params['z_RR_free']
-
-    # Antirrolbar si está presente
-    k_arb_f = params.get('k_arb_f', 0.0)
-    k_arb_r = params.get('k_arb_r', 0.0)
-
-
     def residual(x):
         # Variables: h, phi, theta, zFR, zFL, zRL, zRR
         h, phi, theta, zFR, zFL, zRL, zRR = x
@@ -308,21 +290,10 @@ def compute_static_equilibrium(params, vx=0.0):
         params['x_static_RR'] = x_RR
 
         # Rigidez efectiva muelle + bumpstop + rigidez instalación
-        comp_FR = x_FR - z_FR_free
-        k_bump_FR = bumpstop_front(comp_FR) / comp_FR if comp_FR > 0 else 0.0
-        kFR_eff = 1 / (1 / (kFR + k_bump_FR) + 1 / kinstf)
-
-        comp_FL = x_FL - z_FL_free
-        k_bump_FL = bumpstop_front(comp_FL) / comp_FL if comp_FL > 0 else 0.0
-        kFL_eff = 1 / (1 / (kFL + k_bump_FL) + 1 / kinstf)
-
-        comp_RR = x_RR - z_RR_free
-        k_bump_RR = bumpstop_rear(comp_RR) / comp_RR if comp_RR > 0 else 0.0
-        kRR_eff = 1 / (1 / (kRR + k_bump_RR) + 1 / kinstr)
-
-        comp_RL = x_RL - z_RL_free
-        k_bump_RL = bumpstop_rear(comp_RL) / comp_RL if comp_RL > 0 else 0.0
-        kRL_eff = 1 / (1 / (kRL + k_bump_RL) + 1 / kinstr)
+        kFR_eff = 1 / (1 /(kFR) + 1 / kinstf)
+        kFL_eff = 1 / (1 /(kFL) + 1 / kinstf)
+        kRR_eff = 1 / (1 /(kRR) + 1 / kinstr)
+        kRL_eff = 1 / (1 /(kRL) + 1 / kinstr)
 
         # Fuerzas suspensión
         F_FR = kFR_eff * x_FR
@@ -398,15 +369,9 @@ def compute_static_equilibrium(params, vx=0.0):
     for corner in ['FL','FR','RL','RR']:
         x_static = params[f'x_static_{corner}']
         topout   = params[f'z_topout_{corner}']
-        bottomout= params[f'z_bottomout_{corner}']
-        gap      = params[f'gap_bumpstop_{corner}']
 
         # margen respecto a la carrera del amortiguador
         margen_ext  = topout - x_static
-
-        # margen hasta el bump-stop: gap libre antes de que x_raw supere gap
-        # x_raw = x_static - topout  → compresión real desde topout
-
         print(f"[INFO] Márgenes {corner}: "
             f"extensión = {margen_ext*1000:.2f} mm, ")
 
