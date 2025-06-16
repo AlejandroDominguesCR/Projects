@@ -79,9 +79,10 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         x_clipped = np.clip(x_raw, z_top, z_bot)
         # Bumpstop (compresión más allá del gap)
         compression = x_raw - gap
+        k_bump = bump(compression) / compression      # solo si compression > 0
         f_bump = bump(np.maximum(0, compression))
         # Resortes en serie: resorte + instalación
-        k_total = 1.0/(1.0/k_spring + 1.0/k_inst)
+        k_total = 1 / (1/(k_spring + k_bump) + 1/k_inst)
         f_spring = k_total * x_clipped
         # Amortiguador: velocidad relativa resorte-carrocería
         rel_vel = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
