@@ -1,0 +1,1496 @@
+{
+  "simVersion": "1.9797",
+  "config": {
+    "chassis": {
+      "hRideFSetup": 0.016,
+      "hRideRSetup": 0.044,
+      "rideHeightAdjustMethod": "Pushrod Shim",
+      "carRunningMass": {
+        "name": "Running mass and weight distribution",
+        "mCar": 804.9,
+        "rWeightBalF": 0.447373642620963
+      },
+      "ICar": [
+        141.5,
+        0,
+        0,
+        0,
+        991.7,
+        0,
+        0,
+        0,
+        1079.8
+      ],
+      "mHubF": 33,
+      "IHubF": [
+        0.1,
+        0,
+        0,
+        0,
+        0.1,
+        0,
+        0,
+        0,
+        0.1
+      ],
+      "IWheelF": 0.7,
+      "mHubR": 35.5,
+      "IHubR": [
+        0.1,
+        0,
+        0,
+        0,
+        0.1,
+        0,
+        0,
+        0,
+        0.1
+      ],
+      "IWheelR": 0.7,
+      "rRideF": [
+        0,
+        0,
+        0
+      ],
+      "rRideR": [
+        -3.1345,
+        0,
+        0
+      ],
+      "rUndertrayFront": [
+        -0.45,
+        0,
+        0
+      ],
+      "rUndertrayMid": [
+        -0.9,
+        0,
+        0
+      ],
+      "rUndertrayRear": [
+        -2.4,
+        0,
+        0
+      ],
+      "kUndertrayFront": 50000,
+      "kUndertrayMid": 100000,
+      "kUndertrayRear": 1000000,
+      "muChassis": 0.3,
+      "kVerticalSuspensionComplianceF": 2140000,
+      "kVerticalSuspensionComplianceR": 3400000,
+      "rRackRatio": 0.0429769875011084,
+      "zCoG": -0.298
+    },
+    "suspension": {
+      "front": {
+        "rWheelDesign": 0.354634464105135,
+        "external": {
+          "aToeSetupAlignment": {
+            "name": "Angle Measurement",
+            "aToeSetup": 0
+          },
+          "aCamberSetupAlignment": {
+            "name": "CoG Rotation",
+            "aCamberSetup": -0.074176493209759
+          },
+          "pickUpPts": {
+            "name": "Double wishbone with pushrod on lower wishbone",
+            "travelLimits": {
+              "name": "Rocker Limits",
+              "aRockerMax": 0.2,
+              "aRockerMin": -0.5,
+              "xRackMax": 0.0722,
+              "xRackMin": -0.0722
+            },
+            "rAxleC": [
+              0,
+              0.768818,
+              -0.32596
+            ],
+            "rAxleAxis": [
+              0,
+              0.868818,
+              -0.32596
+            ],
+            "rUserTCP": [
+              0,
+              0.78816,
+              0.02
+            ],
+            "rFLWBI": [
+              0.165056,
+              0.15169,
+              -0.25472
+            ],
+            "rFLWBO": [
+              -0.008579,
+              0.70011,
+              -0.232091
+            ],
+            "rRLWBI": [
+              -0.346203,
+              0.202373,
+              -0.255229
+            ],
+            "rRLWBO": [
+              -0.008579,
+              0.70011,
+              -0.232091
+            ],
+            "rFUWBI": [
+              0.022446,
+              0.167707,
+              -0.443197
+            ],
+            "rFUWBO": [
+              -0.027938,
+              0.659372,
+              -0.410842
+            ],
+            "rRUWBI": [
+              -0.345617,
+              0.201585,
+              -0.428549
+            ],
+            "rRUWBO": [
+              -0.027938,
+              0.659372,
+              -0.410842
+            ],
+            "rTRI": [
+              0.1335,
+              0.17,
+              -0.423
+            ],
+            "rTRO": [
+              0.07663,
+              0.68512,
+              -0.386979
+            ],
+            "rPRI": [
+              0.099398,
+              0.123903,
+              -0.526697
+            ],
+            "rPRO": [
+              0.004461,
+              0.630524,
+              -0.267669
+            ],
+            "rRockerC": [
+              0.090368,
+              0.1064,
+              -0.497161
+            ],
+            "rRockerAxis": [
+              0.3035,
+              0.1064,
+              -0.432
+            ]
+          },
+          "xFlexureNeutral": 0,
+          "kFlexure": 0
+        },
+        "internal": {
+          "pickUpPts": {
+            "name": "T-type anti-roll bar",
+            "rTorsionBarAnchor": [
+              0.1885,
+              0.14136,
+              -0.33
+            ],
+            "rCrossLink": [
+              0.1885,
+              0.14136,
+              -0.33
+            ],
+            "rCornerSpring": [
+              0.08438,
+              0.050004,
+              -0.477574
+            ],
+            "rCornerSpringChassis": [
+              0.03148,
+              0.126657,
+              -0.304547
+            ],
+            "rCornerBumpStop": [
+              0.08438,
+              0.050004,
+              -0.477574
+            ],
+            "rCornerBumpStopChassis": [
+              0.03148,
+              0.126657,
+              -0.304547
+            ],
+            "rCornerDamper": [
+              0.08438,
+              0.050004,
+              -0.477574
+            ],
+            "rCornerDamperChassis": [
+              0.03148,
+              0.126657,
+              -0.304547
+            ],
+            "rCornerInerter": [
+              0,
+              0,
+              0
+            ],
+            "rCornerInerterChassis": [
+              0,
+              0,
+              0
+            ],
+            "rTriSpring": [
+              0,
+              0,
+              0
+            ],
+            "rTriBumpStop": [
+              0,
+              0,
+              0
+            ],
+            "rTriDamper": [
+              0,
+              0,
+              0
+            ],
+            "rTriInerter": [
+              0,
+              0,
+              0
+            ],
+            "rARBRockerPickup": [
+              0.090275,
+              0.023401,
+              -0.49685
+            ],
+            "rARBPickupInboard": [
+              0.05662,
+              0.03,
+              -0.386775
+            ],
+            "rARBAxis": [
+              0.05662,
+              0,
+              -0.381775
+            ],
+            "rARBAnchor": [
+              0.1885,
+              0,
+              -0.33
+            ]
+          },
+          "damper": {
+            "name": "Damper Lookup Table",
+            "vDamperBasis": [
+              -0.12,
+              -0.11,
+              -0.1,
+              -0.09,
+              -0.08,
+              -0.07,
+              -0.06,
+              -0.05,
+              -0.04,
+              -0.03,
+              -0.02,
+              -0.01,
+              0,
+              0.01,
+              0.02,
+              0.03,
+              0.04,
+              0.05,
+              0.06,
+              0.07,
+              0.08,
+              0.09,
+              0.1,
+              0.11,
+              0.12
+            ],
+            "FDamperLU": [
+              -1034.775,
+              -1014.905,
+              -973.86,
+              -915.905,
+              -842.09,
+              -760.405,
+              -677.615,
+              -588.435,
+              -487.68,
+              -391.445,
+              -298.85,
+              -159.825,
+              0,
+              286.57,
+              523.635,
+              591.195,
+              617.305,
+              634.055,
+              646.19,
+              657.47,
+              668.71,
+              679.705,
+              689.24,
+              698.47,
+              706.015
+            ]
+          },
+          "bumpStop": {
+            "name": "Bump-stop LU",
+            "freeGapReferenceCondition": "Setup",
+            "xData": [
+              0,
+              0.0002,
+              0.0004,
+              0.0006,
+              0.0008,
+              0.001,
+              0.0012,
+              0.0014,
+              0.0016,
+              0.0018,
+              0.002,
+              0.0022,
+              0.0024,
+              0.0026,
+              0.0028,
+              0.003,
+              0.0032,
+              0.0034,
+              0.0036,
+              0.0038
+            ],
+            "FData": [
+              0,
+              61.9011,
+              170.694,
+              289.7874,
+              425.9502,
+              563.1921,
+              749.7783,
+              944.8992,
+              1165.7223,
+              1397.925,
+              1655.3394,
+              1946.8926,
+              2309.9607,
+              2717.7624,
+              3196.5885,
+              3765.8628,
+              4446.7749,
+              5161.7277,
+              6080.9247,
+              7072.3233
+            ],
+            "xFreeGap": 0.00312358602001463
+          },
+          "antiRollBar": {
+            "name": "Linear spring",
+            "kAntiRollBar": 2557.4260935754
+          },
+          "spring": {
+            "name": "Linear spring",
+            "kSpring": 538243.820381865,
+            "FSpringPreload": 0
+          }
+        }
+      },
+      "rear": {
+        "rWheelDesign": 0.352777877614942,
+        "external": {
+          "aToeSetupAlignment": {
+            "name": "Angle Measurement",
+            "aToeSetup": -0.00303687289847013
+          },
+          "aCamberSetupAlignment": {
+            "name": "CoG Rotation",
+            "aCamberSetup": -0.0349065850398866
+          },
+          "pickUpPts": {
+            "name": "Double wishbone with pushrod on lower wishbone",
+            "travelLimits": {
+              "name": "Rocker Limits",
+              "aRockerMax": 0.2,
+              "aRockerMin": -0.5,
+              "xRackMax": 0,
+              "xRackMin": 0
+            },
+            "rAxleC": [
+              -3.1345,
+              0.754498,
+              -0.294991
+            ],
+            "rAxleAxis": [
+              -3.1345,
+              0.854498,
+              -0.294991
+            ],
+            "rUserTCP": [
+              -3.1345,
+              0.763184,
+              0.05
+            ],
+            "rFLWBI": [
+              -2.732312,
+              0.159217,
+              -0.177648
+            ],
+            "rFLWBO": [
+              -3.141512,
+              0.65096,
+              -0.153744
+            ],
+            "rRLWBI": [
+              -3.055252,
+              0.118375,
+              -0.154985
+            ],
+            "rRLWBO": [
+              -3.141512,
+              0.65096,
+              -0.153744
+            ],
+            "rFUWBI": [
+              -2.749273,
+              0.199034,
+              -0.331677
+            ],
+            "rFUWBO": [
+              -3.070891,
+              0.60935,
+              -0.368137
+            ],
+            "rRUWBI": [
+              -3.195458,
+              0.110785,
+              -0.33235
+            ],
+            "rRUWBO": [
+              -3.070891,
+              0.60935,
+              -0.368137
+            ],
+            "rTRI": [
+              -3.195458,
+              0.110785,
+              -0.33235
+            ],
+            "rTRO": [
+              -3.221916,
+              0.609473,
+              -0.370665
+            ],
+            "rPRI": [
+              -3.017899,
+              0.13063,
+              -0.383785
+            ],
+            "rPRO": [
+              -3.110065,
+              0.577093,
+              -0.186772
+            ],
+            "rRockerC": [
+              -2.976999,
+              0.12796,
+              -0.38481
+            ],
+            "rRockerAxis": [
+              -2.976999,
+              0.056286,
+              -0.198094
+            ]
+          },
+          "xFlexureNeutral": 0,
+          "kFlexure": 0
+        },
+        "internal": {
+          "pickUpPts": {
+            "name": "T-type anti-roll bar",
+            "rTorsionBarAnchor": [
+              -3.223812,
+              0.080045,
+              -0.216816
+            ],
+            "rCrossLink": [
+              0,
+              0,
+              0
+            ],
+            "rCornerSpring": [
+              -2.996345,
+              0.04973,
+              -0.41484
+            ],
+            "rCornerSpringChassis": [
+              -2.693982,
+              0.087091,
+              -0.4005
+            ],
+            "rCornerBumpStop": [
+              -2.996345,
+              0.04973,
+              -0.41484
+            ],
+            "rCornerBumpStopChassis": [
+              -2.693982,
+              0.087091,
+              -0.4005
+            ],
+            "rCornerDamper": [
+              -2.996345,
+              0.04973,
+              -0.41484
+            ],
+            "rCornerDamperChassis": [
+              -2.693982,
+              0.087091,
+              -0.4005
+            ],
+            "rCornerInerter": [
+              0,
+              0,
+              0
+            ],
+            "rCornerInerterChassis": [
+              0,
+              0,
+              0
+            ],
+            "rTriSpring": [
+              0,
+              0,
+              0
+            ],
+            "rTriBumpStop": [
+              0,
+              0,
+              0
+            ],
+            "rTriDamper": [
+              0,
+              0,
+              0
+            ],
+            "rTriInerter": [
+              0,
+              0,
+              0
+            ],
+            "rARBRockerPickup": [
+              -3.018081,
+              0.080138,
+              -0.403167
+            ],
+            "rARBPickupInboard": [
+              -3.255,
+              0.062,
+              -0.406
+            ],
+            "rARBAxis": [
+              -3.255,
+              0,
+              -0.406
+            ],
+            "rARBAnchor": [
+              -3.224812,
+              0,
+              -0.216816
+            ]
+          },
+          "damper": {
+            "name": "Damper Lookup Table",
+            "vDamperBasis": [
+              -0.25,
+              -0.2,
+              -0.15,
+              -0.1,
+              -0.07,
+              -0.05,
+              0,
+              0.05,
+              0.07,
+              0.1,
+              0.15,
+              0.2,
+              0.25
+            ],
+            "FDamperLU": [
+              -1286.9739,
+              -1201.0383,
+              -1012.7844,
+              -789.2145,
+              -626.0742,
+              -391.9095,
+              0,
+              421.83,
+              546.9075,
+              705.9276,
+              924.7887,
+              1136.979,
+              1273.5342
+            ]
+          },
+          "bumpStop": {
+            "name": "Bump-stop LU",
+            "freeGapReferenceCondition": "Setup",
+            "xData": [
+              0,
+              0.00058,
+              0.00104,
+              0.0016,
+              0.00204,
+              0.00257,
+              0.00301,
+              0.0036,
+              0.00407,
+              0.00451,
+              0.00501,
+              0.00551,
+              0.00601,
+              0.00651,
+              0.008,
+              0.01,
+              0.014,
+              0.018
+            ],
+            "FData": [
+              8,
+              20,
+              36.3333333333333,
+              56.3333333333333,
+              76.6666666666667,
+              97,
+              117.333333333333,
+              149.666666666667,
+              174,
+              202.333333333333,
+              234.666666666667,
+              270,
+              300,
+              325,
+              450,
+              700,
+              1100,
+              1800
+            ],
+            "xFreeGap": 0.000801003973704164
+          },
+          "antiRollBar": {
+            "name": "Linear spring",
+            "kAntiRollBar": 4696.22507362949
+          },
+          "spring": {
+            "name": "Linear spring",
+            "kSpring": 280202.936,
+            "FSpringPreload": 280.202936
+          }
+        }
+      }
+    },
+    "tyres": {
+      "name": "Pacejka 5.2",
+      "front": {
+        "sideDefinition": "Left",
+        "rUnloaded": 0.354634464105135,
+        "vLowSpeed": 1,
+        "radiusEquations": {
+          "name": "Pirelli",
+          "loadedRadius": {
+            "p1": 8.25662727200251,
+            "a1": -0.000214575935881616,
+            "a2": 0.171660748526538,
+            "a3": 200.066888273033,
+            "c1": -0.0933981574647419,
+            "f1": -0.000454037754485714,
+            "b1": -4.80879526475442e-05,
+            "b2": 0.0115132016356622
+          },
+          "rollingRadius": {
+            "A": -0.035,
+            "B": 0.06,
+            "D": 5e-07,
+            "E": -1e-09,
+            "F": 1.2
+          }
+        },
+        "rollingResistance": {
+          "name": "Canopy equation",
+          "kRollingResistance": 78.96069
+        },
+        "DIMENSION": {
+          "WIDTH": 0.275
+        },
+        "VERTICAL": {
+          "FNOMIN": 4000
+        },
+        "SCALING_COEFFICIENTS": {
+          "LFZ0": 1,
+          "LCX": 1,
+          "LMUX": 1.03,
+          "LEX": 1,
+          "LKX": 0.81,
+          "LHX": 0,
+          "LVX": 0,
+          "LGAX": 0,
+          "LCY": 1,
+          "LMUY": 1,
+          "LEY": 1,
+          "LKY": 1.29,
+          "LHY": 0,
+          "LVY": 0,
+          "LGAY": 0,
+          "LTR": 0.7,
+          "LGAZ": 0,
+          "LXAL": 1,
+          "LYKA": 1,
+          "LVYKA": 1,
+          "LS": 1
+        },
+        "LONGITUDINAL_COEFFICIENTS": {
+          "PCX1": 1.595103902,
+          "PDX1": 1.47292943,
+          "PDX2": -0.0343,
+          "PDX3": 0.962572211,
+          "PEX1": 0.597001,
+          "PEX2": -0.13742,
+          "PEX3": 0.0192147,
+          "PEX4": -0.171248,
+          "PKX1": 45.5,
+          "PKX2": 18,
+          "PKX3": -0.5,
+          "PHX1": 0.000355,
+          "PHX2": 0.00247778,
+          "PVX1": -0.0459406,
+          "PVX2": 0.0133836,
+          "RBX1": 44.80270563,
+          "RBX2": -45.30668558,
+          "RCX1": 1.043860028,
+          "REX1": -0.424758685,
+          "REX2": -0.407234315,
+          "RHX1": -0.005627844
+        },
+        "LATERAL_COEFFICIENTS": {
+          "PCY1": 1.514744564,
+          "PDY1": 1.651542237,
+          "PDY2": -0.357,
+          "PDY3": 5.168898118,
+          "PEY1": -2.452272707,
+          "PEY2": -4.493166758,
+          "PEY3": 0,
+          "PEY4": 0,
+          "PKY1": -21.64681592,
+          "PKY2": 1.959,
+          "PKY3": 0,
+          "PHY1": 0.003052596,
+          "PHY2": -0.000746,
+          "PHY3": 0.033733079,
+          "PVY1": -0.03,
+          "PVY2": 0,
+          "PVY3": -1.632932534,
+          "PVY4": 0.789350596,
+          "RBY1": 17.84366277,
+          "RBY2": 24.24887439,
+          "RBY3": 0.003881303,
+          "RCY1": 1.549828926,
+          "REY1": 1.04721152,
+          "REY2": 0.012724572,
+          "RHY1": 0.014791092,
+          "RHY2": 0.017549372,
+          "RVY1": 0.078671334,
+          "RVY2": 0.072394148,
+          "RVY3": -1.048125489,
+          "RVY4": -0.013187957,
+          "RVY5": 1.941520258,
+          "RVY6": -130
+        },
+        "ALIGNING_COEFFICIENTS": {
+          "QBZ1": 14.10791474,
+          "QBZ2": -0.873078491,
+          "QBZ3": 0.10148022,
+          "QBZ4": -0.005606876,
+          "QBZ5": -0.003058976,
+          "QBZ9": 26.31082801,
+          "QBZ10": 0.004484982,
+          "QCZ1": 1.000414254,
+          "QDZ1": 0.178666743,
+          "QDZ2": 0.0411,
+          "QDZ3": 0.438401734,
+          "QDZ4": -20.34039021,
+          "QDZ6": -0.020246687,
+          "QDZ7": -0.009572296,
+          "QDZ8": -1.5636834585,
+          "QDZ9": -0.288883112,
+          "QEZ1": -5.139831631,
+          "QEZ2": -0.703704805,
+          "QEZ3": 0.0035706,
+          "QEZ4": 0.078645971,
+          "QEZ5": -11.547089,
+          "QHZ1": -0.007713349,
+          "QHZ2": 0.003825159,
+          "QHZ3": 0.195694336,
+          "QHZ4": -0.037889988,
+          "SSZ1": 0.039126908,
+          "SSZ2": 0.001432883,
+          "SSZ3": 0.274205088,
+          "SSZ4": 0.425979371
+        },
+        "rGripFactor": 1
+      },
+      "rear": {
+        "sideDefinition": "Left",
+        "rUnloaded": 0.352777877614942,
+        "vLowSpeed": 1,
+        "radiusEquations": {
+          "name": "Pirelli",
+          "loadedRadius": {
+            "p1": 9.07921692130409,
+            "a1": -0.000153798069036031,
+            "a2": 0.123038455246774,
+            "a3": 115,
+            "c1": -0.46567661494418,
+            "f1": -0.000356888115918561,
+            "b1": -1.39415934937961e-05,
+            "b2": -0.00413808304072278
+          },
+          "rollingRadius": {
+            "A": -0.025,
+            "B": 0.045,
+            "D": 5.5e-07,
+            "E": -1.3e-09,
+            "F": 1.25
+          }
+        },
+        "rollingResistance": {
+          "name": "Canopy equation",
+          "kRollingResistance": 78.96069
+        },
+        "DIMENSION": {
+          "WIDTH": 0.325
+        },
+        "VERTICAL": {
+          "FNOMIN": 4000
+        },
+        "SCALING_COEFFICIENTS": {
+          "LFZ0": 1,
+          "LCX": 0.65,
+          "LMUX": 1.15,
+          "LEX": 0.25,
+          "LKX": 0.6375,
+          "LHX": 0,
+          "LVX": 0,
+          "LGAX": 0,
+          "LCY": 0.85,
+          "LMUY": 0.99,
+          "LEY": 1,
+          "LKY": 1.05,
+          "LHY": 0,
+          "LVY": 0,
+          "LGAY": 0,
+          "LTR": 1,
+          "LGAZ": 0,
+          "LXAL": 1,
+          "LYKA": 0.7125,
+          "LVYKA": 1,
+          "LS": 1
+        },
+        "LONGITUDINAL_COEFFICIENTS": {
+          "PCX1": 1.6031813,
+          "PDX1": 1.569947403,
+          "PDX2": -0.04315,
+          "PDX3": 5.370921415,
+          "PEX1": 0.738587,
+          "PEX2": -0.227979,
+          "PEX3": 0.10435,
+          "PEX4": -0.0901435,
+          "PKX1": 56.5,
+          "PKX2": 22,
+          "PKX3": -0.5,
+          "PHX1": 0.00023,
+          "PHX2": -0.000439,
+          "PVX1": -0.0194872,
+          "PVX2": 0.0360446,
+          "RBX1": 37.581,
+          "RBX2": -30.117,
+          "RCX1": 0.79382,
+          "REX1": -0.234215562,
+          "REX2": -0.409810315,
+          "RHX1": -0.003189203
+        },
+        "LATERAL_COEFFICIENTS": {
+          "PCY1": 1.4815,
+          "PDY1": 1.7253,
+          "PDY2": -0.355,
+          "PDY3": 8.377519547,
+          "PEY1": -0.515375924,
+          "PEY2": 0.020527197,
+          "PEY3": 0,
+          "PEY4": 0,
+          "PKY1": -34.76099781,
+          "PKY2": 2.2794,
+          "PKY3": 0,
+          "PHY1": -0.00026,
+          "PHY2": 0.001479868,
+          "PHY3": 0.248268044,
+          "PVY1": 0,
+          "PVY2": 0,
+          "PVY3": -1.175571182,
+          "PVY4": 0.321420847,
+          "RBY1": 11.61836505,
+          "RBY2": 9.485482273,
+          "RBY3": 0.006285452,
+          "RCY1": 1.312168019,
+          "REY1": 0.350652577,
+          "REY2": 0.388552158,
+          "RHY1": 0.000294,
+          "RHY2": 0.000883,
+          "RVY1": 0.00617713,
+          "RVY2": 0.043384817,
+          "RVY3": -0.889126817,
+          "RVY4": 1.555757056,
+          "RVY5": 1.665283189,
+          "RVY6": -28.52912924
+        },
+        "ALIGNING_COEFFICIENTS": {
+          "QBZ1": 2.751930445,
+          "QBZ2": -1.52567909,
+          "QBZ3": 2.568761467,
+          "QBZ4": 0.255339718,
+          "QBZ5": 0.426021296,
+          "QBZ9": 27.86772288,
+          "QBZ10": 0,
+          "QCZ1": 0.997371254,
+          "QDZ1": 0.159330518,
+          "QDZ2": 0.00348,
+          "QDZ3": 0.752072241,
+          "QDZ4": -34.25740727,
+          "QDZ6": 2.68e-05,
+          "QDZ7": 0.001505546,
+          "QDZ8": -2.452515238,
+          "QDZ9": -0.867866722,
+          "QEZ1": -109,
+          "QEZ2": -6.174358032,
+          "QEZ3": 0,
+          "QEZ4": -0.318468909,
+          "QEZ5": -8.688020985,
+          "QHZ1": -0.005588326,
+          "QHZ2": 0.011592636,
+          "QHZ3": -0.029235046,
+          "QHZ4": -0.000335,
+          "SSZ1": 0.002917867,
+          "SSZ2": 0.023819227,
+          "SSZ3": 1.912664108,
+          "SSZ4": -1.178882994
+        },
+        "rGripFactor": 1
+      },
+      "rGripFactor": 1,
+      "rGripBalanceUserOffset": 0
+    },
+    "aero": {
+      "PolynomialCLiftBodyFDefinition": [
+        {
+          "expression": "Const",
+          "coefficient": 1.329317
+        },
+        {
+          "expression": "hRideR",
+          "coefficient": 32.417
+        },
+        {
+          "expression": "hRideR*hRideR",
+          "coefficient": -762.32
+        },
+        {
+          "expression": "hRideR*hRideR*hRideR",
+          "coefficient": 6200
+        },
+        {
+          "expression": "hRideF",
+          "coefficient": -34.769
+        },
+        {
+          "expression": "hRideF*hRideR",
+          "coefficient": 687.53
+        },
+        {
+          "expression": "hRideF*hRideR*hRideR",
+          "coefficient": -8610
+        },
+        {
+          "expression": "hRideF*hRideF",
+          "coefficient": 669.4
+        },
+        {
+          "expression": "hRideF*hRideF*hRideR",
+          "coefficient": -41500
+        },
+        {
+          "expression": "hRideF*hRideF*hRideR*hRideR",
+          "coefficient": 537000
+        },
+        {
+          "expression": "hRideF*hRideF*hRideF",
+          "coefficient": 166
+        },
+        {
+          "expression": "aFlapF",
+          "coefficient": -0.017745
+        },
+        {
+          "expression": "aFlapF*aFlapF",
+          "coefficient": 0.001179
+        },
+        {
+          "expression": "aFlapR",
+          "coefficient": 0
+        },
+        {
+          "expression": "aFlapR*aFlapR",
+          "coefficient": 0
+        }
+      ],
+      "PolynomialCLiftBodyRDefinition": [
+        {
+          "expression": "Const",
+          "coefficient": 5.628673
+        },
+        {
+          "expression": "hRideR",
+          "coefficient": 67.384
+        },
+        {
+          "expression": "hRideR*hRideR",
+          "coefficient": -1922
+        },
+        {
+          "expression": "hRideR*hRideR*hRideR",
+          "coefficient": 15700
+        },
+        {
+          "expression": "hRideF",
+          "coefficient": -14.238
+        },
+        {
+          "expression": "hRideF*hRideR",
+          "coefficient": 2590.3
+        },
+        {
+          "expression": "hRideF*hRideR*hRideR",
+          "coefficient": -54500
+        },
+        {
+          "expression": "hRideF*hRideF",
+          "coefficient": 1354
+        },
+        {
+          "expression": "hRideF*hRideF*hRideR",
+          "coefficient": -112800
+        },
+        {
+          "expression": "hRideF*hRideF*hRideR*hRideR",
+          "coefficient": 2000000
+        },
+        {
+          "expression": "hRideF*hRideF*hRideF",
+          "coefficient": -9990
+        },
+        {
+          "expression": "aFlapF",
+          "coefficient": -0.250101
+        },
+        {
+          "expression": "aFlapF*aFlapF",
+          "coefficient": 0.003883
+        },
+        {
+          "expression": "aFlapR",
+          "coefficient": 0
+        },
+        {
+          "expression": "aFlapR*aFlapR",
+          "coefficient": 0
+        }
+      ],
+      "PolynomialCDragBodyDefinition": [
+        {
+          "expression": "Const",
+          "coefficient": 2.145258
+        },
+        {
+          "expression": "hRideR",
+          "coefficient": 6.5203
+        },
+        {
+          "expression": "hRideR*hRideR",
+          "coefficient": -222.61
+        },
+        {
+          "expression": "hRideR*hRideR*hRideR",
+          "coefficient": 2450
+        },
+        {
+          "expression": "hRideF",
+          "coefficient": -4.8693
+        },
+        {
+          "expression": "hRideF*hRideR",
+          "coefficient": 159.83
+        },
+        {
+          "expression": "hRideF*hRideR*hRideR",
+          "coefficient": -2440
+        },
+        {
+          "expression": "hRideF*hRideF",
+          "coefficient": 342.81
+        },
+        {
+          "expression": "hRideF*hRideF*hRideR",
+          "coefficient": -9130
+        },
+        {
+          "expression": "hRideF*hRideF*hRideR*hRideR",
+          "coefficient": 123000
+        },
+        {
+          "expression": "hRideF*hRideF*hRideF",
+          "coefficient": -4190
+        },
+        {
+          "expression": "aFlapF",
+          "coefficient": -0.057083
+        },
+        {
+          "expression": "aFlapF*aFlapF",
+          "coefficient": 0.000998
+        },
+        {
+          "expression": "aFlapR",
+          "coefficient": 0
+        },
+        {
+          "expression": "aFlapR*aFlapR",
+          "coefficient": 0
+        }
+      ],
+      "flapAngles": {
+        "aFlapF": 25.5,
+        "aFlapR": 0
+      },
+      "hRideRStallOnset": 0,
+      "hRideRStallComplete": 0,
+      "CLiftBodyFStallLoss": 0,
+      "CLiftBodyRStallLoss": 0,
+      "CDragBodyStallLoss": 0,
+      "coefficientOffsets": {
+        "CLiftBodyFUserOffset": 0,
+        "CLiftBodyRUserOffset": 0,
+        "CDragBodyUserOffset": 0,
+        "CLiftBodyUserOffset": 0,
+        "rAeroBalanceUserOffset": 0
+      },
+      "CDragWheelF": 0,
+      "CDragWheelR": 0,
+      "CLiftWheelF": 0,
+      "CLiftWheelR": 0,
+      "ARef": 1,
+      "DRS": {
+        "CLiftBodyFDRSPolynomial": [
+          {
+            "expression": "Const",
+            "coefficient": 0.09
+          },
+          {
+            "expression": "aFlapR",
+            "coefficient": 0
+          },
+          {
+            "expression": "aFlapR*aFlapR",
+            "coefficient": 0
+          }
+        ],
+        "CLiftBodyRDRSPolynomial": [
+          {
+            "expression": "Const",
+            "coefficient": -0.813
+          },
+          {
+            "expression": "aFlapR",
+            "coefficient": 0
+          },
+          {
+            "expression": "aFlapR*aFlapR",
+            "coefficient": 0
+          }
+        ],
+        "CDragBodyDRSPolynomial": [
+          {
+            "expression": "Const",
+            "coefficient": -0.269
+          },
+          {
+            "expression": "aFlapR",
+            "coefficient": 0
+          },
+          {
+            "expression": "aFlapR*aFlapR",
+            "coefficient": 0
+          }
+        ],
+        "bDRSEnabled": true,
+        "vCarDRSStraightSim": 81.9444444444444
+      },
+      "rCLiftBodyFFactor": 1,
+      "rCLiftBodyRFactor": 1,
+      "rCDragBodyFactor": 1
+    },
+    "brakes": {
+      "front": {
+        "rBrakeDisc": 0.234,
+        "muBrakes": {
+          "name": "Constant mu",
+          "muBrake": 0.45
+        },
+        "ABrakeCaliper": 0.00468098
+      },
+      "rear": {
+        "rBrakeDisc": 0.234,
+        "muBrakes": {
+          "name": "Constant mu",
+          "muBrake": 0.45
+        },
+        "ABrakeCaliper": 0.00468098
+      }
+    },
+    "control": {
+      "rBrakeBalF": 0.6,
+      "rAxleSlipBoundRatioF": 10
+    },
+    "powertrain": {
+      "engine": {
+        "IEngine": 0.05,
+        "MEngineMapData": {
+          "nEngineBasis": [
+            0.10471975511966,
+            52.3598775598299,
+            209.43951023932,
+            314.159265358979,
+            418.879020478639,
+            471.238898038469,
+            497.418836818384,
+            523.598775598299,
+            549.778714378214,
+            575.958653158129,
+            602.138591938044,
+            628.318530717959,
+            680.678408277788,
+            733.038285837618,
+            785.398163397448,
+            837.758040957278,
+            890.117918517108,
+            942.477796076938
+          ],
+          "rThrottleBasis": [
+            0,
+            0.2,
+            0.4,
+            0.6,
+            0.8,
+            1
+          ],
+          "MEngineTable": [
+            [
+              0,
+              14.2475505055865,
+              28.4951010111729,
+              42.7426515167594,
+              56.9902020223459,
+              71.2377525279324
+            ],
+            [
+              0,
+              42.7426515167594,
+              85.4853030335188,
+              128.227954550278,
+              170.970606067038,
+              213.713257583797
+            ],
+            [
+              0,
+              56.9902020223459,
+              113.980404044692,
+              170.970606067038,
+              227.960808089384,
+              284.951010111729
+            ],
+            [
+              0,
+              68.8631607770013,
+              137.726321554003,
+              206.589482331004,
+              275.452643108005,
+              344.315803885006
+            ],
+            [
+              0,
+              83.7043592203205,
+              167.408718440641,
+              251.113077660962,
+              334.817436881282,
+              418.521796101603
+            ],
+            [
+              0,
+              90.8677110022959,
+              181.735422004592,
+              272.603133006888,
+              363.470844009184,
+              454.33855501148
+            ],
+            [
+              0,
+              94.7837044161121,
+              189.567408832224,
+              284.351113248336,
+              379.134817664448,
+              473.918522080561
+            ],
+            [
+              0,
+              99.1629515188818,
+              198.325903037764,
+              297.488854556646,
+              396.651806075527,
+              495.814757594409
+            ],
+            [
+              0,
+              105.567564698536,
+              211.135129397072,
+              316.702694095608,
+              422.270258794144,
+              527.83782349268
+            ],
+            [
+              0,
+              110.871847570746,
+              221.743695141491,
+              332.615542712237,
+              443.487390282983,
+              554.359237853728
+            ],
+            [
+              0,
+              112.989270096477,
+              225.978540192954,
+              338.967810289431,
+              451.957080385908,
+              564.946350482385
+            ],
+            [
+              0,
+              113.505485694506,
+              227.010971389011,
+              340.516457083517,
+              454.021942778022,
+              567.527428472528
+            ],
+            [
+              0,
+              112.884438621185,
+              225.76887724237,
+              338.653315863555,
+              451.537754484741,
+              564.422193105926
+            ],
+            [
+              0,
+              111.741503250957,
+              223.483006501914,
+              335.22450975287,
+              446.966013003827,
+              558.707516254784
+            ],
+            [
+              0,
+              110.371024583277,
+              220.742049166553,
+              331.11307374983,
+              441.484098333106,
+              551.855122916383
+            ],
+            [
+              0,
+              107.747100698498,
+              215.494201396995,
+              323.241302095493,
+              430.988402793991,
+              538.735503492488
+            ],
+            [
+              0,
+              104.258546052645,
+              208.517092105289,
+              312.775638157934,
+              417.034184210578,
+              521.292730263223
+            ],
+            [
+              0,
+              100.524384122749,
+              201.048768245498,
+              301.573152368247,
+              402.097536490996,
+              502.621920613745
+            ]
+          ]
+        },
+        "transmissionConnection": "Rear Axle",
+        "rEnginePowerFactor": 0.95
+      },
+      "rearAxleTransmission": {
+        "IGearBoxOnOutputShaft": 0.02,
+        "IGearBoxOnInputShaft": 0.02,
+        "tShiftDelay": 0.05,
+        "rBevelRatio": [
+          0.31055900621118
+        ],
+        "gearBoxEfficiency": {
+          "name": "Constant gearbox efficiency",
+          "rGearBoxEfficiency": 0.92
+        },
+        "gearboxType": {
+          "name": "CVT",
+          "rGearRatios": [
+            [
+              0.325
+            ],
+            [
+              0.454545454545455
+            ],
+            [
+              0.566666666666667
+            ],
+            [
+              0.7
+            ],
+            [
+              0.827586206896552
+            ],
+            [
+              0.923076923076923
+            ]
+          ]
+        }
+      }
+    }
+  }
+}
