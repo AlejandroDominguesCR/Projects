@@ -188,10 +188,10 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     phi_dd   = (lr*(F_RR + F_RL) - lf*(F_FR + F_FL)) / Iyy
 
     # Masas no suspendidas
-    zFR_dd = (-F_FR + params['ktf']*(ztrack_FR - zFR)) / mHubF
-    zFL_dd = (-F_FL + params['ktf']*(ztrack_FL - zFL)) / mHubF
-    zRL_dd = (-F_RL + params['ktr']*(ztrack_RL - zRL)) / mHubR
-    zRR_dd = (-F_RR + params['ktr']*(ztrack_RR - zRR)) / mHubR
+    zFR_dd = (-F_FR + params['ktf']*(ztrack_FR - zFR) - mHubF*g) / mHubF
+    zFL_dd = (-F_FL + params['ktf']*(ztrack_FL - zFL) - mHubF*g) / mHubF
+    zRL_dd = (-F_RL + params['ktr']*(ztrack_RL - zRL) - mHubR*g) / mHubR
+    zRR_dd = (-F_RR + params['ktr']*(ztrack_RR - zRR) - mHubR*g) / mHubR
 
     return [
         hdot, h_dd,
@@ -242,6 +242,7 @@ def vehicle_model_physical(t, z, params, ztrack_funcs):
     vx = params.get('vx', 0.0)
     ax = params.get('ax', 0.0)
     ay = params.get('ay', 0.0)
+    g = 9.81
 
     # Aerodinámica
     Fz_aero_front, Fz_aero_rear, F_drag = compute_aero_forces(
@@ -305,10 +306,10 @@ def vehicle_model_physical(t, z, params, ztrack_funcs):
     kRR_w = k_effective(kRR, bump_r, xRR, z_RR_free, kinstr, karbr if abs(ay) > 0.3 else 0.0)
     kRL_w = k_effective(kRL, bump_r, xRL, z_RL_free, kinstr, karbr if abs(ay) > 0.3 else 0.0)
 
-    zFR_2dot = (-(kFR_w * xFR) - dFR + params['ktf'] * (ztrack_FR - zFR)) / mHubF
-    zFL_2dot = (-(kFL_w * xFL) - dFL + params['ktf'] * (ztrack_FL - zFL)) / mHubF
-    zRL_2dot = (-(kRL_w * xRL) - dRL + params['ktr'] * (ztrack_RL - zRL)) / mHubR
-    zRR_2dot = (-(kRR_w * xRR) - dRR + params['ktr'] * (ztrack_RR - zRR)) / mHubR
+    zFR_2dot = (-(kFR_w * xFR) - dFR + params['ktf'] * (ztrack_FR - zFR) - mHubF * g) / mHubF
+    zFL_2dot = (-(kFL_w * xFL) - dFL + params['ktf'] * (ztrack_FL - zFL) - mHubF * g) / mHubF
+    zRL_2dot = (-(kRL_w * xRL) - dRL + params['ktr'] * (ztrack_RL - zRL) - mHubR * g) / mHubR
+    zRR_2dot = (-(kRR_w * xRR) - dRR + params['ktr'] * (ztrack_RR - zRR) - mHubR * g) / mHubR
 
     return [
         hdot, h_2dot,

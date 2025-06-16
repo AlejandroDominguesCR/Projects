@@ -95,10 +95,10 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    stroke_FL = 0.01965
-    stroke_FR = 0.01965
-    stroke_RL = 0.0305
-    stroke_RR = 0.0305
+    stroke_FL = 0.029 #0.01965
+    stroke_FR = 0.029 #0.01965
+    stroke_RL = 0.059 #0.0305
+    stroke_RR = 0.059 #0.0305
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
