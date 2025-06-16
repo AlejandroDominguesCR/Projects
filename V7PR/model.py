@@ -79,9 +79,11 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         x_clipped = np.clip(x_raw, z_top, z_bot)
         # Bumpstop (compresión más allá del gap)
         compression = x_raw - gap
-        k_bump = bump(compression) / compression      # solo si compression > 0
-        f_bump = bump(np.maximum(0, compression))
-        # Resortes en serie: resorte + instalación
+        if compression > 0:
+            k_bump = bump(compression) / compression
+        else:
+            k_bump = 0.0
+        # Resortes en serie: muelle + bumpstop con la compliancia de instalación
         k_total = 1 / (1/(k_spring + k_bump) + 1/k_inst)
         f_spring = k_total * x_clipped
         # Amortiguador: velocidad relativa resorte-carrocería
@@ -89,7 +91,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         f_damper = damper(rel_vel)
         # Tope blando como respaldo
         f_stop = tope_fuerza(x_raw, z_top, z_bot)
-        return f_spring + f_bump + f_damper + f_stop
+        return f_spring + f_damper + f_stop
 
     # Cálculo de offsets estáticos y dinámicos
     phi_off_front = -lf * phi
@@ -306,10 +308,21 @@ def compute_static_equilibrium(params, vx=0.0):
         params['x_static_RR'] = x_RR
 
         # Rigidez efectiva muelle + bumpstop + rigidez instalación
-        kFR_eff = 1 / (1 / (kFR + bumpstop_front(x_FR - z_FR_free)) + 1 / kinstf)
-        kFL_eff = 1 / (1 / (kFL + bumpstop_front(x_FL - z_FL_free)) + 1 / kinstf)
-        kRR_eff = 1 / (1 / (kRR + bumpstop_rear(x_RR - z_RR_free)) + 1 / kinstr)
-        kRL_eff = 1 / (1 / (kRL + bumpstop_rear(x_RL - z_RL_free)) + 1 / kinstr)
+        comp_FR = x_FR - z_FR_free
+        k_bump_FR = bumpstop_front(comp_FR) / comp_FR if comp_FR > 0 else 0.0
+        kFR_eff = 1 / (1 / (kFR + k_bump_FR) + 1 / kinstf)
+
+        comp_FL = x_FL - z_FL_free
+        k_bump_FL = bumpstop_front(comp_FL) / comp_FL if comp_FL > 0 else 0.0
+        kFL_eff = 1 / (1 / (kFL + k_bump_FL) + 1 / kinstf)
+
+        comp_RR = x_RR - z_RR_free
+        k_bump_RR = bumpstop_rear(comp_RR) / comp_RR if comp_RR > 0 else 0.0
+        kRR_eff = 1 / (1 / (kRR + k_bump_RR) + 1 / kinstr)
+
+        comp_RL = x_RL - z_RL_free
+        k_bump_RL = bumpstop_rear(comp_RL) / comp_RL if comp_RL > 0 else 0.0
+        kRL_eff = 1 / (1 / (kRL + k_bump_RL) + 1 / kinstr)
 
         # Fuerzas suspensión
         F_FR = kFR_eff * x_FR
@@ -390,17 +403,12 @@ def compute_static_equilibrium(params, vx=0.0):
 
         # margen respecto a la carrera del amortiguador
         margen_ext  = topout - x_static
-        margen_comp = x_static    - bottomout
 
         # margen hasta el bump-stop: gap libre antes de que x_raw supere gap
         # x_raw = x_static - topout  → compresión real desde topout
-        x_raw       = x_static - topout
-        margen_bump = gap - x_raw
 
         print(f"[INFO] Márgenes {corner}: "
-            f"extensión = {margen_ext*1000:.2f} mm, "
-            f"compresión (tope amort.) = {margen_comp*1000:.2f} mm, "
-            f"hasta bumpstop = {margen_bump*1000:.2f} mm")
+            f"extensión = {margen_ext*1000:.2f} mm, ")
 
     return sol
 

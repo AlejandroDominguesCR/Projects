@@ -400,7 +400,7 @@ def prepare_simple_params(params, global_setup):
         'aero_CdA': CdA_interp,
         'tire_front': tire_front,
         'tire_rear': tire_rear,
-        'aero_polynomials': global_setup['aero_polynomials'],
+        'aero_polynomials': global_setup['aero_polynomials_flat'],
         'gap_bumpstop_FL': global_setup['gap_bumpstop_FL'],
         'gap_bumpstop_FR': global_setup['gap_bumpstop_FR'],
         'gap_bumpstop_RL': global_setup['gap_bumpstop_RL'],
