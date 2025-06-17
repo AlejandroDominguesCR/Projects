@@ -307,10 +307,23 @@ def compute_static_equilibrium(params, vx=0.0):
         kRL_eff = 1 / (1 / (kRL + bumpstop_rear(x_RL - z_RL_free)) + 1 / kinstr)
 
         # Fuerzas suspensión
+        # Fuerzas suspensión
         F_FR = kFR_eff * x_FR
         F_FL = kFL_eff * x_FL
         F_RR = kRR_eff * x_RR
         F_RL = kRL_eff * x_RL
+
+        # --- Fuerzas de la antirollbar ---
+        if k_arb_f != 0.0:
+            T_arb_f = k_arb_f * (x_FL - x_FR)
+            lever_f = tf / 2.0
+            F_FL += T_arb_f / lever_f
+            F_FR += -T_arb_f / lever_f
+        if k_arb_r != 0.0:
+            T_arb_r = k_arb_r * (x_RL - x_RR)
+            lever_r = tr / 2.0
+            F_RL += T_arb_r / lever_r
+            F_RR += -T_arb_r / lever_r
 
         # --- Añadir fuerzas aerodinámicas si hay velocidad ---
         Fz_aero_front, Fz_aero_rear, _ = compute_aero_forces(
@@ -702,8 +715,25 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     for i in range(n_corners):
         f_damper[i] = damper_funcs[i](v_damper[i])
 
+    # --- Fuerzas de la antirollbar ---
+    k_arb_f = params.get('k_arb_f', 0.0)
+    k_arb_r = params.get('k_arb_r', 0.0)
+    f_arb = np.zeros_like(x_spring)
+    arb_torque_front = np.zeros(N)
+    arb_torque_rear  = np.zeros(N)
+    if k_arb_f != 0.0:
+        arb_torque_front = k_arb_f * (x_spring[0] - x_spring[1])
+        lever_f = track_f / 2.0
+        f_arb[0] += arb_torque_front / lever_f
+        f_arb[1] += -arb_torque_front / lever_f
+    if k_arb_r != 0.0:
+        arb_torque_rear = k_arb_r * (x_spring[2] - x_spring[3])
+        lever_r = track_r / 2.0
+        f_arb[2] += arb_torque_rear / lever_r
+        f_arb[3] += -arb_torque_rear / lever_r
+
         # 4d) Fuerza neta en rueda (nunca negativa)
-    f_wheel = (f_spring + f_bump + f_damper)/ 9.81    # (4, N)
+    f_wheel = (f_spring + f_bump + f_damper + f_arb)/ 9.81    # (4, N)
     f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
 
     static_per_wheel = (np.array([Wf/2, Wf/2, Wr/2, Wr/2])[:,None] / 9.81)
@@ -912,6 +942,9 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         'f_spring':           f_spring,               # (4, N)
         'f_damper':           f_damper,               # (4, N)
         'f_bump':             f_bump,                 # (4, N)
+        'f_arb':              f_arb,                  # (4, N)
+        'arb_torque_front':   arb_torque_front,       # (N,)
+        'arb_torque_rear':    arb_torque_rear,   
 
         # --- Fuerza de neumático ---
         'f_tire':             f_tire,                 # (4, N)

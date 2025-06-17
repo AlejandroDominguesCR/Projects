@@ -146,6 +146,13 @@ def launch_dash(sol, post, setup_name="Setup"):
             style={'height': '300px'},
             config={'displayModeBar': False}
         ))
+        if "arb_torque_front" in post:
+            fig_arb = go.Figure([
+                go.Scatter(x=distance, y=post["arb_torque_front"], name="Front ARB"),
+                go.Scatter(x=distance, y=post["arb_torque_rear"],  name="Rear ARB")
+            ])
+            fig_arb.update_layout(title="Anti-roll Bar Torque [Nm]", xaxis_title="Distance [m]", yaxis_title="Torque [Nm]")
+            graphs.append(dcc.Graph(figure=fig_arb))
 
         # === Ride Height RMS en zonas grip-limited ===
         if 'grip_limited_lateral_mask' in post:
@@ -234,49 +241,6 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # --- KPIs PERSONALIZADOS: Road Noise, Pitch vs Distance, Pitch RMS, Ride Height RMS, Scatter, etc. ---
 
-    # ─── 1) Road‐Noise: wheel vertical‐speed RMS [mm/s] ──────────────────────────
-    try:
-        front_noise_vals, rear_noise_vals = [], []
-        track_labels = [k['track_name'] for k in kpi_data]
-
-        for k in kpi_data:
-            try:
-                lap_time = float(k.get('lap_time', 1.0))    # [s]
-                zt = k.get('zt_hp', k['zt'])                # [FL, FR, RL, RR] en metros
-                n_samples = len(zt[0])
-                if n_samples < 2:
-                    raise ValueError("zt demasiado corto")
-
-                # Δt = lap_time / (n_samples - 1)
-                dt = lap_time / (n_samples - 1)
-
-                # velocidad vertical (mm/s) y RMS por rueda
-                v_mm_s = [np.gradient(z, dt) * 1000 for z in zt]  # 4 listas
-                rms_vals = [np.sqrt(np.mean(v**2)) for v in v_mm_s]
-
-                # promedio por eje
-                front_noise_vals.append(0.5 * (rms_vals[0] + rms_vals[1]))
-                rear_noise_vals .append(0.5 * (rms_vals[2] + rms_vals[3]))
-            except Exception as inner_e:
-                print(f"[WARN] Road-noise: {inner_e}")
-                front_noise_vals.append(np.nan)
-                rear_noise_vals .append(np.nan)
-
-        fig_road_noise = go.Figure()
-        fig_road_noise.add_trace(go.Bar(name="Front Axle", x=track_labels, y=front_noise_vals))
-        fig_road_noise.add_trace(go.Bar(name="Rear  Axle", x=track_labels, y=rear_noise_vals))
-
-        fig_road_noise.update_layout(
-            title="Qual-Derived Road Noise (Wheel-Speed RMS)",
-            xaxis_title="Track",
-            yaxis_title="RMS [mm/s]",
-            barmode="group"
-        )
-        layout.append(dcc.Graph(figure=fig_road_noise))
-
-    except Exception as e:
-        print(f"[ERROR] Fallo en el gráfico de Road Noise: {e}")
-
     # ── 2) Accumulated Road‐Noise Normalised by Lap Time ─────────────────────────
     try:
         noise_by_track = {}
@@ -316,26 +280,6 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     except KeyError:
         print("[DEBUG] No se encontró 'tracknoise_accu_*' en algún KPI")
-
-    # ── 3) Pitch vs Distance [°] (serie temporal) ───────────────────────────────
-    try:
-        fig_pitch_vs_distance = go.Figure()
-        for kpi, name in zip(kpi_data, setup_names):
-            if 'pitch_deg' in kpi and 'distance' in kpi:
-                fig_pitch_vs_distance.add_trace(go.Scatter(
-                    x=kpi['distance'],
-                    y=kpi['pitch_deg'],
-                    mode='lines',
-                    name=name
-                ))
-        fig_pitch_vs_distance.update_layout(
-            title="Pitch vs Distance [°]",
-            xaxis_title="Distance [m]",
-            yaxis_title="Pitch [°]"
-        )
-        layout.append(dcc.Graph(figure=fig_pitch_vs_distance))
-    except Exception as e:
-        print(f"[DEBUG] Error en Pitch vs Distance: {e}")
 
     # ── 4) Tabla de Pitch RMS por Setup ──────────────────────────────────────────
     try:
@@ -555,27 +499,6 @@ def launch_dash_kpis(kpi_data, setup_names):
     except Exception as e:
         print(f"[WARNING] Error al generar el PSD de heave por eje: {e}")
 
-    # ── 11) PSD Heave por setup (solo chasis, mm²/Hz) ───────────────────────────
-    try:
-        fig_psd = go.Figure()
-        for k, name in zip(kpi_data, setup_names):
-            if 'f_psd' in k and 'psd_heave' in k:
-                fig_psd.add_trace(go.Scatter(
-                    x=k['f_psd'],
-                    y=np.array(k['psd_heave']) * 1e6,  # m²/Hz → mm²/Hz
-                    mode='lines',
-                    name=name
-                ))
-        fig_psd.update_layout(
-            title="Power Spectrum Density of Heave Motion",
-            xaxis_title="Frequency (Hz)",
-            yaxis_title="PSD Heave (mm²/Hz)",
-            yaxis_type="log"
-        )
-        layout.append(dcc.Graph(figure=fig_psd))
-    except Exception as e:
-        print(f"[WARNING] Error al generar el PSD de heave: {e}")
-
     # ── 12) PSD Pitch por eje (Front vs Rear, mm²/Hz) ──────────────────────────
     try:
         fig_psd_pitch_axes = go.Figure()
@@ -609,26 +532,6 @@ def launch_dash_kpis(kpi_data, setup_names):
     except Exception as e:
         print(f"[WARNING] Error al generar el PSD de pitch por eje: {e}")
 
-    # ── 13) PSD Pitch por setup (rad²/Hz) ───────────────────────────────────────
-    try:
-        fig_psd_pitch = go.Figure()
-        for k, name in zip(kpi_data, setup_names):
-            if 'f_psd_pitch' in k and 'psd_pitch' in k:
-                fig_psd_pitch.add_trace(go.Scatter(
-                    x=k['f_psd_pitch'],
-                    y=np.array(k['psd_pitch']),  # en rad²/Hz
-                    mode='lines',
-                    name=name
-                ))
-        fig_psd_pitch.update_layout(
-            title="Power Spectrum Density of Pitch Motion",
-            xaxis_title="Frequency (Hz)",
-            yaxis_title="PSD Pitch (rad²/Hz)",
-            yaxis_type="log"
-        )
-        layout.append(dcc.Graph(figure=fig_psd_pitch))
-    except Exception as e:
-        print(f"[WARNING] Error al generar el PSD de pitch: {e}")
 
     # 14a) Magnitud (dB) con smoothing
     fig_psd_load_mag = go.Figure()
@@ -694,34 +597,6 @@ def launch_dash_kpis(kpi_data, setup_names):
     )
     layout.append(dcc.Graph(figure=fig_psd_load_phase))
 
-    # 14c) PSD de Fuerza del Damper – Magnitud (dB) FL y RL con suavizado
-    fig_psd_damper_mag = go.Figure()
-    for k, name in zip(kpi_data, setup_names):
-        if 'f_psd_damper' in k and 'psd_damper_mag_FL' in k and 'psd_damper_mag_RL' in k:
-            f_damp = np.array(k['f_psd_damper'])
-            mag_FL = smooth_signal(np.array(k['psd_damper_mag_FL']), window=51, polyorder=3)
-            mag_RL = smooth_signal(np.array(k['psd_damper_mag_RL']), window=51, polyorder=3)
-            fig_psd_damper_mag.add_trace(go.Scatter(
-                x=f_damp,
-                y=mag_FL,
-                mode='lines',
-                name=f"{name} – Damper FL [dB] (suavizado)"
-            ))
-            fig_psd_damper_mag.add_trace(go.Scatter(
-                x=f_damp,
-                y=mag_RL,
-                mode='lines',
-                name=f"{name} – Damper RL [dB] (suavizado)"
-            ))
-    fig_psd_damper_mag.update_layout(
-        title="PSD de Fuerza del Damper – Magnitud (FL vs RL, Suavizado)",
-        xaxis=dict(title="Frecuencia [Hz]", type="log"),
-        yaxis=dict(title="Magnitud [dB]"),
-        legend=dict(x=0.01, y=0.99)
-    )
-    layout.append(dcc.Graph(figure=fig_psd_damper_mag))
-
-
     # ────────────────────────────────────────────────────────────────────────────
     app_kpi.layout = html.Div(layout)
     app_kpi.run(port=8051, debug=False)
@@ -738,24 +613,7 @@ def get_results_figures(sol, post):
     fig_travel.update_layout(title="Suspension Travel [mm]", xaxis_title="Time [s]", yaxis_title="Travel [mm]")
     figures.append(fig_travel)
 
-    """
-    # Spring
-    fig_spring = go.Figure()
-    fig_spring.add_trace(go.Scatter(x=distance, y=np.mean(post['f_spring'][0:2], axis=0), name="Spring Front"))
-    fig_spring.add_trace(go.Scatter(x=distance, y=np.mean(post['f_spring'][2:4], axis=0), name="Spring Rear"))
-    fig_spring.update_layout(title="Spring Force [N]", xaxis_title="Time [s]", yaxis_title="Force [N]")
-    figures.append(fig_spring)
-    """
-
-    """
-    # Damper
-    fig_damper = go.Figure()
-    fig_damper.add_trace(go.Scatter(x=distance, y=np.mean(post['f_damper'][0:2], axis=0), name="Damper Front"))
-    fig_damper.add_trace(go.Scatter(x=distance, y=np.mean(post['f_damper'][2:4], axis=0), name="Damper Rear"))
-    fig_damper.update_layout(title="Damper Force [N]", xaxis_title="Time [s]", yaxis_title="Force [N]")
-    figures.append(fig_damper)
-    """
-
+    # Heave
     fig_heave = go.Figure()
     fig_heave.add_trace(go.Scatter(x=distance, y=sol.y[0]*1000, name="Heave"))
     fig_heave.update_layout(title="Heave [mm]", xaxis_title="Time [s]", yaxis_title="Heave [mm]")
