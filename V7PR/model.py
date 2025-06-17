@@ -188,10 +188,10 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     phi_dd   = (lr*(F_RR + F_RL) - lf*(F_FR + F_FL)) / Iyy
 
     # Masas no suspendidas
-    zFR_dd = (-F_FR + params['ktf']*(ztrack_FR - zFR) - mHubF*g) / mHubF
-    zFL_dd = (-F_FL + params['ktf']*(ztrack_FL - zFL) - mHubF*g) / mHubF
-    zRL_dd = (-F_RL + params['ktr']*(ztrack_RL - zRL) - mHubR*g) / mHubR
-    zRR_dd = (-F_RR + params['ktr']*(ztrack_RR - zRR) - mHubR*g) / mHubR
+    zFR_dd = (-F_FR + params['ktf']*(ztrack_FR - zFR)) / mHubF
+    zFL_dd = (-F_FL + params['ktf']*(ztrack_FL - zFL)) / mHubF
+    zRL_dd = (-F_RL + params['ktr']*(ztrack_RL - zRL)) / mHubR
+    zRR_dd = (-F_RR + params['ktr']*(ztrack_RR - zRR)) / mHubR
 
     return [
         hdot, h_dd,
@@ -204,122 +204,6 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     ]
 
 from scipy.optimize import fsolve
-
-def vehicle_model_physical(t, z, params, ztrack_funcs):
-    """Modelo 7DOF con ecuaciones extraidas del proyecto Virtual 7-Post Rig."""
-
-    ztrack_FL, ztrack_FR, ztrack_RL, ztrack_RR = [f(t) for f in ztrack_funcs]
-
-    h, hdot, phi, phi_dot, theta, theta_dot, zFR, zFRdot, zFL, zFLdot, zRL, zRLdot, zRR, zRRdot = z
-
-    Ms = params['ms']
-    Ixx = params['Ixx']
-    Iyy = params['Iyy']
-    lf = params['lf']
-    lr = params['lr']
-    tF = params['tf']
-    tR = params['tr']
-    mHubF = params['mHubF']
-    mHubR = params['mHubR']
-    kFL = params['kFL']
-    kFR = params['kFR']
-    kRL = params['kRL']
-    kRR = params['kRR']
-    kinstf = params['kinstf']
-    kinstr = params['kinstr']
-    karbf = params['k_arb_f']
-    karbr = params['k_arb_r']
-    bump_f = params['bumpstop_front']
-    bump_r = params['bumpstop_rear']
-    damper_f = params['damper_front']
-    damper_r = params['damper_rear']
-    z_FL_free = params['z_FL_free']
-    z_FR_free = params['z_FR_free']
-    z_RL_free = params['z_RL_free']
-    z_RR_free = params['z_RR_free']
-    zCoG = params.get('zCoG', 0.3)
-
-    vx = params.get('vx', 0.0)
-    ax = params.get('ax', 0.0)
-    ay = params.get('ay', 0.0)
-    g = 9.81
-
-    # Aerodinámica
-    Fz_aero_front, Fz_aero_rear, F_drag = compute_aero_forces(
-        vx=vx,
-        hRideF=h - lf * phi + params.get('hRideF', 0.02),
-        hRideR=h + lr * phi + params.get('hRideR', 0.04),
-        aero_poly=params.get('aero_polynomials', {})
-    )
-
-    def k_effective(k, bump_func, x, gap, k_inst, k_arb=0.0):
-        bump = bump_func(x - gap)
-        slope = bump / (x - gap) if (x - gap) != 0 else 0.0
-        return 1.0 / (1.0 / (k + slope + k_arb) + 1.0 / k_inst)
-
-    # Desplazamientos relativos
-    xFR = zFR - (-lf * phi - (tF / 2) * theta + h)
-    xFL = zFL - (-lf * phi + (tF / 2) * theta + h)
-    xRR = zRR - (lr * phi - (tR / 2) * theta + h)
-    xRL = zRL - (lr * phi + (tR / 2) * theta + h)
-
-    # Rigideces efectivas
-    kFR_eff = k_effective(kFR, bump_f, xFR, z_FR_free, kinstf)
-    kFL_eff = k_effective(kFL, bump_f, xFL, z_FL_free, kinstf)
-    kRR_eff = k_effective(kRR, bump_r, xRR, z_RR_free, kinstr)
-    kRL_eff = k_effective(kRL, bump_r, xRL, z_RL_free, kinstr)
-
-    # Amortiguadores
-    dFR = damper_f(zFRdot - (-lf * phi_dot - (tF / 2) * theta_dot + hdot))
-    dFL = damper_f(zFLdot - (-lf * phi_dot + (tF / 2) * theta_dot + hdot))
-    dRR = damper_r(zRRdot - (lr * phi_dot - (tR / 2) * theta_dot + hdot))
-    dRL = damper_r(zRLdot - (lr * phi_dot + (tR / 2) * theta_dot + hdot))
-
-    # --- Ecuaciones de la masa suspendida ---
-    h_2dot = (
-        kFR_eff * xFR + kFL_eff * xFL + kRL_eff * xRL + kRR_eff * xRR
-        + dFR + dFL + dRL + dRR
-        + Fz_aero_front + Fz_aero_rear
-    ) / Ms
-
-    theta_2dot = (
-        (tF / 2) * (kFL_eff + (karbf if abs(ay) > 0.3 else 0.0)) * xFL
-        - (tF / 2) * (kFR_eff + (karbf if abs(ay) > 0.3 else 0.0)) * xFR
-        + (tR / 2) * (kRL_eff + (karbr if abs(ay) > 0.3 else 0.0)) * xRL
-        - (tR / 2) * (kRR_eff + (karbr if abs(ay) > 0.3 else 0.0)) * xRR
-        + (tF / 2) * (dFL - dFR)
-        + (tR / 2) * (dRL - dRR)
-        + ay * 9.81 * Ms * (h - zCoG)
-    ) / Ixx
-
-    phi_2dot = (
-        lr * (kRR_eff * xRR + dRR + kRL_eff * xRL + dRL)
-        - lf * (kFR_eff * xFR + dFR + kFL_eff * xFL + dFL)
-        - ax * 9.81 * Ms * (h - zCoG)
-        + lf * Fz_aero_front - lr * Fz_aero_rear
-        - (h - zCoG) * F_drag
-    ) / Iyy
-
-    # --- Masas no suspendidas ---
-    kFR_w = k_effective(kFR, bump_f, xFR, z_FR_free, kinstf, karbf if abs(ay) > 0.3 else 0.0)
-    kFL_w = k_effective(kFL, bump_f, xFL, z_FL_free, kinstf, karbf if abs(ay) > 0.3 else 0.0)
-    kRR_w = k_effective(kRR, bump_r, xRR, z_RR_free, kinstr, karbr if abs(ay) > 0.3 else 0.0)
-    kRL_w = k_effective(kRL, bump_r, xRL, z_RL_free, kinstr, karbr if abs(ay) > 0.3 else 0.0)
-
-    zFR_2dot = (-(kFR_w * xFR) - dFR + params['ktf'] * (ztrack_FR - zFR) - mHubF * g) / mHubF
-    zFL_2dot = (-(kFL_w * xFL) - dFL + params['ktf'] * (ztrack_FL - zFL) - mHubF * g) / mHubF
-    zRL_2dot = (-(kRL_w * xRL) - dRL + params['ktr'] * (ztrack_RL - zRL) - mHubR * g) / mHubR
-    zRR_2dot = (-(kRR_w * xRR) - dRR + params['ktr'] * (ztrack_RR - zRR) - mHubR * g) / mHubR
-
-    return [
-        hdot, h_2dot,
-        phi_dot, phi_2dot,
-        theta_dot, theta_2dot,
-        zFRdot, zFR_2dot,
-        zFLdot, zFL_2dot,
-        zRLdot, zRL_2dot,
-        zRRdot, zRR_2dot
-    ]
 
 def compute_aero_forces(vx, hRideF, hRideR, aero_poly, rho_air=1.225, area_ref=1):
     """
@@ -358,11 +242,11 @@ def compute_static_equilibrium(params, vx=0.0):
     Resuelve el equilibrio estático: encuentra h, phi, theta y las posiciones de las masas no suspendidas
     de forma que las fuerzas verticales y los momentos se equilibren.
     """
+
+    h0_est = estimate_h0_from_static_travel(params, phi=0.0, theta=0.0)
     # Constantes
     g = 9.81
     Ms = params['ms']
-    Ixx = params['Ixx']
-    Iyy = params['Iyy']
     lf = params['lf']
     lr = params['lr']
     hRideF = params.get('hRideF', 0.02)
@@ -384,8 +268,6 @@ def compute_static_equilibrium(params, vx=0.0):
 
     bumpstop_front = params['bumpstop_front']
     bumpstop_rear = params['bumpstop_rear']
-    damper_front = params['damper_front']
-    damper_rear = params['damper_rear']
 
     z_FL_free = params['z_FL_free']
     z_FR_free = params['z_FR_free']
@@ -461,7 +343,7 @@ def compute_static_equilibrium(params, vx=0.0):
         return [R1, R2, R3, R4, R5, R6, R7]
 
     # Heave inicial como media de ambos ride heights
-    h_init = (lr * hRideF + lf * hRideR) / (lf + lr)
+    h_init = h0_est #(lr * hRideF + lf * hRideR) / (lf + lr)
 
     # Pitch inicial derivado de la diferencia entre ambos
     phi_init = (hRideR - hRideF) / (lf + lr)
@@ -477,8 +359,11 @@ def compute_static_equilibrium(params, vx=0.0):
     kf_eff = 1 / (1 / params['kFL'] + 1 / params['kinstf'])
     kr_eff = 1 / (1 / params['kRL'] + 1 / params['kinstr'])
 
-    Wf = W * lf / (lf + lr)
-    Wr = W - Wf
+    # Estimación inicial masas no suspendidas
+    W   = Ms*g  
+    wbal_f = params['rWeightBalF']
+    Wf     = W * wbal_f
+    Wr     = W * (1.0 - wbal_f)
 
     # Travel + z_free + altura sobre suelo (z_ui)
     zFR0 = Wf / (2 * kf_eff) + params['z_FR_free']
@@ -495,22 +380,12 @@ def compute_static_equilibrium(params, vx=0.0):
     for corner in ['FL','FR','RL','RR']:
         x_static = params[f'x_static_{corner}']
         topout   = params[f'z_topout_{corner}']
-        bottomout= params[f'z_bottomout_{corner}']
-        gap      = params[f'gap_bumpstop_{corner}']
 
         # margen respecto a la carrera del amortiguador
-        margen_ext  = bottomout - x_static
-        margen_comp = x_static    - topout
-
-        # margen hasta el bump-stop: gap libre antes de que x_raw supere gap
-        # x_raw = x_static - topout  → compresión real desde topout
-        x_raw       = x_static - topout
-        margen_bump = gap - x_raw
+        margen_ext  = topout - x_static
 
         print(f"[INFO] Márgenes {corner}: "
-            f"extensión = {margen_ext*1000:.2f} mm, "
-            f"compresión (tope amort.) = {margen_comp*1000:.2f} mm, "
-            f"hasta bumpstop = {margen_bump*1000:.2f} mm")
+            f"extensión = {margen_ext*1000:.2f} mm, ")
 
     return sol
 
@@ -569,50 +444,6 @@ def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, throttle, brake, param
         params['ax'] = float(ax_func(t))
         params['ay'] = float(ay_func(t))
         return vehicle_model_simple(t, y, params, ztrack_funcs)
-
-    sol = solve_ivp(rhs, (t_vec[0], t_vec[-1]), y0, t_eval=t_vec, method='RK45', max_step=0.001)
-
-    return sol
-
-def run_vehicle_model_physical(t_vec, z_tracks, vx, ax, ay, throttle, brake, params):
-    ztrack_funcs = [interp1d(t_vec, z_tracks[i], bounds_error=False, fill_value="extrapolate") for i in range(4)]
-
-    vx_func = interp1d(t_vec, vx, bounds_error=False, fill_value="extrapolate")
-    ax_func = interp1d(t_vec, ax, bounds_error=False, fill_value="extrapolate")
-    ay_func = interp1d(t_vec, ay, bounds_error=False, fill_value="extrapolate")
-    throttle_func = interp1d(t_vec, throttle, bounds_error=False, fill_value="extrapolate")
-    brake_func = interp1d(t_vec, brake, bounds_error=False, fill_value="extrapolate")
-    vx0 = float(vx_func(t_vec[0]))
-
-    h0, phi0, theta0, zFR0, zFL0, zRL0, zRR0 = compute_static_equilibrium(params, vx0)
-
-    x_FL_static = zFL0 - (-params['lf'] * phi0 + (params['tf'] / 2) * theta0 + h0)
-    x_FR_static = zFR0 - (-params['lf'] * phi0 - (params['tf'] / 2) * theta0 + h0)
-    x_RL_static = zRL0 - ( params['lr'] * phi0 + (params['tr'] / 2) * theta0 + h0)
-    x_RR_static = zRR0 - ( params['lr'] * phi0 - (params['tr'] / 2) * theta0 + h0)
-
-    params.update({
-        'x_FL_static': x_FL_static,
-        'x_FR_static': x_FR_static,
-        'x_RL_static': x_RL_static,
-        'x_RR_static': x_RR_static,
-        'z_topout_FL': x_FL_static - params['stroke_FL'] / 2,
-        'z_bottomout_FL': x_FL_static + params['stroke_FL'] / 2,
-        'z_topout_FR': x_FR_static - params['stroke_FR'] / 2,
-        'z_bottomout_FR': x_FR_static + params['stroke_FR'] / 2,
-        'z_topout_RL': x_RL_static - params['stroke_RL'] / 2,
-        'z_bottomout_RL': x_RL_static + params['stroke_RL'] / 2,
-        'z_topout_RR': x_RR_static - params['stroke_RR'] / 2,
-        'z_bottomout_RR': x_RR_static + params['stroke_RR'] / 2,
-    })
-
-    y0 = [h0, 0.0, phi0, 0.0, theta0, 0.0, zFR0, 0.0, zFL0, 0.0, zRL0, 0.0, zRR0, 0.0]
-
-    def rhs(t, y):
-        params['vx'] = float(vx_func(t))
-        params['ax'] = float(ax_func(t))
-        params['ay'] = float(ay_func(t))
-        return vehicle_model_physical(t, y, params, ztrack_funcs)
 
     sol = solve_ivp(rhs, (t_vec[0], t_vec[-1]), y0, t_eval=t_vec, method='RK45', max_step=0.001)
 
@@ -692,8 +523,8 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     """
 
     import numpy as np
-    import random
     from scipy.signal import welch
+    from model import compute_aero_forces
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 1) Parámetros y configuraciones iniciales
@@ -703,7 +534,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     N   = len(t)
     dt  = np.mean(np.diff(t))
     fs  = 1.0 / dt
-    nperseg = 1024
+    nperseg = 2048
     noverlap = nperseg // 2
 
     # Dimensiones del vehículo (en metros)
@@ -751,7 +582,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
 
     # Travel absoluto (“unsprung” – “chassis”) en cada esquina
     x_spring   = zu - zs                # shape: (4, N)
-    travel_abs = x_spring.copy()
 
     # Límites física de recorrido (stop extension/compression)
     z_topout    = np.array([
@@ -770,100 +600,115 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         params['gap_bumpstop_FL'], params['gap_bumpstop_FR'],
         params['gap_bumpstop_RL'], params['gap_bumpstop_RR']
     ])
+    hub_mass = np.array([
+        params['mHubF'], params['mHubF'],
+        params['mHubR'], params['mHubR']
+    ])[:, None]  # shape (4,1)
+    zt = np.stack(
+        [np.interp(t, t_vec, z_tracks[i]) for i in range(n_corners)],
+        axis=0
+    )  # (4, N)
 
-    # Márgenes dinámicos en cada instante (extensión/compresión)
-    margen_ext = x_spring - z_topout[:, None]
-    margen_comp = z_bottomout[:, None] - x_spring
+    ae_front = np.zeros_like(h)
+    ae_rear  = np.zeros_like(h)
+    for i, (v_i, h_i, phi_i) in enumerate(zip(vx, h, phi)):
+        dyn_hF = h_i - lf * phi_i + params.get('hRideF', 0.0)
+        dyn_hR = h_i + lr * phi_i + params.get('hRideR', 0.0)
+        Ff, Fr, _ = compute_aero_forces(
+            vx=v_i,
+            hRideF=dyn_hF,
+            hRideR=dyn_hR,
+            aero_poly=params.get('aero_polynomials', {})
+        )
+        ae_front[i] = Ff
+        ae_rear[i]  = Fr
 
-    # Travel estático en RL y RR (primera muestra)
-    xRL_static = x_spring[2, 0]
-    xRR_static = x_spring[3, 0]
+    # peso estático
+    g    = 9.81
+    Wtot = params['ms'] * g
+    Wf   = Wtot * params['rWeightBalF']
+    Wr   = Wtot - Wf
+    static = np.array([Wf/2, Wf/2, Wr/2, Wr/2])[:,None]  # (4,1)
 
-    # Cálculo de márgenes estáticos traseros
-    z_free_RL = params['z_RL_free']
-    z_free_RR = params['z_RR_free']
-    margen_ext_static_RL = xRL_static - params['z_topout_RL']
-    margen_comp_static_RL = z_free_RL - (xRL_static - params['z_topout_RL'])
-    margen_ext_static_RR = xRR_static - params['z_topout_RR']
-    margen_comp_static_RR = z_free_RR - (xRR_static - params['z_topout_RR'])
+    aero = np.vstack([
+        -0.5 * ae_front,
+        -0.5 * ae_front,
+        -0.5 * ae_rear,
+        -0.5 * ae_rear,
+    ])  # (4, N)
 
-    # Mensajes informativos
-    print(f"[INFO] Travel estático trasero: RL = {xRL_static*1000:.2f} mm, RR = {xRR_static*1000:.2f} mm")
-    print(f"[INFO] Margen RL (estático corregido): extensión = {margen_ext_static_RL*1000:.2f} mm, compresión = {margen_comp_static_RL*1000:.2f} mm")
-    print(f"[INFO] Margen RR (estático corregido): extensión = {margen_ext_static_RR*1000:.2f} mm, compresión = {margen_comp_static_RR*1000:.2f} mm")
+    kt = np.array([
+        params['ktf'], params['ktf'],
+        params['ktr'], params['ktr']
+    ])  # neumáticos
 
-    # Viajes relativo a estático
-    travel_static = x_spring[:, 0][:, None]        # (4,1)
-    travel_rel    = x_spring - travel_static       # (4, N)
-    travel_max    = np.max(travel_rel, axis=1)     # (4,)
-    travel_min    = np.min(travel_rel, axis=1)     # (4,)
-    travel_range  = travel_max - travel_min        # (4,)
-    travel_used_pct = 100 * travel_range / stroke  # (% recorrido usado)
+    f_tire     = kt[:,None] * (zt - zu)   # (4, N)
+    wheel_load_N = static + aero + f_tire + hub_mass*g
+    wheel_load    = wheel_load_N/9.81   
+    # ────────────────────────────────────────────────────────────────────────────
+    # Convertir wheel_load [N] → [kg] y sumar masa no suspendida por rueda
+    # ────────────────────────────────────────────────────────────────────────────
+    g = 9.81  # m/s²
+    # vector de masas no suspendidas por rueda [kg], en el mismo orden FL,FR,RL,RR
+
+
+    # Divide por g para pasar de N a “kgf”, y suma la masa de la llanta
+    wheel_load = wheel_load / g + hub_mass
+    # ──────────────────────────────────────────────────────────────────────────────
+    # 3.3) Márgenes dinámicos y estáticos traseros
+    # ──────────────────────────────────────────────────────────────────────────────
+    margen_ext       = x_spring - z_topout[:,None]
+    margen_comp      = z_bottomout[:,None] - x_spring
+    xRL_static       = x_spring[2,0]
+    xRR_static       = x_spring[3,0]
+    z_free_RL        = params['z_RL_free']
+    z_free_RR        = params['z_RR_free']
+    travel_static   = x_spring[:,0][:,None]
+    travel_rel      = x_spring - travel_static
 
     # ──────────────────────────────────────────────────────────────────────────────
-    # 4) Fuerzas de resortes, bump stops y damper
+    # 4) Fuerzas suspensión: muelle, bumpstop y damper
     # ──────────────────────────────────────────────────────────────────────────────
     k = np.array([
-        params['kFL'], params['kFR'], params['kRL'], params['kRR']
-    ])  # rigidez resortes [N/m]
+        params['kFL'], params['kFR'],
+        params['kRL'], params['kRR']
+    ])
 
-    # Fuerza en resortes
-    f_spring = k[:, None] * x_spring  # (4, N)
+    f_spring = k[:,None] * x_spring
 
-    # Bump stops (solo cuando supera el “gap” y va más allá del z_topout)
-    bumpstop_funcs = [
+    bump_funcs = [
         params['bumpstop_front'], params['bumpstop_front'],
         params['bumpstop_rear'],  params['bumpstop_rear']
     ]
-    f_bump = np.zeros_like(x_spring)  # (4, N)
+    f_bump = np.zeros_like(x_spring)
     for i in range(n_corners):
-        travel_from_topout = x_spring[i, :] - (-stroke[i] / 2)
-        compression = np.maximum(0, travel_from_topout - gap_bump[i])
-        f_bump[i, :] = bumpstop_funcs[i](compression)
+        comp = np.maximum(0, x_spring[i] - gap_bump[i])
+        f_bump[i] = bump_funcs[i](comp)
 
-    # Velocidad relativa del damper: zr_dot - zc_dot
-    v_chassis = sol.y[1, :][None, :] + pos[:, 0:1] * sol.y[3, :][None, :] + pos[:, 1:2] * sol.y[5, :][None, :]
-    v_damper  = zudot - v_chassis  # (4, N)
+    v_chassis = (
+        hdot[None,:]
+        + pos[:,0:1] * phi_dot[None,:]
+        + pos[:,1:2] * theta_dot[None,:]
+    )
+    v_damper = zudot - v_chassis
 
-    # Fuerza de damper (bidireccional)
     damper_funcs = [
         params['damper_front'], params['damper_front'],
         params['damper_rear'],  params['damper_rear']
     ]
     f_damper = np.zeros_like(v_damper)
     for i in range(n_corners):
-        f_damper[i, :] = damper_funcs[i](v_damper[i, :])
-
-    f_damp_FL, Pxx_damp_FL = welch(f_damper[0], fs=fs, nperseg=nperseg, noverlap=noverlap)
-    f_damp_RL, Pxx_damp_RL = welch(f_damper[2], fs=fs, nperseg=nperseg, noverlap=noverlap)
+        f_damper[i] = damper_funcs[i](v_damper[i])
 
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 5) Fuerza de neumático y track excitation (interpolación de z_tracks)
     # ──────────────────────────────────────────────────────────────────────────────
-    kt = np.array([
-        params['ktf'], params['ktf'], params['ktr'], params['ktr']
-    ])  # rigidez neumáticos [N/m]
-
-    # Interpolación de perfil de pista en cada rueda
-    zt = np.stack(
-        [np.interp(t, t_vec, z_tracks[i]) for i in range(n_corners)],
-        axis=0
-    )  # (4, N), [m]
-
-    # Fuerza del neumático = kt * (z_track - z_unsprung)
-    f_tire = kt[:, None] * (zt - zu)  # (4, N) [N]
-
-    # Estadísticos de force tire general (TODO: rms por máscara más abajo)
-    f_tire_max = np.max(f_tire, axis=1)
-    f_tire_min = np.min(f_tire, axis=1)
-    f_tire_mean = np.mean(f_tire, axis=1)
-    f_tire_std  = np.std(f_tire, axis=1)
-    f_tire_variation = f_tire_std / f_tire_mean  # ratio
-
-    # Promedio de variation por ejes (front / rear)
-    f_tire_variation_front = np.mean(f_tire_variation[:2])
-    f_tire_variation_rear  = np.mean(f_tire_variation[2:])
+    f_tire_max    = np.max(f_tire,axis=1)
+    f_tire_min    = np.min(f_tire,axis=1)
+    f_tire_mean   = np.mean(f_tire,axis=1)
+    f_tire_std    = np.std(f_tire,axis=1)
+    f_tire_var    = np.var(f_tire,axis=1)
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 6) Condiciones Grip-Limited (lateral, frenada y tracción)
@@ -875,20 +720,19 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     grip_lateral_mask    = (throttle_signal < threshold) & (brake_signal < threshold)
     grip_brake_mask      = (brake_signal > threshold)    & (throttle_signal < threshold)
     grip_traction_mask   = (throttle_signal > threshold) & (brake_signal < threshold)
-    grip_limited_pct     = 100 * np.sum(grip_lateral_mask) / N
 
     # Fuerza tire grip-limited (max y min) en condición lateral
     if np.any(grip_lateral_mask):
-        f_tire_gl_max = np.max(f_tire[:, grip_lateral_mask], axis=1)
-        f_tire_gl_min = np.min(f_tire[:, grip_lateral_mask], axis=1)
+        f_tire_gl_max = np.max(wheel_load_N[:, grip_lateral_mask], axis=1)
+        f_tire_gl_min = np.min(wheel_load_N[:, grip_lateral_mask], axis=1)
     else:
         f_tire_gl_max = np.zeros(4)
         f_tire_gl_min = np.zeros(4)
 
     # ── Grip-Limited en frenada ──
     if np.any(grip_brake_mask):
-        fl_brake = np.mean(f_tire[0:2, grip_brake_mask], axis=0)
-        rl_brake = np.mean(f_tire[2:4, grip_brake_mask], axis=0)
+        fl_brake = np.mean(wheel_load_N[0:2, grip_brake_mask], axis=0)
+        rl_brake = np.mean(wheel_load_N[2:4, grip_brake_mask], axis=0)
         front_load_rms_brake = np.sqrt(np.mean(fl_brake**2))
         rear_load_rms_brake  = np.sqrt(np.mean(rl_brake**2))
     else:
@@ -897,8 +741,8 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
 
     # ── Grip-Limited en tracción ──
     if np.any(grip_traction_mask):
-        fl_trac = np.mean(f_tire[0:2, grip_traction_mask], axis=0)
-        rl_trac = np.mean(f_tire[2:4, grip_traction_mask], axis=0)
+        fl_trac = np.mean(wheel_load_N[0:2, grip_traction_mask], axis=0)
+        rl_trac = np.mean(wheel_load_N[2:4, grip_traction_mask], axis=0)
         front_load_rms_traction = np.sqrt(np.mean(fl_trac**2))
         rear_load_rms_traction  = np.sqrt(np.mean(rl_trac**2))
     else:
@@ -909,7 +753,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     # 7) Road-noise: wheel vertical-speed RMS [mm/s] para cada rueda
     # ──────────────────────────────────────────────────────────────────────────────
     # zt está en [m], convertimos a mm antes de derivar
-    v_mm_s = [np.gradient(zt[i] * 1000, dt) for i in range(n_corners)]  # lista de 4 arrays (mm/s)
+    v_mm_s = [np.gradient(zt[i], dt) for i in range(n_corners)]  # lista de 4 arrays (mm/s)
     rms_per_wheel = [np.sqrt(np.mean(v**2)) for v in v_mm_s]
 
     # Promedio por eje (front / rear)
@@ -925,16 +769,16 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
 
     # RMS de heave en mask grip-lateral (m → convertir más tarde a mm)
     if np.any(grip_lateral_mask):
-        frh_rms = np.sqrt(np.mean(heave_front[grip_lateral_mask]**2))
-        rrh_rms = np.sqrt(np.mean(heave_rear[grip_lateral_mask]**2))
+        frh_rms = np.sqrt(np.mean(heave_front[grip_lateral_mask]**2)) * 1000  # mm
+        rrh_rms = np.sqrt(np.mean(heave_rear[grip_lateral_mask]**2)) * 1000  # mm
     else:
         frh_rms = 0.0
         rrh_rms = 0.0
 
     # Cargas front/rear  RMS en mask grip-lateral
     if np.any(grip_lateral_mask):
-        fl_gl = np.mean(f_tire[0:2, grip_lateral_mask], axis=0)
-        rl_gl = np.mean(f_tire[2:4, grip_lateral_mask], axis=0)
+        fl_gl = np.mean(wheel_load_N[0:2, grip_lateral_mask], axis=0)
+        rl_gl = np.mean(wheel_load_N[2:4, grip_lateral_mask], axis=0)
         front_load_rms = np.sqrt(np.mean(fl_gl**2))
         rear_load_rms  = np.sqrt(np.mean(rl_gl**2))
     else:
@@ -969,53 +813,46 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     pitch_rms = np.sqrt(np.mean(phi**2)) * 180 / np.pi
 
     # ──────────────────────────────────────────────────────────────────────────────
-    # 9) PSD (Heave global, Heave por eje, Pitch global, Pitch por eje)
+    # 9) PSD (Heave global, Heave por eje, Pitch global, Pitch por eje) y FFT de carga
     # ──────────────────────────────────────────────────────────────────────────────
-    # Heave del chasis [m]
-    f_psd_heave, Pxx_heave   = welch(h,  fs=fs, nperseg=nperseg, noverlap=noverlap)
-    # Heave por eje en mm
-    z_front_mm   = heave_front * 1000
-    z_rear_mm    = heave_rear  * 1000
-    f_heave_f, Pxx_heave_f   = welch(z_front_mm, fs=fs, nperseg=nperseg, noverlap=noverlap)
-    f_heave_r, Pxx_heave_r   = welch(z_rear_mm,  fs=fs, nperseg=nperseg, noverlap=noverlap)
+    # --- PSD de heave global [m²/Hz] ---
+    f_psd_heave, Pxx_heave = welch(h, fs=fs, nperseg=nperseg, noverlap=noverlap)
+    # --- PSD de heave por eje [mm²/Hz] ---
+    z_front_mm = heave_front * 1000
+    z_rear_mm  = heave_rear  * 1000
+    f_heave_f, Pxx_heave_f = welch(z_front_mm, fs=fs, nperseg=nperseg, noverlap=noverlap)
+    f_heave_r, Pxx_heave_r = welch(z_rear_mm,  fs=fs, nperseg=nperseg, noverlap=noverlap)
+    # en dB (10·log10 porque es PSD – potencia)
+    Pxx_heave_f_dB = 10 * np.log10(Pxx_heave_f + 1e-30)
+    Pxx_heave_r_dB = 10 * np.log10(Pxx_heave_r + 1e-30)
 
-    # Pitch global [rad]
-    f_psd_pitch, Pxx_pitch   = welch(phi, fs=fs, nperseg=nperseg, noverlap=noverlap)
-    # Pitch inducido en vertical por eje (m → mm)
+    # --- PSD de pitch global [rad²/Hz] ---
+    f_psd_pitch, Pxx_pitch = welch(phi, fs=fs, nperseg=nperseg, noverlap=noverlap)
+    # --- PSD de pitch inducido [mm²/Hz] por eje ---
     pitch_front_mm = (-lf * phi) * 1000
     pitch_rear_mm  = ( lr * phi) * 1000
-    f_pitch_f, Pxx_pitch_f   = welch(pitch_front_mm, fs=fs, nperseg=nperseg, noverlap=noverlap)
-    f_pitch_r, Pxx_pitch_r   = welch(pitch_rear_mm,  fs=fs, nperseg=nperseg, noverlap=noverlap)
+    f_pitch_f, Pxx_pitch_f = welch(pitch_front_mm, fs=fs, nperseg=nperseg, noverlap=noverlap)
+    f_pitch_r, Pxx_pitch_r = welch(pitch_rear_mm,  fs=fs, nperseg=nperseg, noverlap=noverlap)
+    Pxx_pitch_f_dB = 10 * np.log10(Pxx_pitch_f + 1e-30)
+    Pxx_pitch_r_dB = 10 * np.log10(Pxx_pitch_r + 1e-30)
 
-    # Convertir a picos en dB (opcional)
-    psd_heave_peak = 10 * np.log10(np.max(Pxx_heave) + 1e-30)
-    psd_pitch_peak = 10 * np.log10(np.max(Pxx_pitch) + 1e-30)
+    # --- PSD de carga total por eje [N²/Hz] ---
+    front_load_sig = 0.5*(wheel_load_N[0] + wheel_load_N[1])
+    rear_load_sig  = 0.5*(wheel_load_N[2] + wheel_load_N[3])
+    f_load, Pxx_load_front = welch(front_load_sig, fs=fs, nperseg=nperseg, noverlap=noverlap)
+    _,     Pxx_load_rear  = welch(rear_load_sig,  fs=fs, nperseg=nperseg, noverlap=noverlap)
+    # PSD en dB
+    Pxx_load_front_dB = 10 * np.log10(Pxx_load_front + 1e-30)
+    Pxx_load_rear_dB  = 10 * np.log10(Pxx_load_rear  + 1e-30)
 
-    # ──────────────────────────────────────────────────────────────────────────────
-    # 9bis) Calcular la FFT/PSD de la Fuerza de Neumático (“carga”) – Front vs Rear
-    # ──────────────────────────────────────────────────────────────────────────────
-    #   f_tire es ya un array (4, N) con [FL, FR, RL, RR].
-    #   Queremos la señal promediada por ejes: 
-    #     • front_signal = (FL + FR)/2 
-    #     • rear_signal  = (RL + RR)/2
-
-    front_signal = (f_tire[0, :])  # Promedio de fuerza en las dos ruedas delanteras
-    rear_signal  = (f_tire[2, :])  # Promedio de fuerza en las dos ruedas traseras
-
-    # Usamos FFT unidireccional (solo frecuencias positivas):
-    F_front = np.fft.rfft(front_signal)    # Componente compleja espectral frontal
-    F_rear  = np.fft.rfft(rear_signal)     # Componente compleja espectral trasera
-    f_vals  = np.fft.rfftfreq(N, d=dt)     # Vector de frecuencias (longitud N//2 + 1)
-
-    # Magnitud lineal y a continuación convertimos a dB (normalizo por (N/2)):
-    mag_front_linear = np.abs(F_front)                     
-    mag_rear_linear  = np.abs(F_rear)
-    mag_front_dB = 20.0 * np.log10(mag_front_linear / (N/2) + 1e-30)
-    mag_rear_dB  = 20.0 * np.log10(mag_rear_linear  / (N/2) + 1e-30)
-
-    # Fase en grados:
-    phase_front_deg = np.angle(F_front, deg=True)
-    phase_rear_deg  = np.angle(F_rear,  deg=True)
+    # --- FFT de carga total por eje (magnitud) ---
+    # Solo frecuencias positivas:
+    F_front = np.fft.rfft(front_load_sig)
+    F_rear  = np.fft.rfft(rear_load_sig)
+    f_vals  = np.fft.rfftfreq(len(t), d=dt)
+    # Magnitud lineal → dB (20·log10 porque es amplitud)
+    mag_front_dB = 20 * np.log10(np.abs(F_front) + 1e-30)
+    mag_rear_dB  = 20 * np.log10(np.abs(F_rear)  + 1e-30)
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 10) Acumulated Track Noise Normalized by Lap Time (mm/s)
@@ -1028,133 +865,101 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         acc_norm = suma_abs / lap_time       # [mm/s]
         acc_tracknoise_mm.append(acc_norm)
 
-    tracknoise_front_accu = 0.5 * (acc_tracknoise_mm[0] + acc_tracknoise_mm[1])
-    tracknoise_rear_accu  = 0.5 * (acc_tracknoise_mm[2] + acc_tracknoise_mm[3])
-
     # ──────────────────────────────────────────────────────────────────────────────
     # 11) Resultado final: devolver todos los valores en un diccionario
     # ──────────────────────────────────────────────────────────────────────────────
     return {
         # --- Cinemática básica ---
-        'travel':             x_spring,               # (4, N)
-        'travel_rel':         travel_rel,             # (4, N)
-        'travel_static':      travel_static,          # (4, 1)
-        'travel_max':         travel_max,             # (4,)
-        'travel_min':         travel_min,             # (4,)
-        'travel_range':       travel_range,           # (4,)
-        'travel_used_pct':    travel_used_pct,        # (4,)
-        'travel_abs':         travel_abs,             # (4, N)
-        'damper_travel':      zu - zs,                # (4, N)
-        'margen_ext':         margen_ext,             # (4, N)
-        'margen_comp':        margen_comp,            # (4, N)
-        'z_free':             np.array([
-                                  params['z_FL_free'], params['z_FR_free'],
-                                  params['z_RL_free'], params['z_RR_free']
-                              ]),
+        'travel':              x_spring,               # (4, N)
+        'travel_static':       travel_static,          # (4, 1)
+        'travel_rel':          travel_rel,             # (4, N)
+        'damper_travel':       zu - zs,                # (4, N)
+        'margen_ext':          margen_ext,             # (4, N)
+        'margen_comp':         margen_comp,            # (4, N)
+        'z_free':              np.array([
+                                   params['z_FL_free'], params['z_FR_free'],
+                                   params['z_RL_free'], params['z_RR_free']
+                               ]),
 
         # --- Fuerzas de suspensión ---
-        'f_spring':           f_spring,               # (4, N)
-        'f_damper':           f_damper,               # (4, N)
-        'f_bump':             f_bump,                 # (4, N)
+        'f_spring':            f_spring,               # (4, N)
+        'f_damper':            f_damper,               # (4, N)
+        'f_bump':              f_bump,                 # (4, N)
 
-        # --- Fuerza de neumático ---
-        'f_tire':             f_tire,                 # (4, N)
-        'f_tire_max':         f_tire_max,             # (4,)
-        'f_tire_min':         f_tire_min,             # (4,)
-        'f_tire_mean':        f_tire_mean,            # (4,)
-        'f_tire_std':         f_tire_std,             # (4,)
-        'f_tire_variation':   f_tire_variation,       # (4,)
-        'f_tire_variation_front': f_tire_variation_front,
-        'f_tire_variation_rear':  f_tire_variation_rear,
+        # --- Fuerza normal total por rueda ---
+        'wheel_load_N':        wheel_load_N,           # (4, N) [N]
+        'wheel_load_kg':       wheel_load,             # (4, N) [kgf]
 
-        # --- Grip-limited (lateral, brake, traction) ---
-        'grip_limited_lateral_mask':  grip_lateral_mask,      # (N,)
-        'grip_limited_brake_mask':    grip_brake_mask,        # (N,)
-        'grip_limited_traction_mask': grip_traction_mask,     # (N,)
-        'grip_limited_lateral_pct':   grip_limited_pct,       # scalar
-        'f_tire_grip_limited_max':    f_tire_gl_max,          # (4,)
-        'f_tire_grip_limited_min':    f_tire_gl_min,          # (4,)
-        'front_load_rms_brake':       front_load_rms_brake,   # scalar
-        'rear_load_rms_brake':        rear_load_rms_brake,    # scalar
-        'front_load_rms_traction':    front_load_rms_traction,# scalar
-        'rear_load_rms_traction':     rear_load_rms_traction, # scalar
+        # --- Estadísticos de neumático ---
+        'f_tire':              f_tire,                 # (4, N)
+        'f_tire_max':          f_tire_max,             # (4,)
+        'f_tire_min':          f_tire_min,             # (4,)
+        'f_tire_mean':         f_tire_mean,            # (4,)
+        'f_tire_std':          f_tire_std,             # (4,)
+        'f_tire_variation':    f_tire_var,
+        'Fz_aero_front': ae_front,   # (N,)
+        'Fz_aero_rear':  ae_rear,    # (N,)
 
-        # --- RMS de heave / carga en grip-limited vs no-grip ---
-        'frh_rms':            frh_rms,                # heave front RMS [m]
-        'rrh_rms':            rrh_rms,                # heave rear RMS [m]
-        'front_load_rms':     front_load_rms,         # tire load front RMS [N]
-        'rear_load_rms':      rear_load_rms,          # tire load rear RMS [N]
-        'frh_rms_nongrip':    frh_rms_nongrip,        # heave front RMS no-grip [m]
-        'rrh_rms_nongrip':    rrh_rms_nongrip,        # heave rear RMS no-grip [m]
-        'front_load_rms_nongrip': front_load_rms_nongrip,
-        'ztrack_rms_grip':    ztrack_rms_grip,        # (scalar)
-        'ztrack_rms_nongrip': ztrack_rms_nongrip,     # (scalar)
+        # --- Grip-limited ---
+        'grip_mask_lat':       grip_lateral_mask,      # (N,)
+        'f_tire_gl_max':     f_tire_gl_max,        # (4,) [N]
+        'f_tire_gl_min':     f_tire_gl_min,        # (4,) [N]
 
-        # --- Pitch y roll ---
-        'pitch_rms':          pitch_rms,              # RMS φ [°]
-        'phi_ddot':           np.gradient(sol.y[3], t),   # pitch acc [rad/s²]
-        'theta_ddot':         np.gradient(sol.y[5], t),   # roll acc [rad/s²]
+        # --- RMS en grip-lateral vs no-grip ---
+        'heave_f_rms_mm':      frh_rms,                # scalar [mm]
+        'heave_r_rms_mm':      rrh_rms,                # scalar [mm]
+        'load_f_rms_N':        front_load_rms,         # scalar [N]
+        'load_r_rms_N':        rear_load_rms,          # scalar [N]
+        'heave_f_rms_ng_mm':   frh_rms_nongrip,        # scalar [mm]
+        'heave_r_rms_ng_mm':   rrh_rms_nongrip,        # scalar [mm]
+        'load_f_rms_ng':       front_load_rms_nongrip, # scalar [N]
+        'ztrack_rms_lat':      ztrack_rms_grip,        # scalar [m]
+        'ztrack_rms_ng':       ztrack_rms_nongrip,     # scalar [m]
+        'front_load_rms_brake':    front_load_rms_brake,   # scalar [N]
+        'rear_load_rms_brake':     rear_load_rms_brake,    # scalar [N]
+        'front_load_rms_traction': front_load_rms_traction,# scalar [N]
+        'rear_load_rms_traction':  rear_load_rms_traction, # scalar [N]
+
+        # --- Pitch y aceleraciones ---
+        'pitch_rms_deg':       pitch_rms,              # scalar [°]
+        'pitch_acc':           np.gradient(sol.y[3], t),   # (N,) [rad/s²]
+        'roll_acc':            np.gradient(sol.y[5], t),   # (N,) [rad/s²]
 
         # --- Road noise (wheel-speed RMS) ---
-        'tracknoise_accu_front': front_noise_vals,    # (scalar)
-        'tracknoise_accu_rear':  rear_noise_vals,     # (scalar)
+        'roadnoise_front':     front_noise_vals,       # scalar [mm/s]
+        'roadnoise_rear':      rear_noise_vals,        # scalar [mm/s]
 
-        # --- PSDs (global y por eje) ---
-        # Heave global [m²/Hz]:
-        'f_psd':              f_psd_heave,            # (M,)
-        'psd_heave':          Pxx_heave,              # (M,)
-        'psd_heave_peak':     psd_heave_peak,         # dB
+        # --- PSD de heave y pitch ---
+        'f_psd_heave':         f_psd_heave,            # (M,)
+        'psd_heave':           Pxx_heave,              # (M,)
+        'f_psd_heave_f':       f_heave_f,              # (M,)
+        'psd_heave_f':         Pxx_heave_f,            # (M,)
+        'psd_heave_f_dB':      Pxx_heave_f_dB,         # (M,)
+        'f_psd_heave_r':       f_heave_r,              # (M,)
+        'psd_heave_r':         Pxx_heave_r,            # (M,)
+        'psd_heave_r_dB':      Pxx_heave_r_dB,         # (M,)
+        'f_psd_pitch':         f_psd_pitch,            # (M,)
+        'psd_pitch':           Pxx_pitch,              # (M,)
 
-        # Heave por eje [mm²/Hz]:
-        'heave_front':        z_front_mm,             # (N,)
-        'heave_rear':         z_rear_mm,              # (N,)
-        'f_psd_front':        f_heave_f,              # (M,)
-        'psd_heave_front':    Pxx_heave_f,            # (M,)
-        'f_psd_rear':         f_heave_r,              # (M,)
-        'psd_heave_rear':     Pxx_heave_r,            # (M,)
-
-        # Pitch global [rad²/Hz]:
-        'f_psd_pitch':        f_psd_pitch,            # (M,)
-        'psd_pitch':          Pxx_pitch,              # (M,)
-        'psd_pitch_peak':     psd_pitch_peak,         # dB
-
-        # Pitch inducido → vertical por eje [mm²/Hz]:
-        'f_psd_pitch_front':  f_pitch_f,              # (M,)
-        'psd_pitch_front':    Pxx_pitch_f,            # (M,)
-        'f_psd_pitch_rear':   f_pitch_r,              # (M,)
-        'psd_pitch_rear':     Pxx_pitch_r,            # (M,)
-
-        'f_psd_damper'   : f_damp_FL,                  # vector de frecuencias
-        'psd_damper_mag_FL' : 10 * np.log10(Pxx_damp_FL),
-        'psd_damper_mag_RL' : 10 * np.log10(Pxx_damp_RL),
-
-        # --- Resultados auxiliares para Dash/HTML export ---
-        'travel_static':      travel_static,          # (4,1)
-        'zt':                 zt,                     # (4, N)
-        'z_chassis':          h,                      # (N,)
-        'h_ddot':             np.gradient(sol.y[1], t),   # (N,)
-        'v_damper':           v_damper,               # (4, N)
-        'x_spring':           x_spring,               # (4, N)
-        'v_chassis':          v_chassis,              # (4, N)
-        'lap_time':           lap_time,               # scalar
-        'pitch_deg':          np.degrees(phi),        # (N,)
-        'distance':           np.cumsum(vx_interp := np.interp(t, t_vec, vx)) * np.gradient(t),  # (N,)
-        'track_name':         params.get('track_name', 'Unknown Track'),
-        'vx': vx_interp,
-        'z_topout_FL': params['z_topout_FL'],
-        'z_bottomout_FL': params['z_bottomout_FL'],
-        'z_topout_FR': params['z_topout_FR'],
-        'z_bottomout_FR': params['z_bottomout_FR'],
-        'z_topout_RL': params['z_topout_RL'],
-        'z_bottomout_RL': params['z_bottomout_RL'],
-        'z_topout_RR': params['z_topout_RR'],
-        'z_bottomout_RR': params['z_bottomout_RR'],
-        't_vec':              t,                     # (N,)
-        'f_psd_load'           : f_vals,             # vector de frecuencias [Hz]
-        'psd_load_mag_front'   : mag_front_dB,       # magnitud dB eje frontal
-        'psd_load_phase_front' : phase_front_deg,    # fase [°] eje frontal
-        'psd_load_mag_rear'    : mag_rear_dB,        # magnitud dB eje trasero
-        'psd_load_phase_rear'  : phase_rear_deg,     # fase [°] eje trasero        
+        # --- PSD y FFT de carga total ---
+        'f_psd_load':          f_load,                 # (M,)
+        'psd_load_f_dB':       Pxx_load_front_dB,      # (M,)
+        'psd_load_r_dB':       Pxx_load_rear_dB,       # (M,)
+        'f_fft_load':          f_vals,                 # (N//2+1,)
+        'fft_load_mag_f_dB':   mag_front_dB,           # (N//2+1,)
+        'fft_load_mag_r_dB':   mag_rear_dB,            # (N//2+1,)
+        'f_psd_pitch_f':       f_pitch_f,              # (M,)
+        'psd_pitch_f_dB':      Pxx_pitch_f_dB,         # (M,)
+        'f_psd_pitch_r':       f_pitch_r,              # (M,)
+        'psd_pitch_r_dB':      Pxx_pitch_r_dB,         # (M,)
+        # --- Auxiliares de visualización ---
+        'zt':                  zt,                     # (4, N)
+        'z_chassis':           h,                      # (N,)
+        'vx':                  np.interp(t, t_vec, vx),# (N,)
+        'distance':            np.cumsum(np.interp(t, t_vec, vx))*dt,  # (N,)
+        'lap_time':            lap_time,               # scalar
+        'track_name':          params.get('track_name','Unknown Track'),
+        't':                   t                       # (N,)
     }
 
 # --- FIN DEL MODELO ---
