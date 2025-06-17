@@ -26,84 +26,54 @@ def smooth_signal(data, window=51, polyorder=3):
 def launch_dash(sol, post, setup_name="Setup"):
     def plot_data():
         graphs = []
-        dt_vec   = np.gradient(sol.t)
-        distance = np.cumsum(post['vx'] * dt_vec)
-        travel = np.vstack([smooth_signal(travel_i) for travel_i in post['travel']])
-        wheel_f = post['wheel_load_N'] 
-        grip_mask = post['grip_mask_lat']  # (N,)
-        wheel_ld = post['wheel_load_kg']       # (4,N)
+        distance = np.cumsum(post['vx']) * np.gradient(sol.t)
+
+        travel = smooth_signal(post['travel'])
+        #f_spring = smooth_signal(post['f_spring'])
+        #f_damper = smooth_signal(post['f_damper'])
+        wheel_f = post['f_wheel']          # shape (4, N)
+        grip_mask = post['grip_limited_lateral_mask']  # (N,)
+        wheel_ld = post['wheel_load']       # (4,N)
         wheel_names = ["FL", "FR", "RL", "RR"]
+
+        #v_damper = smooth_signal(post['v_damper'])
         heave_filtered = smooth_signal(sol.y[0])
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
 
-        # === Damper Travel por rueda ===
-        dt = np.gradient(sol.t)
-        # damper_travel está en metros, lo pasamos a mm
-        damper_travel_mm = post['damper_travel'] * 1000  # (4, N)
+        # Travel absoluto por rueda (incluyendo z_free)
+        x_total = travel# + post['z_free'][:, None]
         graphs.append(dcc.Graph(figure=go.Figure([
-            go.Scatter(x=distance, y=damper_travel_mm[0], name="Damper Travel FL"),
-            go.Scatter(x=distance, y=damper_travel_mm[1], name="Damper Travel FR"),
-            go.Scatter(x=distance, y=damper_travel_mm[2], name="Damper Travel RL"),
-            go.Scatter(x=distance, y=damper_travel_mm[3], name="Damper Travel RR"),
+            go.Scatter(x=distance, y=x_total[0] * 1000, name="Travel FL"),
+            go.Scatter(x=distance, y=x_total[1] * 1000, name="Travel FR"),
+            go.Scatter(x=distance, y=x_total[2] * 1000, name="Travel RL"),
+            go.Scatter(x=distance, y=x_total[3] * 1000, name="Travel RR"),
         ]).update_layout(
-            title="Damper Travel por rueda [mm]",
-            xaxis_title="Distance [m]",
+            title="Suspension Travel por rueda [mm]",
+            xaxis_title="distance [m]",
             yaxis_title="Travel [mm]"
         )))
         
-        # === Heave (filtrado) ===
-        graphs.append(dcc.Graph(
-            figure=go.Figure([
-                go.Scatter(
-                    x=distance,
-                    y=heave_filtered * 1000,  # [mm]
-                    name="Heave"
-                )
-            ]).update_layout(
-                title="Heave Motion (Filtered)",
-                xaxis_title="Distance [m]",
-                yaxis_title="Heave [mm]"
-            )
-        ))
+        # Heave (filtrado)
+        graphs.append(dcc.Graph(figure=go.Figure([
+            go.Scatter(x=distance, y=heave_filtered * 1000, name="Heave [mm]")
+        ]).update_layout(title="Heave Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Heave [mm]")))
 
-        # === Pitch (filtrado) ===
-        graphs.append(dcc.Graph(
-            figure=go.Figure([
-                go.Scatter(
-                    x=distance,
-                    y=pitch_filtered,  # [°]
-                    name="Pitch"
-                )
-            ]).update_layout(
-                title="Pitch Motion (Filtered)",
-                xaxis_title="Distance [m]",
-                yaxis_title="Pitch [°]"
-            )
-        ))
+        # Pitch (filtrado)
+        graphs.append(dcc.Graph(figure=go.Figure([
+            go.Scatter(x=distance, y=pitch_filtered, name="Pitch [°]")
+        ]).update_layout(title="Pitch Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Pitch [°]")))
 
-        # === Roll (filtrado) ===
-        graphs.append(dcc.Graph(
-            figure=go.Figure([
-                go.Scatter(
-                    x=distance,
-                    y=roll_filtered,   # [°]
-                    name="Roll"
-                )
-            ]).update_layout(
-                title="Roll Motion (Filtered)",
-                xaxis_title="Distance [m]",
-                yaxis_title="Roll [°]"
-            )
-        ))
+        # Roll (filtrado)
+        graphs.append(dcc.Graph(figure=go.Figure([
+            go.Scatter(x=distance, y=roll_filtered, name="Roll [°]")
+        ]).update_layout(title="Roll Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Roll [°]")))
 
         # === Zona de grip limitado lateral ===
         grip_limited_trace = None
-        if 'grip_mask_lat' in post:
-            mask = post['grip_mask_lat']                # (N,)
-            # señal promedio de carga por eje [N]
-            avg_tire_load = np.mean(post['wheel_load_N'], axis=0)
-            # solo mostramos donde hay grip limitado
+        if 'grip_limited_lateral_mask' in post:
+            mask = post['grip_limited_lateral_mask']
+            avg_tire_load = np.mean(wheel_ld, axis=0)
             y_gl = np.where(mask, avg_tire_load, np.nan)
             grip_limited_trace = go.Scatter(
                 x=distance,
@@ -113,12 +83,6 @@ def launch_dash(sol, post, setup_name="Setup"):
                 line=dict(color='black', width=3, dash='dot'),
                 showlegend=True
             )
-        if grip_limited_trace:
-            graphs.append(dcc.Graph(figure=go.Figure([grip_limited_trace]).update_layout(
-                title="Zona de Grip-Limited (Carga Promedio) [N]",
-                xaxis_title="Distance [m]",
-                yaxis_title="Average Tire Load [N]"
-            )))
 
         # === Aerodynamic Downforce per Axle [N] ===
         ae_front = post.get('Fz_aero_front', np.zeros_like(post['vx']))
@@ -142,20 +106,22 @@ def launch_dash(sol, post, setup_name="Setup"):
             fig_load.add_trace(
                 go.Scatter(
                     x=distance,
-                    y=wheel_ld[i],
+                    y=wheel_f[i],
                     name=name
                 )
             )
 
         # Marcadores grip-limited para cada rueda
         for i, name in enumerate(wheel_names):
-            fig_load.add_trace(go.Scatter(
-                x=distance[grip_mask],
-                y=wheel_ld[i, grip_mask],
-                mode='markers',
-                name=f"{name} Grip-Limited",
-                marker=dict(color='black', symbol='line-ns-open')
-            ))
+            fig_load.add_trace(
+                go.Scatter(
+                    x=distance[grip_mask],
+                    y=wheel_f[i, grip_mask],
+                    mode='markers',
+                    name=f"{name} Grip-Limited",
+                    marker=dict(color='black', symbol='line-ns-open')
+                )
+            )
 
         fig_load.update_layout(
             title="Tire Load per Wheel [N]",
@@ -182,8 +148,8 @@ def launch_dash(sol, post, setup_name="Setup"):
         ))
 
         # === Ride Height RMS en zonas grip-limited ===
-        if 'grip_mask_lat' in post:
-            mask = post['grip_mask_lat']
+        if 'grip_limited_lateral_mask' in post:
+            mask = post['grip_limited_lateral_mask']
             zf = (travel[0] + travel[1]) / 2
             zr = (travel[2] + travel[3]) / 2
             rms_zf = np.sqrt(np.mean(zf[mask]**2)) * 1000
@@ -191,10 +157,7 @@ def launch_dash(sol, post, setup_name="Setup"):
             fig_rms_heights = go.Figure([
                 go.Bar(x=["Front", "Rear"], y=[rms_zf, rms_zr])
             ])
-            fig_rms_heights.update_layout(
-                title="Ride Height RMS en grip-limited [mm]",
-                yaxis_title="RMS [mm]"
-            )
+            fig_rms_heights.update_layout(title="Ride Height RMS en grip-limited [mm]", yaxis_title="RMS [mm]")
             graphs.append(dcc.Graph(figure=fig_rms_heights))
 
         # === FRH vs Contact Patch Load (RMS) ===
@@ -203,10 +166,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         load_f = (wheel_ld[0] + wheel_ld[1]) / 2
         load_f_rms = np.sqrt(np.mean(load_f**2))
         fig_frh_vs_load = go.Figure(data=go.Scatter(
-            x=[frh_rms], y=[load_f_rms],
-            mode='markers+text',
-            text=["Front"],
-            textposition='top center'
+            x=[frh_rms], y=[load_f_rms], mode='markers+text', text=["Front"], textposition='top center'
         ))
         fig_frh_vs_load.update_layout(
             title="FRH RMS vs Contact Patch Load RMS",
@@ -244,40 +204,6 @@ def launch_dash_kpis(kpi_data, setup_names):
     kpi_labels = ['FL', 'FR', 'RL', 'RR']
     kpi_labels_axes = ['Front', 'Rear']
 
-    # Mapeo de claves antiguas -> nuevas para mantener compatibilidad
-    key_map = {
-        'f_tire_grip_limited_max': 'f_tire_gl_max',
-        'f_tire_grip_limited_min': 'f_tire_gl_min',
-        'frh_rms': 'heave_f_rms_mm',
-        'rrh_rms': 'heave_r_rms_mm',
-        'front_load_rms': 'load_f_rms_N',
-        'rear_load_rms': 'load_r_rms_N',
-        'frh_rms_nongrip': 'heave_f_rms_ng_mm',
-        'rrh_rms_nongrip': 'heave_r_rms_ng_mm',
-        'front_load_rms_nongrip': 'load_f_rms_ng',
-        # Campos PSD/FFT actualizados
-        'f_psd_front': 'f_psd_heave_f',
-        'psd_heave_front': 'psd_heave_f',
-        'f_psd_rear': 'f_psd_heave_r',
-        'psd_heave_rear': 'psd_heave_r',
-        'f_psd': 'f_psd_heave',
-        'pitch_rms': 'pitch_rms_deg',
-        'f_psd_pitch_front': 'f_psd_pitch_f',
-        'psd_pitch_front': 'psd_pitch_f_dB',
-        'f_psd_pitch_rear': 'f_psd_pitch_r',
-        'psd_pitch_rear': 'psd_pitch_r_dB',
-        'psd_load_mag_front': 'psd_load_f_dB',
-        'psd_load_mag_rear': 'psd_load_r_dB',
-    }
-
-    def get_val(d, key):
-        if key in d:
-            return d[key]
-        mapped = key_map.get(key)
-        if mapped and mapped in d:
-            return d[mapped]
-        raise KeyError(key)
-
     def kpi_bar(title, unit, values_list):
         fig = go.Figure()
         for values, name in zip(values_list, setup_names):
@@ -298,9 +224,10 @@ def launch_dash_kpis(kpi_data, setup_names):
     # --- ARRANCAR LAYOUT CON UN TÍTULO PRINCIPAL ---
     layout = [html.H1("Comparativa de KPIs entre Setups")]
 
+    # ── Gráficas de barras genéricas (Tire Load Grip-Limited Max/Min) ──
     for title, unit, key, factor in kpi_definitions:
         try:
-            values_list = [get_val(k, key) * factor for k in kpi_data]
+            values_list = [k[key] * factor for k in kpi_data]
             layout.append(kpi_bar(title, unit, values_list))
         except KeyError:
             continue
@@ -412,7 +339,7 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # ── 4) Tabla de Pitch RMS por Setup ──────────────────────────────────────────
     try:
-        pitch_rms_vals = [float(get_val(k, 'pitch_rms')) for k in kpi_data]
+        pitch_rms_vals = [float(k['pitch_rms']) for k in kpi_data]
         fig_pitch_table = go.Figure(data=[go.Table(
             header=dict(values=["Setup", "Pitch RMS [°]"],
                         fill_color='paleturquoise', align='left'),
@@ -426,8 +353,8 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # ── 5) Ride Height RMS (FRH, RRH) en GLS [mm] (barras) ─────────────────────
     try:
-        frh_vals = [get_val(k, 'frh_rms') * 1000 for k in kpi_data]
-        rrh_vals = [get_val(k, 'rrh_rms') * 1000 for k in kpi_data]
+        frh_vals = [k['frh_rms'] * 1000 for k in kpi_data]
+        rrh_vals = [k['rrh_rms'] * 1000 for k in kpi_data]
         fig_rh_bar = go.Figure(data=[
             go.Bar(name=name, x=["Front", "Rear"], y=[float(frh), float(rrh)])
             for name, frh, rrh in zip(setup_names, frh_vals, rrh_vals)
@@ -439,8 +366,8 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # ── 6) FRH RMS vs Contact Patch Load RMS (dispersograma etiquetado) ────────
     try:
-        frh_rms_vals = [get_val(k, 'frh_rms') * 1000 for k in kpi_data]
-        load_rms_vals_front = [get_val(k, 'front_load_rms') for k in kpi_data]
+        frh_rms_vals = [k['frh_rms'] * 1000 for k in kpi_data]
+        load_rms_vals_front = [k['front_load_rms'] for k in kpi_data]
         fig_scatter_frh = go.Figure(data=[
             go.Scatter(
                 x=frh_rms_vals,
@@ -461,8 +388,8 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # ── 7) RRH RMS vs Contact Patch Load RMS (dispersograma etiquetado) ────────
     try:
-        rrh_rms_vals = [get_val(k, 'rrh_rms') * 1000 for k in kpi_data]
-        load_rms_vals_rear = [get_val(k, 'rear_load_rms') for k in kpi_data]
+        rrh_rms_vals = [k['rrh_rms'] * 1000 for k in kpi_data]
+        load_rms_vals_rear = [k['rear_load_rms'] for k in kpi_data]
         fig_scatter_rrh = go.Figure(data=[
             go.Scatter(
                 x=rrh_rms_vals,
@@ -483,8 +410,8 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # ── 8) FRH: GLS vs NGLS (barras) ────────────────────────────────────────────
     try:
-        frh_grip_vals = [get_val(k, 'frh_rms') * 1000 for k in kpi_data]
-        frh_nongrip_vals = [get_val(k, 'frh_rms_nongrip') * 1000 for k in kpi_data]
+        frh_grip_vals = [k['frh_rms'] * 1000 for k in kpi_data]
+        frh_nongrip_vals = [k['frh_rms_nongrip'] * 1000 for k in kpi_data]
         fig_frh_compare = go.Figure()
         fig_frh_compare.add_trace(go.Bar(
             name="Grip-Limited", x=setup_names, y=frh_grip_vals))
@@ -502,8 +429,8 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # ── 9) RRH: GLS vs NGLS (barras) ────────────────────────────────────────────
     try:
-        rrh_grip_vals = [get_val(k, 'rrh_rms') * 1000 for k in kpi_data]
-        rrh_nongrip_vals = [get_val(k, 'rrh_rms_nongrip') * 1000 for k in kpi_data]
+        rrh_grip_vals = [k['rrh_rms'] * 1000 for k in kpi_data]
+        rrh_nongrip_vals = [k['rrh_rms_nongrip'] * 1000 for k in kpi_data]
         fig_rrh_compare = go.Figure()
         fig_rrh_compare.add_trace(go.Bar(
             name="Grip-Limited", x=setup_names, y=rrh_grip_vals))
@@ -599,28 +526,23 @@ def launch_dash_kpis(kpi_data, setup_names):
     try:
         fig_psd_axes = go.Figure()
         for k, name in zip(kpi_data, setup_names):
-            try:
-                f_front = get_val(k, 'f_psd_front')
-                psd_front = np.array(get_val(k, 'psd_heave_front')) * 1e6
-                f_rear = get_val(k, 'f_psd_rear')
-                psd_rear = np.array(get_val(k, 'psd_heave_rear')) * 1e6
-            except KeyError:
-                continue
+            if ('f_psd_front' in k and 'psd_heave_front' in k and
+                'f_psd_rear'  in k and 'psd_heave_rear'  in k):
 
-            # PSD eje delantero (convertir m²/Hz → mm²/Hz)
-            fig_psd_axes.add_trace(go.Scatter(
-                x=f_front,
-                y=psd_front,
-                mode='lines',
-                name=f"{name} – Front"
-            ))
-            # PSD eje trasero
-            fig_psd_axes.add_trace(go.Scatter(
-                x=f_rear,
-                y=psd_rear,
-                mode='lines',
-                name=f"{name} – Rear"
-            ))
+                # PSD eje delantero (convertir m²/Hz → mm²/Hz)
+                fig_psd_axes.add_trace(go.Scatter(
+                    x=k['f_psd_front'],
+                    y=np.array(k['psd_heave_front']) * 1e6,
+                    mode='lines',
+                    name=f"{name} – Front"
+                ))
+                # PSD eje trasero
+                fig_psd_axes.add_trace(go.Scatter(
+                    x=k['f_psd_rear'],
+                    y=np.array(k['psd_heave_rear']) * 1e6,
+                    mode='lines',
+                    name=f"{name} – Rear"
+                ))
 
         fig_psd_axes.update_layout(
             title="PSD of Heave Motion by Axle (Front vs Rear)",
@@ -637,17 +559,13 @@ def launch_dash_kpis(kpi_data, setup_names):
     try:
         fig_psd = go.Figure()
         for k, name in zip(kpi_data, setup_names):
-            try:
-                f_psd = get_val(k, 'f_psd')
-                psd_h = np.array(get_val(k, 'psd_heave')) * 1e6
-            except KeyError:
-                continue
-            fig_psd.add_trace(go.Scatter(
-                x=f_psd,
-                y=psd_h,
-                mode='lines',
-                name=name
-            ))
+            if 'f_psd' in k and 'psd_heave' in k:
+                fig_psd.add_trace(go.Scatter(
+                    x=k['f_psd'],
+                    y=np.array(k['psd_heave']) * 1e6,  # m²/Hz → mm²/Hz
+                    mode='lines',
+                    name=name
+                ))
         fig_psd.update_layout(
             title="Power Spectrum Density of Heave Motion",
             xaxis_title="Frequency (Hz)",
@@ -662,28 +580,23 @@ def launch_dash_kpis(kpi_data, setup_names):
     try:
         fig_psd_pitch_axes = go.Figure()
         for k, name in zip(kpi_data, setup_names):
-            try:
-                f_pf = get_val(k, 'f_psd_pitch_front')
-                psd_pf = np.array(get_val(k, 'psd_pitch_front')) * 1e6
-                f_pr = get_val(k, 'f_psd_pitch_rear')
-                psd_pr = np.array(get_val(k, 'psd_pitch_rear')) * 1e6
-            except KeyError:
-                continue
+            if ('f_psd_pitch_front' in k and 'psd_pitch_front' in k and
+                'f_psd_pitch_rear'  in k and 'psd_pitch_rear'  in k):
 
-            # PSD pitch→vertical eje delantero (m²/Hz → mm²/Hz)
-            fig_psd_pitch_axes.add_trace(go.Scatter(
-                x=f_pf,
-                y=psd_pf,
-                mode='lines',
-                name=f"{name} – Pitch Front"
-            ))
-            # PSD pitch→vertical eje trasero
-            fig_psd_pitch_axes.add_trace(go.Scatter(
-                x=f_pr,
-                y=psd_pr,
-                mode='lines',
-                name=f"{name} – Pitch Rear"
-            ))
+                # PSD pitch→vertical eje delantero (m²/Hz → mm²/Hz)
+                fig_psd_pitch_axes.add_trace(go.Scatter(
+                    x=k['f_psd_pitch_front'],
+                    y=np.array(k['psd_pitch_front']) * 1e6,
+                    mode='lines',
+                    name=f"{name} – Pitch Front"
+                ))
+                # PSD pitch→vertical eje trasero
+                fig_psd_pitch_axes.add_trace(go.Scatter(
+                    x=k['f_psd_pitch_rear'],
+                    y=np.array(k['psd_pitch_rear']) * 1e6,
+                    mode='lines',
+                    name=f"{name} – Pitch Rear"
+                ))
 
         fig_psd_pitch_axes.update_layout(
             title="PSD of Pitch‐Induced Vertical by Axle (Front vs Rear)",
@@ -720,28 +633,26 @@ def launch_dash_kpis(kpi_data, setup_names):
     # 14a) Magnitud (dB) con smoothing
     fig_psd_load_mag = go.Figure()
     for k, name in zip(kpi_data, setup_names):
-        try:
-            f_load = np.array(get_val(k, 'f_psd_load'))
-            mag_f_raw = np.array(get_val(k, 'psd_load_mag_front'))
-            mag_r_raw = np.array(get_val(k, 'psd_load_mag_rear'))
-        except KeyError:
-            continue
-        # Suavizado de la magnitud
-        mag_f = smooth_signal(mag_f_raw, window=51, polyorder=3)
-        mag_r = smooth_signal(mag_r_raw, window=51, polyorder=3)
+        if ('f_psd_load' in k and 'psd_load_mag_front' in k and 'psd_load_mag_rear' in k):
+            f_load = np.array(k['f_psd_load'])
+            # Suavizado de la magnitud
+            mag_f_raw = np.array(k['psd_load_mag_front'])
+            mag_r_raw = np.array(k['psd_load_mag_rear'])
+            mag_f = smooth_signal(mag_f_raw, window=51, polyorder=3)
+            mag_r = smooth_signal(mag_r_raw, window=51, polyorder=3)
 
-        fig_psd_load_mag.add_trace(go.Scatter(
-            x=f_load,
-            y=mag_f,
-            mode='lines',
-            name=f"{name} – Mag Front [dB] (suavizado)"
-        ))
-        fig_psd_load_mag.add_trace(go.Scatter(
-            x=f_load,
-            y=mag_r,
-            mode='lines',
-            name=f"{name} – Mag Rear  [dB] (suavizado)"
-        ))
+            fig_psd_load_mag.add_trace(go.Scatter(
+                x=f_load,
+                y=mag_f,
+                mode='lines',
+                name=f"{name} – Mag Front [dB] (suavizado)",
+            ))
+            fig_psd_load_mag.add_trace(go.Scatter(
+                x=f_load,
+                y=mag_r,
+                mode='lines',
+                name=f"{name} – Mag Rear  [dB] (suavizado)",
+            ))
 
     fig_psd_load_mag.update_layout(
         title="PSD de Carga – Magnitud (Front vs Rear, Suavizado)",
@@ -754,28 +665,26 @@ def launch_dash_kpis(kpi_data, setup_names):
     # 14b) Fase (grados) con smoothing
     fig_psd_load_phase = go.Figure()
     for k, name in zip(kpi_data, setup_names):
-        try:
-            f_load = np.array(get_val(k, 'f_psd_load'))
-            phase_f_raw = np.array(get_val(k, 'psd_load_phase_front'))
-            phase_r_raw = np.array(get_val(k, 'psd_load_phase_rear'))
-        except KeyError:
-            continue
-        # Suavizado de la fase
-        phase_f = smooth_signal(phase_f_raw, window=51, polyorder=3)
-        phase_r = smooth_signal(phase_r_raw, window=51, polyorder=3)
+        if ('f_psd_load' in k and 'psd_load_phase_front' in k and 'psd_load_phase_rear' in k):
+            f_load   = np.array(k['f_psd_load'])
+            # Suavizado de la fase
+            phase_f_raw = np.array(k['psd_load_phase_front'])
+            phase_r_raw = np.array(k['psd_load_phase_rear'])
+            phase_f = smooth_signal(phase_f_raw, window=51, polyorder=3)
+            phase_r = smooth_signal(phase_r_raw, window=51, polyorder=3)
 
-        fig_psd_load_phase.add_trace(go.Scatter(
-            x=f_load,
-            y=phase_f,
-            mode='lines',
-            name=f"{name} – Phase Front [°] (suavizado)"
-        ))
-        fig_psd_load_phase.add_trace(go.Scatter(
-            x=f_load,
-            y=phase_r,
-            mode='lines',
-            name=f"{name} – Phase Rear  [°] (suavizado)"
-        ))
+            fig_psd_load_phase.add_trace(go.Scatter(
+                x=f_load,
+                y=phase_f,
+                mode='lines',
+                name=f"{name} – Phase Front [°] (suavizado)",
+            ))
+            fig_psd_load_phase.add_trace(go.Scatter(
+                x=f_load,
+                y=phase_r,
+                mode='lines',
+                name=f"{name} – Phase Rear  [°] (suavizado)",
+            ))
 
     fig_psd_load_phase.update_layout(
         title="PSD de Carga – Fase (Front vs Rear, Suavizado)",
@@ -788,24 +697,22 @@ def launch_dash_kpis(kpi_data, setup_names):
     # 14c) PSD de Fuerza del Damper – Magnitud (dB) FL y RL con suavizado
     fig_psd_damper_mag = go.Figure()
     for k, name in zip(kpi_data, setup_names):
-        try:
-            f_damp = np.array(get_val(k, 'f_psd_damper'))
-            mag_FL = smooth_signal(np.array(get_val(k, 'psd_damper_mag_FL')), window=51, polyorder=3)
-            mag_RL = smooth_signal(np.array(get_val(k, 'psd_damper_mag_RL')), window=51, polyorder=3)
-        except KeyError:
-            continue
-        fig_psd_damper_mag.add_trace(go.Scatter(
-            x=f_damp,
-            y=mag_FL,
-            mode='lines',
-            name=f"{name} – Damper FL [dB] (suavizado)"
-        ))
-        fig_psd_damper_mag.add_trace(go.Scatter(
-            x=f_damp,
-            y=mag_RL,
-            mode='lines',
-            name=f"{name} – Damper RL [dB] (suavizado)"
-        ))
+        if 'f_psd_damper' in k and 'psd_damper_mag_FL' in k and 'psd_damper_mag_RL' in k:
+            f_damp = np.array(k['f_psd_damper'])
+            mag_FL = smooth_signal(np.array(k['psd_damper_mag_FL']), window=51, polyorder=3)
+            mag_RL = smooth_signal(np.array(k['psd_damper_mag_RL']), window=51, polyorder=3)
+            fig_psd_damper_mag.add_trace(go.Scatter(
+                x=f_damp,
+                y=mag_FL,
+                mode='lines',
+                name=f"{name} – Damper FL [dB] (suavizado)"
+            ))
+            fig_psd_damper_mag.add_trace(go.Scatter(
+                x=f_damp,
+                y=mag_RL,
+                mode='lines',
+                name=f"{name} – Damper RL [dB] (suavizado)"
+            ))
     fig_psd_damper_mag.update_layout(
         title="PSD de Fuerza del Damper – Magnitud (FL vs RL, Suavizado)",
         xaxis=dict(title="Frecuencia [Hz]", type="log"),
@@ -831,7 +738,24 @@ def get_results_figures(sol, post):
     fig_travel.update_layout(title="Suspension Travel [mm]", xaxis_title="Time [s]", yaxis_title="Travel [mm]")
     figures.append(fig_travel)
 
-    # Heave
+    """
+    # Spring
+    fig_spring = go.Figure()
+    fig_spring.add_trace(go.Scatter(x=distance, y=np.mean(post['f_spring'][0:2], axis=0), name="Spring Front"))
+    fig_spring.add_trace(go.Scatter(x=distance, y=np.mean(post['f_spring'][2:4], axis=0), name="Spring Rear"))
+    fig_spring.update_layout(title="Spring Force [N]", xaxis_title="Time [s]", yaxis_title="Force [N]")
+    figures.append(fig_spring)
+    """
+
+    """
+    # Damper
+    fig_damper = go.Figure()
+    fig_damper.add_trace(go.Scatter(x=distance, y=np.mean(post['f_damper'][0:2], axis=0), name="Damper Front"))
+    fig_damper.add_trace(go.Scatter(x=distance, y=np.mean(post['f_damper'][2:4], axis=0), name="Damper Rear"))
+    fig_damper.update_layout(title="Damper Force [N]", xaxis_title="Time [s]", yaxis_title="Force [N]")
+    figures.append(fig_damper)
+    """
+
     fig_heave = go.Figure()
     fig_heave.add_trace(go.Scatter(x=distance, y=sol.y[0]*1000, name="Heave"))
     fig_heave.update_layout(title="Heave [mm]", xaxis_title="Time [s]", yaxis_title="Heave [mm]")
