@@ -1057,11 +1057,7 @@ class SevenPostRigGUI(QWidget):
                     print(f"  Fuerza neumático FL (inicio): {post['f_tire'][0][:5]}")
                     print(f"  Fuerza amortiguador FL (inicio): {post['f_damper'][0][:5]}")
                     print("[DEBUG] Topes físicos por esquina (topout / bottomout):")
-                    for wheel in ["FL", "FR", "RL", "RR"]:
-                        zt = post[f'z_topout_{wheel}']   # valor escalar [m]
-                        zb = post[f'z_bottomout_{wheel}']
-                        print(f"  {wheel}: {zt*1000:.2f} mm / {zb*1000:.2f} mm")
-                    # ───────────────────────────────────────────────────────────
+
 
                     for eje, idxs in zip(['Front', 'Rear'], [(0,1),(2,3)]):
                         travel = np.mean([post['travel'][i]*1000 for i in idxs], axis=0)
