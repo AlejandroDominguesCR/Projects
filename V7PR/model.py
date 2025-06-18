@@ -85,7 +85,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         f_damper = damper(rel_vel)
         # Tope como respaldo
         f_stop = tope_fuerza(x_raw, z_top, z_bot)
-        return f_spring + f_bump + f_damper + f_stop
+        return f_spring + f_bump - f_damper + f_stop
 
     # Cálculo de offsets estáticos y dinámicos
     phi_off_front = -lf * phi
@@ -750,7 +750,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     wheel_load = (aero + static + f_tire + f_arb) / 9.81   #  + f_tire(4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
-    f_wheel = (f_spring + f_bump + f_damper + f_arb)/ 9.81    # (4, N)
+    f_wheel = (f_spring + f_bump - f_damper + f_arb)/ 9.81    # (4, N)
     f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
 
     f_damp_FL, Pxx_damp_FL = welch(f_damper[0], fs=fs, nperseg=nperseg, noverlap=noverlap)

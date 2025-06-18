@@ -178,15 +178,21 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
-    mr_f = 0.491 #0.696 1.437
-    mr_r = 0.752 #0.75 1.328
+    mr_f_dw = 1#0.696 #1.437
+    mr_r_dw = 1#0.752 #1.328
 
-    global_setup["MR_FL"] = mr_f
-    global_setup["MR_FR"] = mr_f
+    mr_f_rd = 1#-0.01695
+    mr_r_rd = 1
 
-    global_setup["MR_RL"] = mr_r
-    global_setup["MR_RR"] = mr_r
 
+    global_setup["MR_FL"] = mr_f_dw
+    global_setup["MR_FR"] = mr_f_dw
+
+    global_setup["MR_RL"] = mr_r_dw
+    global_setup["MR_RR"] = mr_r_dw
+
+    global_setup["MR_FL_rd"] = mr_f_rd
+    global_setup["MR_FR_rd"] = mr_f_rd
 
     chassis = json_data['config']['chassis']
     tyres = json_data['config']['tyres']
@@ -255,10 +261,10 @@ def prepare_simple_params(params, global_setup):
     kRL = params[2]['kSpring']
     kRR = params[3]['kSpring']
 
-    kFL = kFL*  global_setup["MR_FL"]**2
-    kFR = kFR*  global_setup["MR_FR"]**2
-    kRL = kRL*  global_setup["MR_RL"]**2
-    kRL = kRR*  global_setup["MR_RR"]**2
+    kFL = kFL/  global_setup["MR_FL"]**2
+    kFR = kFR/  global_setup["MR_FR"]**2
+    kRL = kRL/  global_setup["MR_RL"]**2
+    kRR = kRR/ global_setup["MR_RR"]**2
 
     # Damper y bumpstop interpoladores
     # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
@@ -297,8 +303,8 @@ def prepare_simple_params(params, global_setup):
 
 
     # Rigidez de barra estabilizadora (anti roll bar)
-    k_arb_f = global_setup.get('kARB_F', 0)
-    k_arb_r = global_setup.get('kARB_R', 0)
+    k_arb_f = global_setup.get('kARB_F', 0)/ global_setup["MR_FL"]**2
+    k_arb_r = global_setup.get('kARB_R', 0)/ global_setup["MR_RL"]**2
 
     # --- Cálculo de topes físicos (top-out y bumpstop) para cada esquina ---
     z_topout_FL = float(min(params[0]['spring_x'][0], params[0]['bump_x'][0]))
