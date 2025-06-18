@@ -44,15 +44,10 @@ def launch_dash(sol, post, setup_name="Setup"):
         # Travel absoluto por rueda (incluyendo z_free)
         x_total = travel# + post['z_free'][:, None]
         graphs.append(dcc.Graph(figure=go.Figure([
-            go.Scatter(x=distance, y=x_total[0] * 1000, name="Travel FL"),
-            go.Scatter(x=distance, y=x_total[1] * 1000, name="Travel FR"),
-            go.Scatter(x=distance, y=x_total[2] * 1000, name="Travel RL"),
-            go.Scatter(x=distance, y=x_total[3] * 1000, name="Travel RR"),
+            go.Scatter(x=distance, y=x_total[0] * 1000, name="Travel FL"), go.Scatter(x=distance, y=x_total[1] * 1000, name="Travel FR"),
+            go.Scatter(x=distance, y=x_total[2] * 1000, name="Travel RL"), go.Scatter(x=distance, y=x_total[3] * 1000, name="Travel RR"),
         ]).update_layout(
-            title="Suspension Travel por rueda [mm]",
-            xaxis_title="distance [m]",
-            yaxis_title="Travel [mm]"
-        )))
+            title="Suspension Travel por rueda [mm]",xaxis_title="distance [m]",yaxis_title="Travel [mm]")))
         
         # Heave (filtrado)
         graphs.append(dcc.Graph(figure=go.Figure([
@@ -76,11 +71,7 @@ def launch_dash(sol, post, setup_name="Setup"):
             avg_tire_load = np.mean(wheel_ld, axis=0)
             y_gl = np.where(mask, avg_tire_load, np.nan)
             grip_limited_trace = go.Scatter(
-                x=distance,
-                y=y_gl,
-                name="Grip-Limited Zone",
-                mode='lines',
-                line=dict(color='black', width=3, dash='dot'),
+                x=distance, y=y_gl, name="Grip-Limited Zone", mode='lines', line=dict(color='black', width=3, dash='dot'),
                 showlegend=True
             )
 
@@ -92,10 +83,7 @@ def launch_dash(sol, post, setup_name="Setup"):
             go.Scatter(x=distance, y=-ae_rear,  name="Downforce Rear"),
         ])
         fig_aero.update_layout(
-            title="Aerodynamic Downforce per Axle [N]",
-            xaxis_title="Distance [m]",
-            yaxis_title="Force [N]"
-        )
+            title="Aerodynamic Downforce per Axle [N]", xaxis_title="Distance [m]", yaxis_title="Force [N]")
         graphs.append(dcc.Graph(figure=fig_aero))
 
         # Tire load
@@ -104,48 +92,32 @@ def launch_dash(sol, post, setup_name="Setup"):
         # Curvas de carga por rueda
         for i, name in enumerate(wheel_names):
             fig_load.add_trace(
-                go.Scatter(
-                    x=distance,
-                    y=wheel_f[i],
-                    name=name
-                )
-            )
+                go.Scatter(x=distance, y=wheel_f[i], name=name))
 
         # Marcadores grip-limited para cada rueda
         for i, name in enumerate(wheel_names):
             fig_load.add_trace(
                 go.Scatter(
-                    x=distance[grip_mask],
-                    y=wheel_f[i, grip_mask],
-                    mode='markers',
-                    name=f"{name} Grip-Limited",
-                    marker=dict(color='black', symbol='line-ns-open')
-                )
+                    x=distance[grip_mask], y=wheel_f[i, grip_mask],
+                    mode='markers', name=f"{name} Grip-Limited",
+                    marker=dict(color='black', symbol='line-ns-open'))
             )
 
         fig_load.update_layout(
-            title="Tire Load per Wheel [N]",
-            xaxis_title="Distance [m]",
-            yaxis_title="Load [N]"
-        )
+            title="Tire Load per Wheel [N]", xaxis_title="Distance [m]", yaxis_title="Load [N]")
         graphs.append(dcc.Graph(figure=fig_load))
         
         # === Bumpstop Forces por rueda ===
         graphs.append(dcc.Graph(
             figure=go.Figure([
-                go.Scatter(x=distance, y=post['f_bump'][0], name="Bumpstop FL"),
-                go.Scatter(x=distance, y=post['f_bump'][1], name="Bumpstop FR"),
-                go.Scatter(x=distance, y=post['f_bump'][2], name="Bumpstop RL"),
-                go.Scatter(x=distance, y=post['f_bump'][3], name="Bumpstop RR"),
+                go.Scatter(x=distance, y=post['f_bump'][0], name="Bumpstop FL"), go.Scatter(x=distance, y=post['f_bump'][1], name="Bumpstop FR"),
+                go.Scatter(x=distance, y=post['f_bump'][2], name="Bumpstop RL"), go.Scatter(x=distance, y=post['f_bump'][3], name="Bumpstop RR"),
             ]).update_layout(
-                title="Bumpstop Force per Wheel [N]",
-                xaxis_title="Distance [m]",
-                yaxis_title="Force [N]"
+                title="Bumpstop Force per Wheel [N]", xaxis_title="Distance [m]", yaxis_title="Force [N]"
             ),
-            id='bumpstop-forces',
-            style={'height': '300px'},
-            config={'displayModeBar': False}
+            id='bumpstop-forces', style={'height': '300px'}, config={'displayModeBar': False}
         ))
+
         if "arb_torque_front" in post:
             fig_arb = go.Figure([
                 go.Scatter(x=distance, y=post["arb_torque_front"], name="Front ARB"),
@@ -176,13 +148,11 @@ def launch_dash(sol, post, setup_name="Setup"):
             x=[frh_rms], y=[load_f_rms], mode='markers+text', text=["Front"], textposition='top center'
         ))
         fig_frh_vs_load.update_layout(
-            title="FRH RMS vs Contact Patch Load RMS",
-            xaxis_title="Front Ride Height RMS [mm]",
+            title="FRH RMS vs Contact Patch Load RMS", xaxis_title="Front Ride Height RMS [mm]",
             yaxis_title="Contact Patch Load RMS [N]"
         )
         graphs.append(dcc.Graph(figure=fig_frh_vs_load))
         
-
         app.layout = html.Div([
             html.H1(f"Resultados 7-Post Rig: {setup_name}"),
             html.H2("Señales dinámicas"),
@@ -224,8 +194,8 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # --- DEFINICIÓN CENTRALIZADA DE LOS KPIs --- 
     kpi_definitions = [
-        ("Tire Load Max (Grip-Limited) [N]", "N", "f_tire_grip_limited_max", 1),
-        ("Tire Load Min (Grip-Limited) [N]", "N", "f_tire_grip_limited_min", 1),
+        ("Wheel Load Max [N]", "N", "wheel_load_max", 1),
+        ("Wheel Load Min [N]", "N", "wheel_load_min", 1),
     ]
 
     # --- ARRANCAR LAYOUT CON UN TÍTULO PRINCIPAL ---
@@ -608,8 +578,8 @@ def get_results_figures(sol, post):
     distance = np.cumsum(post['vx']) * np.gradient(sol.t)
     # Travel
     fig_travel = go.Figure()
-    fig_travel.add_trace(go.Scatter(x=distance, y=np.mean(post['travel_rel'][0:2], axis=0)*1000, name="Front"))
-    fig_travel.add_trace(go.Scatter(x=distance, y=np.mean(post['travel_rel'][2:4], axis=0)*1000, name="Rear"))
+    fig_travel.add_trace(go.Scatter(x=distance, y=np.mean(post['travel'][0:2], axis=0)*1000, name="Front"))
+    fig_travel.add_trace(go.Scatter(x=distance, y=np.mean(post['travel'][2:4], axis=0)*1000, name="Rear"))
     fig_travel.update_layout(title="Suspension Travel [mm]", xaxis_title="Time [s]", yaxis_title="Travel [mm]")
     figures.append(fig_travel)
 
@@ -631,12 +601,13 @@ def get_results_figures(sol, post):
     fig_roll.update_layout(title="Roll [°]", xaxis_title="Time [s]", yaxis_title="Roll [°]")
     figures.append(fig_roll)
 
-    # Tire Load
-    fig_tire = go.Figure()
+    # Wheel Load
+    fig_load = go.Figure()
     for i, label in enumerate(["FL", "FR", "RL", "RR"]):
-        fig_tire.add_trace(go.Scatter(x=distance, y=post['f_tire'][i], name=label))
-    fig_tire.update_layout(title="Tire Load per Wheel [N]", xaxis_title="Time [s]", yaxis_title="Load [N]")
-    figures.append(fig_tire)
+        fig_load.add_trace(go.Scatter(x=distance, y=post['wheel_load'][i], name=label))
+    fig_load.update_layout(
+        title="Wheel Load per Wheel [N]",xaxis_title="Time [s]",yaxis_title="Load [N]")
+    figures.append(fig_load)
 
     return figures
 
@@ -657,8 +628,8 @@ def get_kpi_figures(setups):
 
     # === 1) Barras de KPIs centrales (Grip-Limited) ===
     kpi_definitions = [
-        ("Tire Load Max (Grip-Limited) [N]", "N", "f_tire_grip_limited_max", 1),
-        ("Tire Load Min (Grip-Limited) [N]", "N", "f_tire_grip_limited_min", 1),
+        ("Wheel Load Max [N]", "N", "wheel_load_max", 1),
+        ("Wheel Load Min [N]", "N", "wheel_load_min", 1),
     ]
     for title, unit, key, factor in kpi_definitions:
         try:
@@ -668,11 +639,8 @@ def get_kpi_figures(setups):
             for values, name in zip(values_list, setup_names):
                 fig.add_trace(go.Bar(name=name, x=kpi_labels, y=values))
             fig.update_layout(
-                title=title,
-                yaxis_title=unit,
-                barmode='group',
-                width=NEW_WIDTH,
-                height=NEW_HEIGHT
+                title=title, yaxis_title=unit, barmode='group',
+                width=NEW_WIDTH, height=NEW_HEIGHT
             )
             figures.append(fig)
         except KeyError:
@@ -698,12 +666,10 @@ def get_kpi_figures(setups):
         fig_accu.add_trace(go.Bar(name="Rear  Axle", x=tracks_unique, y=rear_vals))
         fig_accu.update_layout(
             title="Accumulated Road Track-Noise Normalized by Lap Time",
-            xaxis_title="Track",
-            yaxis_title="Normalized Accu. Track-Noise [mm/s]",
-            barmode="group",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            xaxis_title="Track", yaxis_title="Normalized Accu. Track-Noise [mm/s]",
+            barmode="group", width=NEW_WIDTH, height=NEW_HEIGHT
         )
+
         figures.append(fig_accu)
     except (KeyError, TypeError):
         pass
@@ -714,19 +680,14 @@ def get_kpi_figures(setups):
         for _, post, _, _ in setups:
             if 'pitch_deg' in post and 'distance' in post:
                 fig_pitch_vs_distance.add_trace(go.Scatter(
-                    x=post['distance'],
-                    y=post['pitch_deg'],
-                    mode='lines',
-                    name=""
+                    x=post['distance'], y=post['pitch_deg'], mode='lines', name=""
                 ))
         for idx, trace in enumerate(fig_pitch_vs_distance.data):
             trace.name = setup_names[idx]
         fig_pitch_vs_distance.update_layout(
             title="Pitch vs Distance [°]",
-            xaxis_title="Distance [m]",
-            yaxis_title="Pitch [°]",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            xaxis_title="Distance [m]", yaxis_title="Pitch [°]",
+            width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_pitch_vs_distance)
     except Exception:
@@ -737,20 +698,15 @@ def get_kpi_figures(setups):
         pitch_rms_vals = [float(post.get('pitch_rms', 0)) for _, post, _, _ in setups]
         fig_pitch_table = go.Figure(data=[go.Table(
             header=dict(
-                values=["Setup", "Pitch RMS [°]"],
-                fill_color='paleturquoise',
-                align='left'
+                values=["Setup", "Pitch RMS [°]"], fill_color='paleturquoise', align='left'
             ),
             cells=dict(
-                values=[setup_names, pitch_rms_vals],
-                fill_color='lavender',
-                align='left'
+                values=[setup_names, pitch_rms_vals], fill_color='lavender', align='left'
             )
         )])
         fig_pitch_table.update_layout(
             title="Pitch RMS por Setup (Resumen Numérico)",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_pitch_table)
     except KeyError:
@@ -769,10 +725,8 @@ def get_kpi_figures(setups):
             ))
         fig_frh_rrh.update_layout(
             title="Ride Height RMS en GLS [mm]",
-            barmode='group',
-            xaxis_title="Axle",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            barmode='group', xaxis_title="Axle",
+            width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_frh_rrh)
     except KeyError:
@@ -785,18 +739,14 @@ def get_kpi_figures(setups):
         fig_h_vs_f = go.Figure()
         for name, frh, load_f in zip(setup_names, frh_rms_vals, load_rms_front):
             fig_h_vs_f.add_trace(go.Scatter(
-                x=[frh],
-                y=[load_f],
+                x=[frh], y=[load_f],
                 mode='markers+text',
-                text=[name],
-                textposition='top center'
+                text=[name], textposition='top center'
             ))
         fig_h_vs_f.update_layout(
             title="Front Ride Height RMS vs Contact Patch Load RMS",
-            xaxis_title="Front Ride Height RMS [mm]",
-            yaxis_title="Contact Patch Load RMS [N]",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            xaxis_title="Front Ride Height RMS [mm]", yaxis_title="Contact Patch Load RMS [N]",
+            width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_h_vs_f)
     except KeyError:
@@ -809,18 +759,14 @@ def get_kpi_figures(setups):
         fig_rrh_vs_f = go.Figure()
         for name, rrh, load_r in zip(setup_names, rrh_rms_vals, load_rms_rear):
             fig_rrh_vs_f.add_trace(go.Scatter(
-                x=[rrh],
-                y=[load_r],
+                x=[rrh], y=[load_r],
                 mode='markers+text',
-                text=[name],
-                textposition='top center'
+                text=[name], textposition='top center'
             ))
         fig_rrh_vs_f.update_layout(
             title="Rear Ride Height RMS vs Contact Patch Load RMS",
-            xaxis_title="Rear Ride Height RMS [mm]",
-            yaxis_title="Contact Patch Load RMS [N]",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            xaxis_title="Rear Ride Height RMS [mm]", yaxis_title="Contact Patch Load RMS [N]",
+            width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_rrh_vs_f)
     except KeyError:
@@ -840,11 +786,8 @@ def get_kpi_figures(setups):
         for idx, trace in enumerate(fig_rh.data):
             trace.name = setup_names[idx]
         fig_rh.update_layout(
-            title="Ride Height RMS [mm]",
-            barmode='group',
-            xaxis_title="Axle",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            title="Ride Height RMS [mm]", barmode='group', xaxis_title="Axle",
+            width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_rh)
     except Exception:
@@ -859,11 +802,8 @@ def get_kpi_figures(setups):
         fig_brake.add_trace(go.Bar(name="Rear",  x=setup_names, y=brake_vals_rear))
         fig_brake.update_layout(
             title="Contact Patch Load RMS en Frenada [N]",
-            xaxis_title="Setup",
-            yaxis_title="CPL RMS [N]",
-            barmode="group",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            xaxis_title="Setup", yaxis_title="CPL RMS [N]", barmode="group",
+            width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_brake)
     except KeyError:
@@ -877,64 +817,11 @@ def get_kpi_figures(setups):
         fig_traction.add_trace(go.Bar(name="Rear",  x=setup_names, y=traction_vals_rear))
         fig_traction.update_layout(
             title="Contact Patch Load RMS en Tracción [N]",
-            xaxis_title="Setup",
-            yaxis_title="CPL RMS [N]",
-            barmode="group",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            xaxis_title="Setup", yaxis_title="CPL RMS [N]", barmode="group",
+            width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_traction)
     except KeyError:
-        pass
-
-    # === 10) Heave PSD [mm²/Hz] (Global) ===
-    try:
-        fig_psd_heave = go.Figure()
-        for _, post, _, _ in setups:
-            if 'f_psd' in post and 'psd_heave' in post:
-                fig_psd_heave.add_trace(go.Scatter(
-                    x=post['f_psd'],
-                    y=np.array(post['psd_heave']) * 1e6,  # m²/Hz → mm²/Hz
-                    mode='lines',
-                    name=""
-                ))
-        for idx, trace in enumerate(fig_psd_heave.data):
-            trace.name = setup_names[idx]
-        fig_psd_heave.update_layout(
-            title="Power Spectrum Density of Heave Motion",
-            xaxis_title="Frequency [Hz]",
-            yaxis_title="PSD Heave (mm²/Hz)",
-            yaxis_type="log",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
-        )
-        figures.append(fig_psd_heave)
-    except Exception:
-        pass
-
-    # === 11) Pitch PSD [rad²/Hz] (Global) ===
-    try:
-        fig_psd_pitch = go.Figure()
-        for _, post, _, _ in setups:
-            if 'f_psd_pitch' in post and 'psd_pitch' in post:
-                fig_psd_pitch.add_trace(go.Scatter(
-                    x=post['f_psd_pitch'],
-                    y=np.array(post['psd_pitch']),
-                    mode='lines',
-                    name=""
-                ))
-        for idx, trace in enumerate(fig_psd_pitch.data):
-            trace.name = setup_names[idx]
-        fig_psd_pitch.update_layout(
-            title="Power Spectrum Density of Pitch Motion",
-            xaxis_title="Frequency [Hz]",
-            yaxis_title="PSD Pitch (rad²/Hz)",
-            yaxis_type="log",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
-        )
-        figures.append(fig_psd_pitch)
-    except Exception:
         pass
 
     # === 12) Heave PSD por eje (Front vs Rear) en mm²/Hz ===
