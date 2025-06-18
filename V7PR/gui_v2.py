@@ -178,6 +178,16 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
+    mr_f = 0.491 #0.696 1.437
+    mr_r = 0.752 #0.75 1.328
+
+    global_setup["MR_FL"] = mr_f
+    global_setup["MR_FR"] = mr_f
+
+    global_setup["MR_RL"] = mr_r
+    global_setup["MR_RR"] = mr_r
+
+
     chassis = json_data['config']['chassis']
     tyres = json_data['config']['tyres']
 
@@ -245,6 +255,10 @@ def prepare_simple_params(params, global_setup):
     kRL = params[2]['kSpring']
     kRR = params[3]['kSpring']
 
+    kFL = kFL*  global_setup["MR_FL"]**2
+    kFR = kFR*  global_setup["MR_FR"]**2
+    kRL = kRL*  global_setup["MR_RL"]**2
+    kRL = kRR*  global_setup["MR_RR"]**2
 
     # Damper y bumpstop interpoladores
     # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
