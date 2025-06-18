@@ -571,10 +571,13 @@ def launch_dash_kpis(kpi_data, setup_names):
     app_kpi.layout = html.Div(layout)
     app_kpi.run(port=8051, debug=False)
 
-def get_results_figures(sol, post):
+def get_results_figures(sol, post, save_dir=None):
     import plotly.graph_objs as go
     import numpy as np
+    import os
     figures = []
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
     distance = np.cumsum(post['vx']) * np.gradient(sol.t)
     # Travel
     fig_travel = go.Figure()
@@ -582,24 +585,32 @@ def get_results_figures(sol, post):
     fig_travel.add_trace(go.Scatter(x=distance, y=np.mean(post['travel'][2:4], axis=0)*1000, name="Rear"))
     fig_travel.update_layout(title="Suspension Travel [mm]", xaxis_title="Time [s]", yaxis_title="Travel [mm]")
     figures.append(fig_travel)
+    if save_dir:
+        fig_travel.write_html(os.path.join(save_dir, 'travel.html'))
 
     # Heave
     fig_heave = go.Figure()
     fig_heave.add_trace(go.Scatter(x=distance, y=sol.y[0]*1000, name="Heave"))
     fig_heave.update_layout(title="Heave [mm]", xaxis_title="Time [s]", yaxis_title="Heave [mm]")
     figures.append(fig_heave)
+    if save_dir:
+        fig_heave.write_html(os.path.join(save_dir, 'heave.html'))
 
     # Pitch
     fig_pitch = go.Figure()
     fig_pitch.add_trace(go.Scatter(x=distance, y=np.degrees(sol.y[2]), name="Pitch"))
     fig_pitch.update_layout(title="Pitch [°]", xaxis_title="Time [s]", yaxis_title="Pitch [°]")
     figures.append(fig_pitch)
+    if save_dir:
+        fig_roll.write_html(os.path.join(save_dir, 'roll.html'))
 
     # Roll
     fig_roll = go.Figure()
     fig_roll.add_trace(go.Scatter(x=distance, y=np.degrees(sol.y[4]), name="Roll"))
     fig_roll.update_layout(title="Roll [°]", xaxis_title="Time [s]", yaxis_title="Roll [°]")
     figures.append(fig_roll)
+    if save_dir:
+        fig_roll.write_html(os.path.join(save_dir, 'roll.html'))
 
     # Wheel Load
     fig_load = go.Figure()
@@ -608,10 +619,15 @@ def get_results_figures(sol, post):
     fig_load.update_layout(
         title="Wheel Load per Wheel [N]",xaxis_title="Time [s]",yaxis_title="Load [N]")
     figures.append(fig_load)
+    if save_dir:
+        fig_load.write_html(os.path.join(save_dir, 'wheel_load.html'))
 
+    if save_dir:
+        for idx, fig in enumerate(figures, 1):
+            fig.write_html(os.path.join(save_dir, f'result_{idx}.html'))
     return figures
 
-def get_kpi_figures(setups):
+def get_kpi_figures(setups, save_dir=None):
     import os
     import numpy as np
     import plotly.graph_objects as go
@@ -621,7 +637,8 @@ def get_kpi_figures(setups):
     kpi_labels  = ['FL', 'FR', 'RL', 'RR']
 
     figures = []
-
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
     # Definimos el nuevo tamaño (20 % más que 1122×529)
     NEW_WIDTH  = int(1122 * 1.5)  # ≈ 1346
     NEW_HEIGHT = int(529  * 1.5)  # ≈ 634
@@ -891,6 +908,10 @@ def get_kpi_figures(setups):
         figures.append(fig_psd_pitch_axes)
     except Exception:
         pass
+
+    if save_dir:
+        for idx, fig in enumerate(figures, 1):
+            fig.write_html(os.path.join(save_dir, f'kpi_{idx}.html'))
 
     return figures
 

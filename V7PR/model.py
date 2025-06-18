@@ -147,10 +147,12 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     F_RR += -T_arb_r / lever_r
 
     # --- Aerodinámica ---
+    dyn_hF = h - lf * phi + params.get('hRideF', 0.02)
+    dyn_hR = h + lr * phi + params.get('hRideR', 0.04)
     Fz_aero_front, Fz_aero_rear, F_drag = compute_aero_forces(
         vx=params.get('vx', 30.0),
-        hRideF=params.get('hRideF', 0.02),
-        hRideR=params.get('hRideR', 0.04),
+        hRideF=dyn_hF,
+        hRideR=dyn_hR,
         aero_poly=params.get('aero_polynomials', {})
     )
     F_FL += 0.5 * Fz_aero_front
@@ -327,10 +329,12 @@ def compute_static_equilibrium(params, vx=0.0):
             F_RR += -T_arb_r / lever_r
 
         # --- Añadir fuerzas aerodinámicas si hay velocidad ---
+        dyn_hF = h - lf * phi + params.get("hRideF", 0.02)
+        dyn_hR = h + lr * phi + params.get("hRideR", 0.04)
         Fz_aero_front, Fz_aero_rear, _ = compute_aero_forces(
             vx=vx,
-            hRideF=params.get("hRideF", 0.02),
-            hRideR=params.get("hRideR", 0.04),
+            hRideF=dyn_hF,
+            hRideR=dyn_hR,
             aero_poly=params.get("aero_polynomials", {})
         )
         # Distribuir por rueda
