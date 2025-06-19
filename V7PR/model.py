@@ -85,7 +85,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         f_damper = damper(rel_vel)
         # Tope como respaldo
         f_stop = tope_fuerza(x_raw, z_top, z_bot)
-        return f_spring + f_bump - f_damper + f_stop
+        return f_spring + f_bump + f_damper + f_stop
 
     # Cálculo de offsets estáticos y dinámicos
     phi_off_front = -lf * phi
@@ -150,7 +150,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     dyn_hF = h - lf * phi + params.get('hRideF', 0.02)
     dyn_hR = h + lr * phi + params.get('hRideR', 0.04)
     Fz_aero_front, Fz_aero_rear, F_drag = compute_aero_forces(
-        vx=params.get('vx', 30.0),
+        vx=params.get('vx', 15),
         hRideF=dyn_hF,
         hRideR=dyn_hR,
         aero_poly=params.get('aero_polynomials', {})
@@ -607,9 +607,28 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         pos[:, 1:2] * theta[None, :]    # aporte por roll  × distancia en y
     )
 
-    # Travel absoluto (“unsprung” – “chassis”) en cada esquina
-    x_spring   = zu - zs                # shape: (4, N)
-    travel_abs = x_spring.copy()
+    # 3. Cinemática de suspensión: travel en rueda (“unsprung”–“chassis”)
+    # 1) Travel a nivel rueda (“unsprung” vs chasis)
+    x_wheel = zu - zs      # shape: (4, N)
+
+    # 2) Extraer MR damper→wheel desde params
+    #    params es una lista de 4 dicts con key 'mr_dw'
+    # 3.3) Extraer MR damper→wheel desde el dict simple_params
+    mr_dw = np.array([params['MR_FL'],params['MR_FR'],params['MR_RL'],params['MR_RR']])[:, None]  # (4,1)
+
+    # 3) Separar front/rear y aplicar su MR correspondiente
+    mr_front = mr_dw[0:2, :]    # (2,1) para FL,FR
+    mr_rear  = mr_dw[2:4, :]    # (2,1) para RL,RR
+
+    # 4) Desplazamiento real del pistón/muelle en cada eje
+    x_spring_front = x_wheel[0:2, :] / mr_front  # (2, N)
+    x_spring_rear  = x_wheel[2:4, :] / mr_rear   # (2, N)
+
+    x_spring = np.vstack([x_spring_front, x_spring_rear])  # (4, N)
+    travel_abs = x_spring.copy()   
+    # 5) Guardar para gráficos (front y rear por separado)
+    travel_abs_front = x_spring_front.copy()
+    travel_abs_rear  = x_spring_rear.copy()
 
     # Límites física de recorrido (stop extension/compression)
     z_topout    = np.array([
@@ -668,7 +687,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     ])  # neumáticos
 
     f_tire     = kt[:,None] * (zt - zu)   # (4, N)
-    wheel_load = aero + static + f_tire   #  + f_tire(4, N)
+
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 3.3) Márgenes dinámicos y estáticos traseros
@@ -679,14 +698,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     xRR_static       = x_spring[3,0]
     z_free_RL        = params['z_RL_free']
     z_free_RR        = params['z_RR_free']
-    margen_ext_s_RL  = xRL_static - params['z_topout_RL']
-    margen_comp_s_RL = z_free_RL - (xRL_static - params['z_topout_RL'])
-    margen_ext_s_RR  = xRR_static - params['z_topout_RR']
-    margen_comp_s_RR = z_free_RR - (xRR_static - params['z_topout_RR'])
-
-    print(f"[INFO] Travel estático trasero: RL = {xRL_static*1000:.2f} mm, RR = {xRR_static*1000:.2f} mm")
-    print(f"[INFO] Margen RL (estático corregido): extensión = {margen_ext_s_RL*1000:.2f} mm, compresión = {margen_comp_s_RL*1000:.2f} mm")
-    print(f"[INFO] Margen RR (estático corregido): extensión = {margen_ext_s_RR*1000:.2f} mm, compresión = {margen_comp_s_RR*1000:.2f} mm")
 
     travel_static   = x_spring[:,0][:,None]
     travel_rel      = x_spring - travel_static
@@ -747,11 +758,11 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         f_arb[3] += -arb_torque_rear / lever_r
 
         # 4d) Fuerza neta en rueda (nunca negativa)
-    wheel_load = (aero + static + f_tire + f_arb) / 9.81   #  + f_tire(4, N)
+    wheel_load = (aero + static + f_arb + f_spring) / 9.81   #  + f_tire(4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
-    f_wheel = (f_spring + f_bump - f_damper + f_arb)/ 9.81    # (4, N)
-    f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
+    f_wheel = (aero + static + f_arb + f_spring)    # (4, N)
+    #f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
 
     f_damp_FL, Pxx_damp_FL = welch(f_damper[0], fs=fs, nperseg=nperseg, noverlap=noverlap)
     f_damp_RL, Pxx_damp_RL = welch(f_damper[2], fs=fs, nperseg=nperseg, noverlap=noverlap)
@@ -898,8 +909,8 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     # ──────────────────────────────────────────────────────────────────────────────
     #   f_tire es ya un array (4, N) con [FL, FR, RL, RR].
 
-    front_signal = (wheel_load[0, :]) /9.81  # Promedio de fuerza en las dos ruedas delanteras
-    rear_signal  = (wheel_load[2, :]) /9.81  # Promedio de fuerza en las dos ruedas traseras
+    front_signal = (wheel_load[0, :])   # Promedio de fuerza en las dos ruedas delanteras
+    rear_signal  = (wheel_load[2, :])   # Promedio de fuerza en las dos ruedas traseras
 
     # Usamos FFT unidireccional (solo frecuencias positivas):
     F_front = np.fft.rfft(front_signal)    # Componente compleja espectral frontal
@@ -933,6 +944,9 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     return {
         # --- Cinemática básica ---
         'travel':             x_spring,               # (4, N)
+        'travel_abs':      travel_abs,          # (4, N)
+        'travel_abs_front': travel_abs_front,   # (2, N)
+        'travel_abs_rear':  travel_abs_rear,    # (2, N)
         'travel_rel':         travel_rel,             # (4, N)
         'travel_static':      travel_static,          # (4, 1)
         'travel_max':         travel_max,             # (4,)
@@ -940,7 +954,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         'travel_range':       travel_range,           # (4,)
         'travel_used_pct':    travel_used_pct,        # (4,)
         'travel_abs':         travel_abs,             # (4, N)
-        'damper_travel':      zu - zs,                # (4, N)
+        'wheel_travel':      x_wheel,                # (4, N)
         'margen_ext':         margen_ext,             # (4, N)
         'margen_comp':        margen_comp,            # (4, N)
         'z_free':             np.array([

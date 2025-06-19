@@ -106,7 +106,7 @@ def parse_json_setup(json_data):
         # --- Corrección damper: separar compresión y extensión ---
         v = np.array(damper["vDamperBasis"])
         F = np.array(damper["FDamperLU"])
-        damper_f_ext = F[v > 0]
+        damper_f_ext = F[v > 0] 
         damper_v_ext = v[v > 0]
         damper_f_comp = F[v < 0]
         damper_v_comp = v[v < 0]
@@ -185,7 +185,7 @@ def parse_json_setup(json_data):
     mr_r_rd = 1
 
     mr_f_arb= 1.3387
-    mr_r_arb= 1
+    mr_r_arb= 4.4286
 
     global_setup["MR_FL"] = mr_f_wd
     global_setup["MR_FR"] = mr_f_wd
@@ -194,10 +194,13 @@ def parse_json_setup(json_data):
     global_setup["MR_RR"] = mr_r_wd
 
     global_setup["MR_FL_rd"] = mr_f_rd
-    global_setup["MR_FR_rd"] = mr_f_rd
+    global_setup["MR_FR_rd"] = mr_r_rd
 
     global_setup["MR_F_ARB"] = mr_f_arb
     global_setup["MR_R_ARB"] = mr_r_arb
+
+    for idx, corner in enumerate(("FL","FR","RL","RR")):
+        params[idx]["mr_dw"] = global_setup[f"MR_{corner}"]
 
     chassis = json_data['config']['chassis']
     tyres = json_data['config']['tyres']
@@ -273,25 +276,35 @@ def prepare_simple_params(params, global_setup):
 
     # Damper y bumpstop interpoladores
     # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
-    def damper_interp_factory(v_ext, f_ext, v_comp, f_comp):
+    def damper_interp_factory(v_ext, f_ext, v_comp, f_comp, mr_wd):
         from scipy.interpolate import interp1d
-        # Crear interpoladores lineales con extrapolación
-        interp_ext = interp1d(v_ext, f_ext, kind='linear', fill_value='extrapolate', bounds_error=False)
-        interp_comp = interp1d(v_comp, f_comp, kind='linear', fill_value='extrapolate', bounds_error=False)
-        def damper_func(v):
-            v = np.asarray(v)
-            out = np.zeros_like(v)
-            mask_ext = v > 0
-            mask_comp = v < 0
-            if np.any(mask_ext):
-                out[mask_ext] = interp_ext(v[mask_ext])
-            if np.any(mask_comp):
-                out[mask_comp] = interp_comp(v[mask_comp])
-            out[v == 0] = 0.0
-            return out
+        interp_ext = interp1d(v_ext, f_ext, kind='linear',
+                              fill_value='extrapolate', bounds_error=False)
+        interp_comp = interp1d(v_comp, f_comp, kind='linear',
+                               fill_value='extrapolate', bounds_error=False)
+        def damper_func(v_wheel):
+            # 1) velocidad rueda → velocidad pistón amortiguador
+            v_damper = np.asarray(v_wheel) / mr_wd
+            # 2) fuerza interna en el amortiguador
+            f_int = np.where(v_damper > 0,
+                             interp_ext(v_damper),
+                             interp_comp(v_damper))
+            # 3) fuerza pistón → fuerza rueda
+            return f_int / mr_wd
         return damper_func
-    damper_front = damper_interp_factory(params[0]['damper_v_ext'], params[0]['damper_f_ext'], params[0]['damper_v_comp'], params[0]['damper_f_comp'])
-    damper_rear = damper_interp_factory(params[2]['damper_v_ext'], params[2]['damper_f_ext'], params[2]['damper_v_comp'], params[2]['damper_f_comp'])
+
+    # Llama a la fábrica pasando tu MR damper→wheel ya definido en global_setup
+    damper_front = damper_interp_factory(
+        params[0]['damper_v_ext'], params[0]['damper_f_ext'],
+        params[0]['damper_v_comp'], params[0]['damper_f_comp'],
+        global_setup['MR_FL']
+    )
+    damper_rear  = damper_interp_factory(
+        params[2]['damper_v_ext'], params[2]['damper_f_ext'],
+        params[2]['damper_v_comp'], params[2]['damper_f_comp'],
+        global_setup['MR_RL']
+    )
+
     bumpstop_front_interp = interp1d(params[0]['bump_x'], params[0]['bump_f'], kind='linear', fill_value='extrapolate', bounds_error=False)
     bumpstop_rear_interp = interp1d(params[2]['bump_x'], params[2]['bump_f'], kind='linear', fill_value='extrapolate', bounds_error=False)
 
@@ -310,6 +323,9 @@ def prepare_simple_params(params, global_setup):
     # Rigidez de barra estabilizadora (anti roll bar)
     k_arb_f = global_setup.get('kARB_F', 0) / 2
     k_arb_r = global_setup.get('kARB_R', 0) / 2
+
+    k_arb_f = ((k_arb_f / global_setup["MR_F_ARB"]**2)*1000)/ global_setup["MR_FL"]**2 
+    k_arb_r = ((k_arb_r / global_setup["MR_R_ARB"]**2)*1000)/ global_setup["MR_RL"]**2 
 
     # --- Cálculo de topes físicos (top-out y bumpstop) para cada esquina ---
     z_topout_FL = float(min(params[0]['spring_x'][0], params[0]['bump_x'][0]))
@@ -332,18 +348,12 @@ def prepare_simple_params(params, global_setup):
     stroke_RL = params[2].get("stroke")
     stroke_RR = params[3].get("stroke")
 
-    # --- Aerodinámica: interpoladores para ClA y CdA ---
-    aero_v = global_setup.get('aero_v', np.array([0]))
-    aero_ClA = global_setup.get('aero_ClA', np.array([0]))
-    aero_CdA = global_setup.get('aero_CdA', np.array([0]))
 
     tires = global_setup.get('tires', {})
     tire_front = tires.get('front', {})
     tire_rear = tires.get('rear', {})
+
     
-    ClA_interp = interp1d(aero_v, aero_ClA, kind='linear', fill_value='extrapolate', bounds_error=False)
-    CdA_interp = interp1d(aero_v, aero_CdA, kind='linear', fill_value='extrapolate', bounds_error=False)
- 
     return {
         'ms': ms_total,
         'Ixx': global_setup['ICar'][0],
@@ -395,8 +405,6 @@ def prepare_simple_params(params, global_setup):
         'z_bottomout_RL': z_bottomout_RL,
         'z_topout_RR': z_topout_RR,
         'z_bottomout_RR': z_bottomout_RR,
-        'aero_ClA': ClA_interp,
-        'aero_CdA': CdA_interp,
         'tire_front': tire_front,
         'tire_rear': tire_rear,
         'aero_polynomials': global_setup['aero_polynomials'],
@@ -408,6 +416,10 @@ def prepare_simple_params(params, global_setup):
         'x_FR_static': params[1]['spring_bump_total_f'][0] / kFR,
         'x_RL_static': params[2]['spring_bump_total_f'][0] / kRL,
         'x_RR_static': params[3]['spring_bump_total_f'][0] / kRR,
+        'MR_FL': global_setup['MR_FL'],
+        'MR_FR': global_setup['MR_FR'],
+        'MR_RL': global_setup['MR_RL'],
+        'MR_RR': global_setup['MR_RR'],
     }
 
 def simulate_combo(setup_path, track_path, kt_overrides=None):

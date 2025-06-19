@@ -28,9 +28,10 @@ def launch_dash(sol, post, setup_name="Setup"):
         graphs = []
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
-        travel = smooth_signal(post['travel'])
+        spring_travel = smooth_signal(post['travel']) * 1000
         #f_spring = smooth_signal(post['f_spring'])
         #f_damper = smooth_signal(post['f_damper'])
+        travel = post['wheel_travel']
         wheel_f = post['f_wheel']          # shape (4, N)
         grip_mask = post['grip_limited_lateral_mask']  # (N,)
         wheel_ld = post['wheel_load']       # (4,N)
@@ -42,13 +43,14 @@ def launch_dash(sol, post, setup_name="Setup"):
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
 
         # Travel absoluto por rueda (incluyendo z_free)
-        x_total = travel# + post['z_free'][:, None]
         graphs.append(dcc.Graph(figure=go.Figure([
-            go.Scatter(x=distance, y=x_total[0] * 1000, name="Travel FL"), go.Scatter(x=distance, y=x_total[1] * 1000, name="Travel FR"),
-            go.Scatter(x=distance, y=x_total[2] * 1000, name="Travel RL"), go.Scatter(x=distance, y=x_total[3] * 1000, name="Travel RR"),
+            go.Scatter(x=distance, y=spring_travel[0], name="Spring Travel FL"),
+            go.Scatter(x=distance, y=spring_travel[1], name="Spring Travel FR"),
+            go.Scatter(x=distance, y=spring_travel[2], name="Spring Travel RL"),
+            go.Scatter(x=distance, y=spring_travel[3], name="Spring Travel RR"),
         ]).update_layout(
-            title="Suspension Travel por rueda [mm]",xaxis_title="distance [m]",yaxis_title="Travel [mm]")))
-        
+            title="Travel [mm]", xaxis_title="Distance [m]", yaxis_title="Travel [mm]"
+        )))
         # Heave (filtrado)
         graphs.append(dcc.Graph(figure=go.Figure([
             go.Scatter(x=distance, y=heave_filtered * 1000, name="Heave [mm]")
