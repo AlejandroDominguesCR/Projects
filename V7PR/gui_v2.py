@@ -178,23 +178,26 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
-    #MR Damper Wheel
-    mr_f_dw = 0.696 #1.437 
-    mr_r_dw = 0.752 #1.328 
+    mr_f_wd = 1.437 #0.696 1.437
+    mr_r_wd = 1.328 #0.752 1.328
 
-    #MR Rocker Damper
-    mr_f_rd = 1 #-0.01695
+    mr_f_rd = 0.01695 #-0.01695
     mr_r_rd = 1
 
+    mr_f_arb= 1.3387
+    mr_r_arb= 1
 
-    global_setup["MR_FL"] = mr_f_dw
-    global_setup["MR_FR"] = mr_f_dw
+    global_setup["MR_FL"] = mr_f_wd
+    global_setup["MR_FR"] = mr_f_wd
 
-    global_setup["MR_RL"] = mr_r_dw
-    global_setup["MR_RR"] = mr_r_dw
+    global_setup["MR_RL"] = mr_r_wd
+    global_setup["MR_RR"] = mr_r_wd
 
     global_setup["MR_FL_rd"] = mr_f_rd
-    global_setup["MR_RL_rd"] = mr_f_rd
+    global_setup["MR_FR_rd"] = mr_f_rd
+
+    global_setup["MR_F_ARB"] = mr_f_arb
+    global_setup["MR_R_ARB"] = mr_r_arb
 
     chassis = json_data['config']['chassis']
     tyres = json_data['config']['tyres']
@@ -257,44 +260,38 @@ def prepare_simple_params(params, global_setup):
     # global_setup: diccionario global
 
     from scipy.interpolate import interp1d
+    # Muelle: usar directamente el valor de kSpring del JSON para cada esquina
+    kFL = params[0]['kSpring']
+    kFR = params[1]['kSpring']
+    kRL = params[2]['kSpring']
+    kRR = params[3]['kSpring']
 
-    # Delanteros (torsión): pasar rigidez torsión->damper (MR_rd) y luego damper->rueda (MR_dw)
-    kFL = params[0]['kSpring'] * global_setup['MR_FL_rd']**2 * global_setup['MR_FL']**2
-    kFR = params[1]['kSpring'] * global_setup['MR_FL_rd']**2 * global_setup['MR_FR']**2
-    # Traseros (coil springs, MR_rd=1)
-    kRL = params[2]['kSpring'] * global_setup['MR_RL_rd']**2 * global_setup['MR_RL']**2
-    kRR = params[3]['kSpring'] * global_setup['MR_RL_rd']**2 * global_setup['MR_RR']**2
+    kFL = kFL / global_setup["MR_FL"]**2
+    kFR = kFR / global_setup["MR_FR"]**2
+    kRL = kRL / global_setup["MR_RL"]**2
+    kRR = kRR / global_setup["MR_RR"]**2
 
-
-    # --- Amortiguador: escala velocidad y fuerza vía MR (damper→wheel) ---
-    def damper_interp_factory(v_ext, f_ext, v_comp, f_comp, mr_dw):
+    # Damper y bumpstop interpoladores
+    # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
+    def damper_interp_factory(v_ext, f_ext, v_comp, f_comp):
         from scipy.interpolate import interp1d
-        interp_ext = interp1d(v_ext, f_ext, kind='linear',
-                              fill_value='extrapolate', bounds_error=False)
-        interp_comp = interp1d(v_comp, f_comp, kind='linear',
-                               fill_value='extrapolate', bounds_error=False)
-        def damper_func(v_wheel):
-            # 1) velocidad rueda → velocidad pistón amortiguador
-            v_damper = np.asarray(v_wheel) * mr_dw
-            # 2) fuerza interna en el amortiguador
-            f_int = np.where(v_damper > 0,
-                             interp_ext(v_damper),
-                             interp_comp(v_damper))
-            # 3) fuerza pistón → fuerza rueda
-            return f_int * mr_dw
+        # Crear interpoladores lineales con extrapolación
+        interp_ext = interp1d(v_ext, f_ext, kind='linear', fill_value='extrapolate', bounds_error=False)
+        interp_comp = interp1d(v_comp, f_comp, kind='linear', fill_value='extrapolate', bounds_error=False)
+        def damper_func(v):
+            v = np.asarray(v)
+            out = np.zeros_like(v)
+            mask_ext = v > 0
+            mask_comp = v < 0
+            if np.any(mask_ext):
+                out[mask_ext] = interp_ext(v[mask_ext])
+            if np.any(mask_comp):
+                out[mask_comp] = interp_comp(v[mask_comp])
+            out[v == 0] = 0.0
+            return out
         return damper_func
-
-    # Llama a la fábrica pasando tu MR damper→wheel ya definido en global_setup
-    damper_front = damper_interp_factory(
-        params[0]['damper_v_ext'], params[0]['damper_f_ext'],
-        params[0]['damper_v_comp'], params[0]['damper_f_comp'],
-        global_setup['MR_FL']
-    )
-    damper_rear  = damper_interp_factory(
-        params[2]['damper_v_ext'], params[2]['damper_f_ext'],
-        params[2]['damper_v_comp'], params[2]['damper_f_comp'],
-        global_setup['MR_RL']
-    )
+    damper_front = damper_interp_factory(params[0]['damper_v_ext'], params[0]['damper_f_ext'], params[0]['damper_v_comp'], params[0]['damper_f_comp'])
+    damper_rear = damper_interp_factory(params[2]['damper_v_ext'], params[2]['damper_f_ext'], params[2]['damper_v_comp'], params[2]['damper_f_comp'])
     bumpstop_front_interp = interp1d(params[0]['bump_x'], params[0]['bump_f'], kind='linear', fill_value='extrapolate', bounds_error=False)
     bumpstop_rear_interp = interp1d(params[2]['bump_x'], params[2]['bump_f'], kind='linear', fill_value='extrapolate', bounds_error=False)
 
@@ -311,10 +308,8 @@ def prepare_simple_params(params, global_setup):
 
 
     # Rigidez de barra estabilizadora (anti roll bar)
-    # Delantero: torsión->damper y damper->rueda
-    k_arb_f = global_setup.get('kARB_F', 0) * global_setup['MR_FL_rd']**2 * global_setup['MR_FL']**2
-    # Trasero (MR_rd=1)
-    k_arb_r = global_setup.get('kARB_R', 0) * global_setup['MR_RL_rd']**2 * global_setup['MR_RL']**2
+    k_arb_f = global_setup.get('kARB_F', 0) / 2
+    k_arb_r = global_setup.get('kARB_R', 0) / 2
 
     # --- Cálculo de topes físicos (top-out y bumpstop) para cada esquina ---
     z_topout_FL = float(min(params[0]['spring_x'][0], params[0]['bump_x'][0]))
