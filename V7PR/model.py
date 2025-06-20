@@ -68,23 +68,32 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
                     phi_off, theta_off,
                     phi_dot_off, theta_dot_off,
                     k_spring, k_inst,
-                    bump, damper,
+                    spring_preload, bump, damper,
+                    mr_dw,                   
                     z_top, z_bot,
                     x_bump):
+        # 1) desplazamiento total a nivel pistón
         x_raw = z_w - (phi_off + theta_off + h)
-        # Clipping al recorrido físico
+        # 2) clipping al recorrido físico
         x_clipped = np.clip(x_raw, z_top, z_bot)
-        # Bumpstop (compresión más allá del gap)
+
+        # 3) bumpstop (pistón → rueda)
         comp_bump = np.maximum(0.0, x_raw - x_bump)
-        f_bump    = bump(comp_bump)
-        # Resortes en serie: resorte + instalación
+        f_bump_p  = bump(comp_bump)    # [N] pistón
+        f_bump    = f_bump_p * mr_dw   # [N] rueda
+
+        # 4) resortes en serie + preload
         k_total = 1.0/(1.0/k_spring + 1.0/k_inst)
-        f_spring = k_total * x_clipped
-        # Amortiguador: velocidad relativa resorte-carrocería
-        rel_vel = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
+        f_spring = k_total * x_clipped + spring_preload
+
+        # 5) amortiguador (ya escala internamente con MR)
+        rel_vel  = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
         f_damper = damper(rel_vel)
-        # Tope como respaldo
-        f_stop = tope_fuerza(x_raw, z_top, z_bot)
+
+        # 6) tope rígido (pistón → rueda)
+        f_stop_p = tope_fuerza(x_raw, z_top, z_bot)  # [N] pistón
+        f_stop   = f_stop_p * mr_dw                 # [N] rueda
+
         return f_spring + f_bump + f_damper + f_stop
 
     # Cálculo de offsets estáticos y dinámicos
@@ -102,7 +111,9 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
                        phi_off_front, theta_off_front,
                        phi_dot_off_front, theta_dot_off_front,
                        kFL, kinstf,
+                       params['FSpringPreload_FL'],
                        bump_front, damper_front,
+                       params['MR_FL'],          
                        z_topout_FL, z_bottomout_FL,
                        x_bump_FL)
 
@@ -110,7 +121,9 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
                        phi_off_front, -theta_off_front,
                        phi_dot_off_front, -theta_dot_off_front,
                        kFR, kinstf,
+                       params['FSpringPreload_FR'],
                        bump_front, damper_front,
+                       params['MR_FR'],
                        z_topout_FR, z_bottomout_FR,
                        x_bump_FR)
 
@@ -118,7 +131,9 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
                        phi_off_rear, theta_off_rear,
                        phi_dot_off_rear, theta_dot_off_rear,
                        kRL, kinstr,
+                       params['FSpringPreload_RL'],
                        bump_rear, damper_rear,
+                       params['MR_RL'],
                        z_topout_RL, z_bottomout_RL,
                        x_bump_RL)
 
@@ -126,7 +141,9 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
                        phi_off_rear, -theta_off_rear,
                        phi_dot_off_rear, -theta_dot_off_rear,
                        kRR, kinstr,
+                       params['FSpringPreload_RR'],
                        bump_rear, damper_rear,
+                       params['MR_RR'],
                        z_topout_RR, z_bottomout_RR,
                        x_bump_RR)
 
@@ -208,24 +225,51 @@ def compute_aero_forces(vx, hRideF, hRideR, aero_poly, rho_air=1.225, area_ref=1
     """
     Calcula las fuerzas aerodinámicas verticales y de arrastre (drag).
     """
+    fa     = aero_poly.get('flapAngles', {})
+    aFlapF = fa.get('aFlapF', 0.0)
+    aFlapR = fa.get('aFlapR', 0.0)
 
-    def evaluate_poly(poly_dict, hF, hR):
+    def evaluate_poly(poly_dict, hF, hR, aFlapF, aFlapR):
         variables = {
-            "Const": 1.0,
-            "hRideF": hF,
-            "hRideR": hR,
-            "hRideF*hRideF": hF**2,
-            "hRideR*hRideR": hR**2,
-            "hRideF*hRideF*hRideF": hF**3,
-            "hRideR*hRideR*hRideR": hR**3,
-            "hRideF*hRideR": hF * hR,
-        }
-        return sum(coef * variables.get(expr, 0.0) for expr, coef in poly_dict.items())
+            "Const":                         1.0,
+            "hRideF":                        hF,
+            "hRideR":                        hR,
+            "hRideF*hRideF":                 hF**2,
+            "hRideR*hRideR":                 hR**2,
+            "hRideF*hRideF*hRideF":          hF**3,
+            "hRideR*hRideR*hRideR":          hR**3,
+            "hRideF*hRideR":                 hF * hR,
+            "hRideF*hRideR*hRideR":          hF * (hR**2),
+            "hRideF*hRideF*hRideR":          (hF**2) * hR,
+            "hRideF*hRideF*hRideR*hRideR":   (hF**2) * (hR**2),
 
-    # --- Coeficientes ---
-    Clf = evaluate_poly(aero_poly.get("CLiftBodyF", {}), hRideF, hRideR)
-    Clr = evaluate_poly(aero_poly.get("CLiftBodyR", {}), hRideF, hRideR)
-    Cd  = evaluate_poly(aero_poly.get("CDragBody", {}), hRideF, hRideR)
+            # monomios de flap
+            "aFlapF":                        aFlapF,
+            "aFlapF*aFlapF":                 aFlapF**2,
+            "aFlapR":                        aFlapR,
+            "aFlapR*aFlapR":                 aFlapR**2,
+        }
+        # suma coef * valor_monomio para cada término del polinomio
+        return sum(coef * variables.get(expr, 0.0)
+                for expr, coef in poly_dict.items())
+
+
+    # aplicamos factor de usuario y offset
+    # factores y offsets de usuario
+    fF   = aero_poly.get('rCLiftBodyFFactor', 1.0)
+    fR   = aero_poly.get('rCLiftBodyRFactor', 1.0)
+    offF = aero_poly.get('coefficientOffsets', {}).get('CLiftBodyFUserOffset', 0.0)
+    offR = aero_poly.get('coefficientOffsets', {}).get('CLiftBodyRUserOffset', 0.0)
+    fD   = aero_poly.get('rCDragBodyFactor', 1.0)
+
+    # evaluamos los polinomios según los dicts generados en parse_json_setup
+    Clf = evaluate_poly(aero_poly.get('CLiftBodyF', {}),
+                        hRideF, hRideR, aFlapF, aFlapR) * fF + offF
+    Clr = evaluate_poly(aero_poly.get('CLiftBodyR', {}),
+                        hRideF, hRideR, aFlapF, aFlapR) * fR + offR
+    Cd  = evaluate_poly(aero_poly.get('CDragBody',  {}),
+                        hRideF, hRideR, aFlapF, aFlapR) * fD
+
 
     # --- Fuerzas ---
     q = 0.5 * rho_air * vx**2  # presión dinámica
@@ -768,10 +812,10 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         f_arb[3] += -arb_torque_rear / lever_r
 
         # 4d) Fuerza neta en rueda (nunca negativa)
-    wheel_load = (aero + static + f_arb + f_spring) / 9.81   #  + f_tire(4, N)
+    wheel_load = (static + aero + f_arb) / 9.81   #  + f_tire(4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
-    f_wheel = (aero + static + f_arb + f_spring)    # (4, N)
+    f_wheel = (static + aero + f_arb)    # (4, N)
     #f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
 
     f_damp_FL, Pxx_damp_FL = welch(f_damper[0], fs=fs, nperseg=nperseg, noverlap=noverlap)

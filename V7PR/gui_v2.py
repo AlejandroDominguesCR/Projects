@@ -149,6 +149,8 @@ def parse_json_setup(json_data):
             "damper_v_comp": damper_v_comp,
             "kt": kt,
             "stroke": stroke,
+            "FSpringPreload": FSpringPreload
+
         }
         params.append(p)
 
@@ -184,8 +186,8 @@ def parse_json_setup(json_data):
     mr_f_rd = 0.01695 #-0.01695
     mr_r_rd = 1
 
-    mr_f_arb= 1.3387
-    mr_r_arb= 4.4286
+    mr_f_arb= 2000/((60**2)*(0.72)**2)
+    mr_r_arb= mr_f_arb
 
     global_setup["MR_FL"] = mr_f_wd
     global_setup["MR_FR"] = mr_f_wd
@@ -247,6 +249,11 @@ def parse_json_setup(json_data):
         'DRS_CLiftF': parse_poly(aero_poly.get('DRS', {}).get('CLiftBodyFDRSPolynomial', [])),
         'DRS_CLiftR': parse_poly(aero_poly.get('DRS', {}).get('CLiftBodyRDRSPolynomial', [])),
         'DRS_CDrag': parse_poly(aero_poly.get('DRS', {}).get('CDragBodyDRSPolynomial', [])),
+        'flapAngles':       aero_poly.get('flapAngles', {}),
+        'coefficientOffsets': aero_poly.get('coefficientOffsets', {}),
+        'rCLiftBodyFFactor':  aero_poly.get('rCLiftBodyFFactor', 1.0),
+        'rCLiftBodyRFactor':  aero_poly.get('rCLiftBodyRFactor', 1.0),
+        'rCDragBodyFactor':   aero_poly.get('rCDragBodyFactor', 1.0),
     }
 
     global_setup['aero_polynomials'] = aero_polynomials
@@ -321,11 +328,11 @@ def prepare_simple_params(params, global_setup):
 
 
     # Rigidez de barra estabilizadora (anti roll bar)
-    k_arb_f = global_setup.get('kARB_F', 0) / 2
-    k_arb_r = global_setup.get('kARB_R', 0) / 2
+    k_arb_f = global_setup.get('kARB_F', 0) 
+    k_arb_r = global_setup.get('kARB_R', 0) 
 
-    k_arb_f = ((k_arb_f / global_setup["MR_F_ARB"]**2)*1000)/ global_setup["MR_FL"]**2 
-    k_arb_r = ((k_arb_r / global_setup["MR_R_ARB"]**2)*1000)/ global_setup["MR_RL"]**2 
+    k_arb_f = k_arb_f * global_setup["MR_F_ARB"]
+    k_arb_r = k_arb_r * global_setup["MR_R_ARB"]
 
     # --- Cálculo de topes físicos (top-out y bumpstop) para cada esquina ---
     z_topout_FL = float(min(params[0]['spring_x'][0], params[0]['bump_x'][0]))
@@ -420,6 +427,10 @@ def prepare_simple_params(params, global_setup):
         'MR_FR': global_setup['MR_FR'],
         'MR_RL': global_setup['MR_RL'],
         'MR_RR': global_setup['MR_RR'],
+        'FSpringPreload_FL': params[0].get('FSpringPreload', 0.0) * global_setup['MR_FL'],
+        'FSpringPreload_FR': params[1].get('FSpringPreload', 0.0) * global_setup['MR_FR'],
+        'FSpringPreload_RL': params[2].get('FSpringPreload', 0.0) * global_setup['MR_RL'],
+        'FSpringPreload_RR': params[3].get('FSpringPreload', 0.0) * global_setup['MR_RR'],      
     }
 
 def simulate_combo(setup_path, track_path, kt_overrides=None):

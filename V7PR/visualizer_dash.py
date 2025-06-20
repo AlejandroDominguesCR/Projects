@@ -128,32 +128,6 @@ def launch_dash(sol, post, setup_name="Setup"):
             fig_arb.update_layout(title="Anti-roll Bar Torque [Nm]", xaxis_title="Distance [m]", yaxis_title="Torque [Nm]")
             graphs.append(dcc.Graph(figure=fig_arb))
 
-        # === Ride Height RMS en zonas grip-limited ===
-        if 'grip_limited_lateral_mask' in post:
-            mask = post['grip_limited_lateral_mask']
-            zf = (travel[0] + travel[1]) / 2
-            zr = (travel[2] + travel[3]) / 2
-            rms_zf = np.sqrt(np.mean(zf[mask]**2)) * 1000
-            rms_zr = np.sqrt(np.mean(zr[mask]**2)) * 1000
-            fig_rms_heights = go.Figure([
-                go.Bar(x=["Front", "Rear"], y=[rms_zf, rms_zr])
-            ])
-            fig_rms_heights.update_layout(title="Ride Height RMS en grip-limited [mm]", yaxis_title="RMS [mm]")
-            graphs.append(dcc.Graph(figure=fig_rms_heights))
-
-        # === FRH vs Contact Patch Load (RMS) ===
-        frh = (travel[0] + travel[1]) / 2
-        frh_rms = np.sqrt(np.mean(frh**2)) * 1000
-        load_f = (wheel_ld[0] + wheel_ld[1]) / 2
-        load_f_rms = np.sqrt(np.mean(load_f**2))
-        fig_frh_vs_load = go.Figure(data=go.Scatter(
-            x=[frh_rms], y=[load_f_rms], mode='markers+text', text=["Front"], textposition='top center'
-        ))
-        fig_frh_vs_load.update_layout(
-            title="FRH RMS vs Contact Patch Load RMS", xaxis_title="Front Ride Height RMS [mm]",
-            yaxis_title="Contact Patch Load RMS [N]"
-        )
-        graphs.append(dcc.Graph(figure=fig_frh_vs_load))
         
         app.layout = html.Div([
             html.H1(f"Resultados 7-Post Rig: {setup_name}"),
@@ -196,8 +170,7 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # --- DEFINICIÓN CENTRALIZADA DE LOS KPIs --- 
     kpi_definitions = [
-        ("Wheel Load Max [N]", "N", "wheel_load_max", 1),
-        ("Wheel Load Min [N]", "N", "wheel_load_min", 1),
+        ("Wheel Load Max [Kg]", "Kg", "wheel_load_max", 1),
     ]
 
     # --- ARRANCAR LAYOUT CON UN TÍTULO PRINCIPAL ---
