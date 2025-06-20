@@ -31,8 +31,8 @@ def launch_dash(sol, post, setup_name="Setup"):
         spring_travel = smooth_signal(post['travel']) * 1000
         #f_spring = smooth_signal(post['f_spring'])
         #f_damper = smooth_signal(post['f_damper'])
-        travel = post['wheel_travel']
-        wheel_f = post['f_tire']         # shape (4, N)
+        travel = post['travel']
+        wheel_f = post['f_wheel']          # shape (4, N)
         grip_mask = post['grip_limited_lateral_mask']  # (N,)
         wheel_ld = post['wheel_load']       # (4,N)
         wheel_names = ["FL", "FR", "RL", "RR"]
@@ -42,7 +42,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
 
-        # Travel absoluto por rueda (incluyendo z_free)
+        # Travel absoluto por rueda 
         graphs.append(dcc.Graph(figure=go.Figure([
             go.Scatter(x=distance, y=spring_travel[0], name="Spring Travel FL"),
             go.Scatter(x=distance, y=spring_travel[1], name="Spring Travel FR"),
@@ -196,8 +196,8 @@ def launch_dash_kpis(kpi_data, setup_names):
 
     # --- DEFINICIÓN CENTRALIZADA DE LOS KPIs --- 
     kpi_definitions = [
-        ("Wheel Load Max [N]", "N", "f_tire_max", 1),
-        ("Wheel Load Min [N]", "N", "f_tire_min", 1),
+        ("Wheel Load Max [N]", "N", "wheel_load_max", 1),
+        ("Wheel Load Min [N]", "N", "wheel_load_min", 1),
     ]
 
     # --- ARRANCAR LAYOUT CON UN TÍTULO PRINCIPAL ---

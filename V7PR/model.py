@@ -147,10 +147,10 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     F_RR += -T_arb_r / lever_r
 
     # --- Aerodinámica ---
-    dyn_hF = h - lf * phi + params.get('hRideF', 0.02)
-    dyn_hR = h + lr * phi + params.get('hRideR', 0.04)
+    dyn_hF = h - lf * phi + params.get('hRideF')
+    dyn_hR = h + lr * phi + params.get('hRideR')
     Fz_aero_front, Fz_aero_rear, F_drag = compute_aero_forces(
-        vx=params.get('vx', 15),
+        vx=params.get('vx'),
         hRideF=dyn_hF,
         hRideR=dyn_hR,
         aero_poly=params.get('aero_polynomials', {})
@@ -236,7 +236,7 @@ def compute_aero_forces(vx, hRideF, hRideR, aero_poly, rho_air=1.225, area_ref=1
 
     return Fz_aero_front, Fz_aero_rear, F_drag
 
-def compute_static_equilibrium(params, vx=0.0):
+def compute_static_equilibrium(params, vx=0):
     """
     Resuelve el equilibrio estático: encuentra h, phi, theta y las posiciones de las masas no suspendidas
     de forma que las fuerzas verticales y los momentos se equilibren.
@@ -316,46 +316,50 @@ def compute_static_equilibrium(params, vx=0.0):
         F_RR = kRR_eff * x_RR + f_bump_RR
         F_RL = kRL_eff * x_RL + f_bump_RL
 
-        # --- Fuerzas de la antirollbar ---
-        if k_arb_f != 0.0:
+        if k_arb_f:
             T_arb_f = k_arb_f * (x_FL - x_FR)
-            lever_f = tf / 2.0
-            F_FL += T_arb_f / lever_f
-            F_FR += -T_arb_f / lever_f
-        if k_arb_r != 0.0:
+            lever_f = tf/2
+            F_FL +=  T_arb_f/lever_f
+            F_FR += -T_arb_f/lever_f
+
+        if k_arb_r:
             T_arb_r = k_arb_r * (x_RL - x_RR)
-            lever_r = tr / 2.0
-            F_RL += T_arb_r / lever_r
-            F_RR += -T_arb_r / lever_r
+            lever_r = tr/2
+            F_RL +=  T_arb_r/lever_r
+            F_RR += -T_arb_r/lever_r
 
-        # --- Añadir fuerzas aerodinámicas si hay velocidad ---
-        dyn_hF = h - lf * phi + params.get("hRideF", 0.02)
-        dyn_hR = h + lr * phi + params.get("hRideR", 0.04)
-        Fz_aero_front, Fz_aero_rear, _ = compute_aero_forces(
-            vx=vx,
-            hRideF=dyn_hF,
-            hRideR=dyn_hR,
-            aero_poly=params.get("aero_polynomials", {})
-        )
-        # Distribuir por rueda
-        F_FL += 0.5 * Fz_aero_front
-        F_FR += 0.5 * Fz_aero_front
-        F_RL += 0.5 * Fz_aero_rear
-        F_RR += 0.5 * Fz_aero_rear
+        # 2) Aerodinámica (con vx pasado a compute_static_equilibrium)
+        #    calculamos downforce frontal y trasera:
+        dyn_hF = h - lf*phi + hRideF
+        dyn_hR = h + lr*phi + hRideR
+        Fz_aF, Fz_aR, _ = compute_aero_forces(vx, dyn_hF, dyn_hR,
+                                            params.get("aero_polynomials", {}))
 
-        # Fuerza total vertical (suma fuerzas suspensión - peso)
-        R1 = F_FR + F_FL + F_RR + F_RL - Ms * g
+        # R1: equilibrio vertical de la carrocería
+        #     suma de fuerzas de suspensión en las 4 ruedas debe igualar el peso total (Ms·g) 
+        R1 = (F_FR + F_FL + F_RR + F_RL) + (Fz_aF + Fz_aR) - Ms * g
 
-        # Momento de roll (respecto al eje longitudinal)
+        # R2: momento de roll (eje longitudinal X)
+        #     par generado por diferencia de fuerzas izquierda-derecha en tren delantero y trasero
         R2 = (tf/2)*(F_FL - F_FR) + (tr/2)*(F_RL - F_RR)
 
-        # Momento de pitch (respecto al eje transversal)
+        # R3: momento de pitch (eje transversal Y)
+        #     par generado por diferencia frontal-trasero: reacciones traseras vs delanteras
         R3 = lr*(F_RR + F_RL) - lf*(F_FR + F_FL)
 
-        # Equilibrio masas no suspendidas: z_i tal que fuerza muelle + neumático = peso mu
+        # R4–R7: equilibrio de cada masa no suspendida (rueda+bujes)
+        #     fuerza de suspensión (hacia arriba) + fuerza neumático (hacia abajo) - peso de la masa = 0
+
+        # R4: rueda delantera-derecha
         R4 = -F_FR + ktf*(0 - zFR) - mHubF * g
+
+        # R5: rueda delantera-izquierda
         R5 = -F_FL + ktf*(0 - zFL) - mHubF * g
+
+        # R6: rueda trasera-derecha
         R6 = -F_RR + ktr*(0 - zRR) - mHubR * g
+
+        # R7: rueda trasera-izquierda
         R7 = -F_RL + ktr*(0 - zRL) - mHubR * g
 
         return [R1, R2, R3, R4, R5, R6, R7]
@@ -383,17 +387,19 @@ def compute_static_equilibrium(params, vx=0.0):
     Wf     = W * wbal_f
     Wr     = W * (1.0 - wbal_f)
 
-    # Travel + z_free + altura sobre suelo (z_ui)
-    zFR0 = Wf / (2 * kf_eff) + params['z_FR_free']
-    zFL0 = Wf / (2 * kf_eff) + params['z_FL_free']
-    zRR0 = Wr / (2 * kr_eff) + params['z_RR_free']
-    zRL0 = Wr / (2 * kr_eff) + params['z_RL_free']
+    # Estimación inicial de la compresión estática de la suspensión bajo carga:
+    # carga por rueda = Wf/2 (delantera) o Wr/2 (trasera), y k*_eff es la rigidez efectiva muelle+instalación
+    zFR0 = Wf / (2 * kf_eff)    # compresión inicial del muelle delantero-derecho
+    zFL0 = Wf / (2 * kf_eff)    # compresión inicial del muelle delantero-izquierdo
+    zRR0 = Wr / (2 * kr_eff)    # compresión inicial del muelle trasero-derecho
+    zRL0 = Wr / (2 * kr_eff)    # compresión inicial del muelle trasero-izquierdo 
 
     x0 = [h_init, phi_init, theta_init, zFR0, zFL0, zRL0, zRR0]
 
     sol, info, ier, msg = fsolve(residual, x0, full_output=True)
     if ier != 1:
         print(f"[WARNING] fsolve no ha convergido: {msg}")
+    
     # === Cálculo de márgenes al bumpstop tras resolver el equilibrio estático ===
     for corner in ['FL','FR','RL','RR']:
         x_static = params[f'x_static_{corner}']
@@ -515,13 +521,6 @@ def estimate_h0_from_static_travel(params, phi=0.0, theta=0.0):
         'RR': 1 / (1 / params['kRR'] + 1 / params['kinstr']),
     }
 
-    z_free = {
-        'FL': params['z_FL_free'],
-        'FR': params['z_FR_free'],
-        'RL': params['z_RL_free'],
-        'RR': params['z_RR_free'],
-    }
-
     h_list = []
     for corner in ['FL', 'FR', 'RL', 'RR']:
         xi, yi = pos[corner]
@@ -536,7 +535,7 @@ def estimate_h0_from_static_travel(params, phi=0.0, theta=0.0):
             print(f"[WARN] {corner} travel limitado: {x_spring*1000:.2f} mm → {x_spring_clipped*1000:.2f} mm")
 
         z_ui = 0.0  # rueda apoyada en el suelo
-        z_si = z_ui - x_spring_clipped - z_free[corner]      # posición del chasis en esa esquina
+        z_si = z_ui - x_spring_clipped #- z_free[corner]      # posición del chasis en esa esquina
         h_i = z_si - (phi * xi + theta * yi)                 # despejamos h
         h_list.append(h_i)
     print(f"[DEBUG] Reparto de peso: Wf = {Wf:.2f} N, Wr = {Wr:.2f} N")
@@ -618,47 +617,26 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     static = np.array([Wf/2, Wf/2, Wr/2, Wr/2])[:,None]  # (4,1)
     # 3. Cinemática de suspensión: travel en rueda (“unsprung”–“chassis”)
     # v_wheel = velocidad rueda–carrocería
-    x_wheel = zu - zs                # (4, N)
-    v_wheel = zudot - v_chassis
+    # 3. Cinemática de suspensión: travel en rueda (“unsprung”–“chassis”)
+    # 1) Travel a nivel rueda (“unsprung” vs chasis)
+    x_wheel = zu - zs      # shape: (4, N)
 
-    # 1) MR damper→wheel y su inversa
-    mr_dw = np.array([
-        params['MR_FL'],
-        params['MR_FR'],
-        params['MR_RL'],
-        params['MR_RR']
-    ])[:, None]     # (4,1)
-    mr_wd = 1.0 / mr_dw
+    # 2) Extraer MR damper→wheel desde params
+    #    params es una lista de 4 dicts con key 'mr_dw'
+    # 3.3) Extraer MR damper→wheel desde el dict simple_params
+    mr_wd = np.array([params['MR_FL'],params['MR_FR'],params['MR_RL'],params['MR_RR']])[:, None]  # (4,1) damper to wheel
+    mr_dw = 1 / mr_wd  # (4,1) wheel to damper
 
-    # 2) velocidad pistón = velocidad rueda / MR_dw
-    v_piston = v_wheel / mr_dw    # (4, N)
+    # 3) Separar front/rear y aplicar su MR correspondiente
+    mr_front = mr_dw[0:2, :]    # (2,1) para FL,FR
+    mr_rear  = mr_dw[2:4, :]    # (2,1) para RL,RR
 
-    # 3) travel dinámico pistón por integración
-    dt = np.mean(np.diff(sol.t))
-    x_dyn = np.cumsum(v_piston * dt, axis=1)
+    # 4) Desplazamiento real del pistón/muelle en cada eje
+    x_spring_front = x_wheel[0:2, :] * mr_front  # (2, N)
+    x_spring_rear  = x_wheel[2:4, :] * mr_rear   # (2, N)
 
-    # 4) deflexión estática pistón
-    #    static = carga estática en la rueda [N] (como defines más arriba)
-    F_stat_wheel = static        # shape (4,1)
-    #    fuerza en pistón = fuerza rueda / MR_dw
-    F_stat_piston = F_stat_wheel / mr_dw   # (4,1)
-
-    # 5) rigidez pistón: recalculamos a partir de kFL..RR y MR
-    #    kFL..RR en simple_params ya están escaladas a rueda,
-    #    así que para volver al pistón multiplicamos por MR_dw²
-    k_piston = np.array([
-        params['kFL'] * params['MR_FL']**2,
-        params['kFR'] * params['MR_FR']**2,
-        params['kRL'] * params['MR_RL']**2,
-        params['kRR'] * params['MR_RR']**2
-    ])[:, None]   # (4,1)
-
-    # 6) deflexión estática del pistón
-    x_stat = F_stat_piston / k_piston   # (4,1)
-
-    # 7) travel total del pistón (spring travel) = estático + dinámico
-    x_spring = x_stat + x_dyn          # (4, N)
-    travel_abs = x_spring.copy()   
+    x_spring = np.vstack([x_spring_front, x_spring_rear])  # (4, N)
+    travel_abs = x_spring.copy()  
     # 5) Guardar para gráficos (front y rear por separado)
     x_spring_front = x_spring[0:2,:]
     x_spring_rear  = x_spring[2:4,:]
