@@ -606,27 +606,63 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         pos[:, 0:1] * phi[None, :]   +   # aporte por pitch × distancia en x
         pos[:, 1:2] * theta[None, :]    # aporte por roll  × distancia en y
     )
-
+    v_chassis = (
+        hdot[None,:]
+        + pos[:,0:1] * phi_dot[None,:]
+        + pos[:,1:2] * theta_dot[None,:]
+    )
+    g    = 9.81
+    Wtot = params['ms'] * g
+    Wf   = Wtot * params['rWeightBalF']
+    Wr   = Wtot - Wf
+    static = np.array([Wf/2, Wf/2, Wr/2, Wr/2])[:,None]  # (4,1)
     # 3. Cinemática de suspensión: travel en rueda (“unsprung”–“chassis”)
-    # 1) Travel a nivel rueda (“unsprung” vs chasis)
-    x_wheel = zu - zs      # shape: (4, N)
+    # v_wheel = velocidad rueda–carrocería
+    x_wheel = zu - zs                # (4, N)
+    v_wheel = zudot - v_chassis
 
-    # 2) Extraer MR damper→wheel desde params
-    #    params es una lista de 4 dicts con key 'mr_dw'
-    # 3.3) Extraer MR damper→wheel desde el dict simple_params
-    mr_dw = np.array([params['MR_FL'],params['MR_FR'],params['MR_RL'],params['MR_RR']])[:, None]  # (4,1)
+    # 1) MR damper→wheel y su inversa
+    mr_dw = np.array([
+        params['MR_FL'],
+        params['MR_FR'],
+        params['MR_RL'],
+        params['MR_RR']
+    ])[:, None]     # (4,1)
+    mr_wd = 1.0 / mr_dw
 
-    # 3) Separar front/rear y aplicar su MR correspondiente
-    mr_front = mr_dw[0:2, :]    # (2,1) para FL,FR
-    mr_rear  = mr_dw[2:4, :]    # (2,1) para RL,RR
+    # 2) velocidad pistón = velocidad rueda / MR_dw
+    v_piston = v_wheel / mr_dw    # (4, N)
 
-    # 4) Desplazamiento real del pistón/muelle en cada eje
-    x_spring_front = x_wheel[0:2, :] / mr_front  # (2, N)
-    x_spring_rear  = x_wheel[2:4, :] / mr_rear   # (2, N)
+    # 3) travel dinámico pistón por integración
+    dt = np.mean(np.diff(sol.t))
+    x_dyn = np.cumsum(v_piston * dt, axis=1)
 
-    x_spring = np.vstack([x_spring_front, x_spring_rear])  # (4, N)
+    # 4) deflexión estática pistón
+    #    static = carga estática en la rueda [N] (como defines más arriba)
+    F_stat_wheel = static        # shape (4,1)
+    #    fuerza en pistón = fuerza rueda / MR_dw
+    F_stat_piston = F_stat_wheel / mr_dw   # (4,1)
+
+    # 5) rigidez pistón: recalculamos a partir de kFL..RR y MR
+    #    kFL..RR en simple_params ya están escaladas a rueda,
+    #    así que para volver al pistón multiplicamos por MR_dw²
+    k_piston = np.array([
+        params['kFL'] * params['MR_FL']**2,
+        params['kFR'] * params['MR_FR']**2,
+        params['kRL'] * params['MR_RL']**2,
+        params['kRR'] * params['MR_RR']**2
+    ])[:, None]   # (4,1)
+
+    # 6) deflexión estática del pistón
+    x_stat = F_stat_piston / k_piston   # (4,1)
+
+    # 7) travel total del pistón (spring travel) = estático + dinámico
+    x_spring = x_stat + x_dyn          # (4, N)
     travel_abs = x_spring.copy()   
     # 5) Guardar para gráficos (front y rear por separado)
+    x_spring_front = x_spring[0:2,:]
+    x_spring_rear  = x_spring[2:4,:]
+
     travel_abs_front = x_spring_front.copy()
     travel_abs_rear  = x_spring_rear.copy()
 
@@ -725,11 +761,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         comp = np.maximum(0, x_spring[i] - gap_bump[i])
         f_bump[i] = bump_funcs[i](comp)
 
-    v_chassis = (
-        hdot[None,:]
-        + pos[:,0:1] * phi_dot[None,:]
-        + pos[:,1:2] * theta_dot[None,:]
-    )
+
     v_damper = zudot - v_chassis
 
     damper_funcs = [
@@ -909,8 +941,8 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     # ──────────────────────────────────────────────────────────────────────────────
     #   f_tire es ya un array (4, N) con [FL, FR, RL, RR].
 
-    front_signal = (wheel_load[0, :])   # Promedio de fuerza en las dos ruedas delanteras
-    rear_signal  = (wheel_load[2, :])   # Promedio de fuerza en las dos ruedas traseras
+    front_signal = (f_tire[0, :]) /9.81   # Promedio de fuerza en las dos ruedas delanteras
+    rear_signal  = (f_tire[2, :]) /9.81  # Promedio de fuerza en las dos ruedas traseras
 
     # Usamos FFT unidireccional (solo frecuencias positivas):
     F_front = np.fft.rfft(front_signal)    # Componente compleja espectral frontal
@@ -951,9 +983,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         'travel_static':      travel_static,          # (4, 1)
         'travel_max':         travel_max,             # (4,)
         'travel_min':         travel_min,             # (4,)
-        'travel_range':       travel_range,           # (4,)
-        'travel_used_pct':    travel_used_pct,        # (4,)
-        'travel_abs':         travel_abs,             # (4, N)
         'wheel_travel':      x_wheel,                # (4, N)
         'margen_ext':         margen_ext,             # (4, N)
         'margen_comp':        margen_comp,            # (4, N)
@@ -981,7 +1010,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         'f_tire_variation_rear':  f_tire_var_r,
         'Fz_aero_front':      ae_front,               # (N,) [N]
         'Fz_aero_rear':       ae_rear,                # (N,) [N]
-        'f_tire_raw':  f_tire,      
+        'f_tire':  f_tire,      
         'wheel_load':  wheel_load, 
         'wheel_load_max':    wheel_load_max,        # (4,)
         'wheel_load_min':    wheel_load_min,        # (4,)

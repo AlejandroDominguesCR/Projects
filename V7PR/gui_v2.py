@@ -83,7 +83,7 @@ def parse_json_setup(json_data):
 
     # Neumático (ejemplo)
     kt_f = 373100 #276500
-    kt_r = 397900 #282100, 282100, 269000
+    kt_r = 295000 #397900, 282100, 269000
 
     hRideF = json_data["config"]["chassis"].get("hRideFSetup")
     hRideR = json_data["config"]["chassis"].get("hRideRSetup")
@@ -184,8 +184,8 @@ def parse_json_setup(json_data):
     mr_f_rd = 0.01695 #-0.01695
     mr_r_rd = 1
 
-    mr_f_arb= 1.3387
-    mr_r_arb= 4.4286
+    mr_f_arb= 0.87300733 #1.3387
+    mr_r_arb= 3.9691418 #4.4286
 
     global_setup["MR_FL"] = mr_f_wd
     global_setup["MR_FR"] = mr_f_wd
