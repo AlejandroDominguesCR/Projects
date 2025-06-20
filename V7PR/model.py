@@ -812,10 +812,10 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         f_arb[3] += -arb_torque_rear / lever_r
 
         # 4d) Fuerza neta en rueda (nunca negativa)
-    wheel_load = (static + aero + f_arb) / 9.81   #  + f_tire(4, N)
+    wheel_load = (static - aero + f_arb) / 9.81   #  + f_tire(4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
-    f_wheel = (static + aero + f_arb)    # (4, N)
+    f_wheel = (static - aero + f_arb)    # (4, N)
     #f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
 
     f_damp_FL, Pxx_damp_FL = welch(f_damper[0], fs=fs, nperseg=nperseg, noverlap=noverlap)
