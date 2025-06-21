@@ -30,25 +30,6 @@ def set_dark_theme(app):
     palette.setColor(QPalette.HighlightedText, Qt.white)
     app.setPalette(palette)
 
-class DragDropLabel(QLabel):
-    def __init__(self, text, file_callback):
-        super().__init__(text)
-        self.setAcceptDrops(True)
-        self.file_callback = file_callback
-        self.setStyleSheet("border: 2px dashed #888; padding: 20px; color: #aaa;")
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.accept()
-            self.setStyleSheet("border: 2px solid #4e9a06; background: #222; color: #fff;")
-        else:
-            event.ignore()
-    def dragLeaveEvent(self, event):
-        self.setStyleSheet("border: 2px dashed #888; padding: 20px; color: #aaa;")
-    def dropEvent(self, event):
-        self.setStyleSheet("border: 2px dashed #888; padding: 20px; color: #aaa;")
-        for url in event.mimeData().urls():
-            self.file_callback(url.toLocalFile())
-
 def parse_json_setup(json_data):
     import numpy as np
     # Extrae masas y parámetros globales
@@ -535,8 +516,8 @@ class SevenPostRigGUI(QWidget):
                 color: #1565c0;
             }
             QTabWidget::pane {
-                border-top: 3px solid #1565c0;
-                top: -1em;
+                border-top: none;
+                top: 0;
             }
         """)
         main_layout.addWidget(self.tabs)
@@ -562,10 +543,8 @@ class SevenPostRigGUI(QWidget):
                 color: #1565c0;
             }
         """)
-        # Widget contenedor con fondo claro para los DragDropLabel
-        dragdrop_container = QWidget()
-        dragdrop_container.setStyleSheet("background: #e0e0e0; border-radius: 8px;")
-        group_layout = QGridLayout(dragdrop_container)
+        # Layout principal para las listas y botones de carga
+        group_layout = QGridLayout()
         # NUEVO: Listas para setups y tracks
         self.setup_list = QListWidget()
         self.setup_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
@@ -614,11 +593,20 @@ class SevenPostRigGUI(QWidget):
         btn_load_tracks.clicked.connect(self.add_tracks)
         group_layout.addWidget(btn_load_setups, 2, 0)
         group_layout.addWidget(btn_load_tracks, 2, 1)
+
+        # Botones para eliminar elementos seleccionados
+        btn_remove_setups = QPushButton("Eliminar Seleccionados")
+        btn_remove_setups.setStyleSheet("background:#c62828;color:#fff;font-weight:bold;border-radius:8px;padding:8px")
+        btn_remove_setups.clicked.connect(lambda: self.remove_selected(self.setup_list))
+        btn_remove_tracks = QPushButton("Eliminar Seleccionados")
+        btn_remove_tracks.setStyleSheet("background:#c62828;color:#fff;font-weight:bold;border-radius:8px;padding:8px")
+        btn_remove_tracks.clicked.connect(lambda: self.remove_selected(self.track_list))
+        group_layout.addWidget(btn_remove_setups, 3, 0)
+        group_layout.addWidget(btn_remove_tracks, 3, 1)
         # Área de listas más pequeña
         self.setup_list.setMaximumHeight(80)
         self.track_list.setMaximumHeight(80)
-        group_setup.setLayout(QVBoxLayout())
-        group_setup.layout().addWidget(dragdrop_container)
+        group_setup.setLayout(group_layout)
         config_layout.addWidget(group_setup)
 
         # --- NUEVO: Formulario de parámetros ---
@@ -884,6 +872,36 @@ class SevenPostRigGUI(QWidget):
                         self.feedback(f"✅ Track {os.path.basename(f)} añadido correctamente.", "success")
                 except Exception as e:
                     self.feedback(f"❌ Error leyendo {os.path.basename(f)}: {str(e)}", "error")
+
+    def remove_selected(self, list_widget):
+        for item in list_widget.selectedItems():
+            row = list_widget.row(item)
+            list_widget.takeItem(row)
+        if list_widget is self.setup_list:
+            # actualizar selector de edición
+            self.edit_setup_selector.clear()
+            for i in range(self.setup_list.count()):
+                self.edit_setup_selector.addItem(self.setup_list.item(i).text())
+            if self.setup_list.count() > 0:
+                self.load_setup_params_tab(self.setup_list.item(0).text())
+            else:
+                self.params_table_group.setVisible(False)
+                self.apply_params_btn.setVisible(False)
+
+    def remove_selected(self, list_widget):
+        for item in list_widget.selectedItems():
+            row = list_widget.row(item)
+            list_widget.takeItem(row)
+        if list_widget is self.setup_list:
+            # actualizar selector de edición
+            self.edit_setup_selector.clear()
+            for i in range(self.setup_list.count()):
+                self.edit_setup_selector.addItem(self.setup_list.item(i).text())
+            if self.setup_list.count() > 0:
+                self.load_setup_params_tab(self.setup_list.item(0).text())
+            else:
+                self.params_table_group.setVisible(False)
+                self.apply_params_btn.setVisible(False)
 
     def on_edit_setup_changed(self, idx):
         if idx < 0 or idx >= self.edit_setup_selector.count():
