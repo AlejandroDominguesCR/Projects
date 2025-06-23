@@ -10,7 +10,7 @@ import os
 import webbrowser
 import random
 from session_io import load_session_data
-from data_process import unify_timestamps
+from data_process import unify_timestamps, convert_time_column
 from KPI_builder import (
     compute_top_speeds, lap_time_histogram, pace_delta,
     position_trace, sector_comparison, gap_matrix,
@@ -86,6 +86,7 @@ class MainWindow(QMainWindow):
             raise KeyError('No se encontró columna de piloto en Analysis')
         df_analysis = df_analysis.copy()
         df_analysis['driver'] = df_analysis[driver_col]
+        df_analysis = convert_time_column(df_analysis, 'lap_time')
         # Classification
         if not df_class.empty:
             class_driver = next((c for c in ['driver_name', 'driver_shortname', 'driver_number'] if c in df_class.columns), None)

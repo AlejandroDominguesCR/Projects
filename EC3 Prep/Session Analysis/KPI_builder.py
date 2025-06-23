@@ -2,6 +2,7 @@
 import pandas as pd
 import numpy as np
 from scipy.stats import linregress
+from data_process import parse_time_to_seconds
 
 def detect_stints(laps: pd.DataFrame) -> pd.DataFrame:
     """Detecta secuencias de vueltas según reglas de stint (O, W, P)."""
@@ -66,16 +67,21 @@ def pace_comparison(df: pd.DataFrame, baseline: str) -> pd.DataFrame:
     else:
         raise KeyError('No se encontró columna de piloto')
 
+    laps = df['lap_time']
+    if not np.issubdtype(laps.dtype, np.number):
+        laps = laps.apply(parse_time_to_seconds)
+
     # Tiempo medio de referencia usando la columna detectada
-    ref = df[df[driver_col] == baseline]['lap_time'].mean()
+    ref = laps[df[driver_col] == baseline].mean()
 
     # Diferencia respecto a la referencia
-    df['delta'] = df['lap_time'] - ref
+    df = df.copy()
+    df['delta'] = laps - ref
     return df
 
 def position_trace(df: pd.DataFrame) -> pd.DataFrame:
     """Evolución de posiciones vuelta a vuelta."""
-    lap_col = 'lap'
+    lap_col = "lap" if "lap" in df.columns else "lap_number"
     pos_col = 'pos'
     # Piloto: preferimos shortname o driver_name
     if 'driver_shortname' in df.columns:
@@ -86,7 +92,12 @@ def position_trace(df: pd.DataFrame) -> pd.DataFrame:
         driver_col = 'driver_number'
     else:
         raise KeyError('No se encontró columna de piloto')
-    return df.pivot(index=lap_col, columns=driver_col, values=pos_col)
+
+    df_clean = (
+        df.groupby([lap_col, driver_col], as_index=False)[pos_col]
+        .last()
+    )
+    return df_clean.pivot(index=lap_col, columns=driver_col, values=pos_col)
 
 def lap_time_histogram(df: pd.DataFrame, lap_start: int | None = None, lap_end: int | None = None) -> pd.DataFrame:
     """Return lap time data optionally limited to a lap range.
@@ -108,27 +119,34 @@ def lap_time_histogram(df: pd.DataFrame, lap_start: int | None = None, lap_end: 
         DataFrame with the columns ``lap``, ``lap_time`` and ``driver`` filtered
         by the requested lap range.
     """
+    lap_col = "lap" if "lap" in df.columns else "lap_number"
 
-    required = {"lap", "lap_time", "driver"}
+    required = {lap_col, "lap_time", "driver"}
     if not required.issubset(df.columns):
         missing = required.difference(df.columns)
         raise KeyError(f"Missing columns in dataframe: {', '.join(missing)}")
 
-    out = df.loc[:, ["lap", "lap_time", "driver"]].copy()
+    out = df.loc[:, [lap_col, "lap_time", "driver"]].copy()
     if lap_start is not None or lap_end is not None:
         if lap_start is None:
-            lap_start = int(out["lap"].min())
+            lap_start = int(out[lap_col].min())
         if lap_end is None:
-            lap_end = int(out["lap"].max())
-        out = out[(out["lap"] >= lap_start) & (out["lap"] <= lap_end)]
+            lap_end = int(out[lap_col].max())
+        out = out[(out[lap_col] >= lap_start) & (out[lap_col] <= lap_end)]
 
     return out.dropna(subset=["lap_time"]).reset_index(drop=True)
 
 def pace_delta(df: pd.DataFrame, reference: str) -> pd.DataFrame:
     """Delta de lap_time vuelta a vuelta vs reference."""
-    ref = df[df['driver'] == reference].set_index('lap')['lap_time']
-    df2 = df.set_index('lap')
-    df2['delta'] = df2['lap_time'] - ref
+    laps = df['lap_time']
+    if not np.issubdtype(laps.dtype, np.number):
+        laps = laps.apply(parse_time_to_seconds)
+
+    ref = laps[df['driver'] == reference]
+    ref = ref.set_axis(df.loc[df['driver'] == reference, 'lap'])
+
+    df2 = df.set_index('lap').copy()
+    df2['delta'] = laps.values - ref.reindex(df2.index).values
     return df2.reset_index()
 
 def sector_comparison(df: pd.DataFrame) -> pd.DataFrame:
@@ -155,7 +173,13 @@ def gap_matrix(df: pd.DataFrame) -> pd.DataFrame:
     """Matriz de diferencias medias entre pilotos."""
     drivers = df['driver'].unique()
     mat = pd.DataFrame(index=drivers, columns=drivers, dtype=float)
-    mean_times = df.groupby('driver')['lap_time'].mean()
+
+    if not np.issubdtype(df['lap_time'].dtype, np.number):
+        laps = df['lap_time'].apply(parse_time_to_seconds)
+    else:
+        laps = df['lap_time']
+
+    mean_times = df.groupby('driver').apply(lambda d: laps.loc[d.index].mean())
     for i in drivers:
         for j in drivers:
             mat.loc[i,j] = mean_times[i] - mean_times[j]
@@ -164,7 +188,12 @@ def gap_matrix(df: pd.DataFrame) -> pd.DataFrame:
 def climate_impact(df: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     """Join de lap_times con datos meteorológicos por timestamp y regresión."""
     merged = pd.merge_asof(df.sort_values('time'), weather.sort_values('time'), on='time')
-    slope, intercept, r, p, stderr = linregress(merged['temperature'], merged['lap_time'])
+
+    laps = merged['lap_time']
+    if not np.issubdtype(laps.dtype, np.number):
+        laps = laps.apply(parse_time_to_seconds)
+
+    slope, intercept, r, p, stderr = linregress(merged['temperature'], laps)
     return {'slope': slope, 'r_value': r, 'data': merged}
 
 def track_limits_incidents(df: pd.DataFrame) -> pd.DataFrame:

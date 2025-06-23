@@ -2,7 +2,43 @@
 import os
 import pandas as pd
 import warnings
-from session_io import load_session_data
+from session_io import load_session_data, convert_lap_time
+
+def parse_time_to_seconds(value) -> float:
+    """Return the number of seconds represented by ``value``.
+
+    The function accepts strings in ``mm:ss.xxx`` or ``h:mm:ss.xxx`` format and
+    returns a floating point value in seconds. Unparsable values yield ``NaN``.
+    Numeric inputs are returned unchanged.
+    """
+
+    if pd.isna(value):
+        return float("nan")
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    try:
+        text = str(value).strip()
+        parts = text.split(":")
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        if len(parts) == 2:
+            minutes, seconds = parts
+            return int(minutes) * 60 + float(seconds)
+        return float(text)
+    except Exception:
+        return float("nan")
+
+def convert_time_column(df: pd.DataFrame, column: str) -> pd.DataFrame:
+    """Convert ``column`` from ``df`` to numeric seconds if present."""
+
+    col = column.lower()
+    if col not in df.columns:
+        return df
+    df = df.copy()
+    df[col] = df[col].apply(parse_time_to_seconds)
+    return df
 
 def unify_timestamps(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
     """
@@ -42,6 +78,7 @@ def process_session(
     data = load_session_data(folder)
     for key, df in data.items():
         df = unify_timestamps(df, "time")
+        df = convert_lap_time(df)
         out_path = os.path.join(out_folder, f"{key}.parquet")
         df.to_parquet(out_path)
 

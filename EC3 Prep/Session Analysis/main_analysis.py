@@ -13,7 +13,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 from session_io import load_session_data
-from data_process import unify_timestamps
+from data_process import unify_timestamps, convert_time_column
 from KPI_builder import (
     compute_top_speeds,
     lap_time_histogram,
@@ -53,6 +53,7 @@ def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
         raise KeyError("No se encontró columna de piloto en Analysis")
     df_analysis = df_analysis.copy()
     df_analysis["driver"] = df_analysis[driver_col]
+    df_analysis = convert_time_column(df_analysis, "lap_time")
 
     if not df_class.empty:
         class_driver = next(
@@ -79,6 +80,7 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
                 "Campos Racing": "#1f77b4",
                 "Griffin Core": "#ff7f0e",
             },
+            category_orders={"driver": ts["driver"].tolist()},
         )
     except Exception as e:
         logging.exception("Failed to build Top Speeds")
