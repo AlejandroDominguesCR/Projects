@@ -22,7 +22,6 @@ def unify_timestamps(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
     df = df.sort_values(col)
     return df.reset_index(drop=True)
 
-
 def process_session(
     folder: str,
     output_root: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "processed"),
@@ -45,7 +44,6 @@ def process_session(
         df = unify_timestamps(df, "time")
         out_path = os.path.join(out_folder, f"{key}.parquet")
         df.to_parquet(out_path)
-
 
 def process_all_sessions(
     data_root: str = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Data"),

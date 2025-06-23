@@ -9,7 +9,8 @@ from plotly.offline import plot
 import tkinter as tk
 from tkinter import filedialog
 import webbrowser
-
+import logging
+logging.basicConfig(level=logging.INFO)
 
 from session_io import load_session_data
 from data_process import unify_timestamps
@@ -79,61 +80,61 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
                 "Griffin Core": "#ff7f0e",
             },
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Top Speeds")
     try:
         laps = lap_time_histogram(df_analysis)
         fig_lt = px.scatter(laps, x="lap", y="lap_time", color="driver", title="Lap Times")
         fig_lt.update_layout(xaxis=dict(rangeslider=dict(visible=True)))
         figs["Lap Times"] = fig_lt
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Lap Times")
     try:
         delta = pace_delta(df_analysis, df_analysis["driver"].iloc[0])
         figs["Pace Delta"] = px.line(delta, x="lap", y="delta", color="driver", title="Pace Delta")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Pace Delta")
     try:
         if not df_class.empty:
             pos = position_trace(df_class)
             figs["Position Trace"] = px.line(pos, title="Position Trace")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Position Trace")
     try:
         sec_df = sector_comparison(df_analysis)
         sector_cols = [c for c in sec_df.columns if c.startswith("sector") and not c.endswith("_rank")]
         for col in sector_cols:
             df_sorted = sec_df.sort_values(col)
             figs[f"{col.capitalize()} Times"] = px.bar(df_sorted, x="driver", y=col, title=f"{col.capitalize()} Times")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Sector Comparison")
     try:
         gap = gap_matrix(df_analysis)
         figs["Gap Matrix"] = px.imshow(gap, text_auto=True, title="Gap Matrix")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Gap Matrix")
     try:
         if not weather_df.empty:
             clim = climate_impact(df_analysis, weather_df)
             figs["Climate Impact"] = px.scatter(clim["data"], x="temperature", y="lap_time", title="Climate Impact")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Climate Impact")
     try:
         if not tracklimits_df.empty:
             inc = track_limits_incidents(tracklimits_df)
             figs["Track Limits"] = px.bar(inc, x="driver", y="incident", title="Track Limits Incidents")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Track Limits")
     try:
         loc = top_speed_locations(df_analysis)
         figs["Top Speed Locations"] = px.scatter(loc, x="track_pos", y="top_speed", color="driver", title="Top Speed Locations")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Top Speed Locations")
     try:
         stint = stint_boxplots(df_analysis)
         figs["Stint Boxplot"] = px.box(stint, x="stint", y="lap_time", color="driver", title="Lap Time by Stint")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Stint Boxplot")
     try:
         team = team_ranking(df_analysis)
         if not team.empty:
@@ -141,10 +142,15 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
                 team,
                 x="team",
                 y="mean_top_speed",
+                color="team",
+                color_discrete_map={
+                    "Campos Racing": "#1f77b4",
+                    "Griffin Core": "#ff7f0e",
+                },
                 title="Team Average Top Speed",
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logging.exception("Failed to build Team Ranking")
     return figs
 
 def export_report(figs: dict, path: str):
@@ -162,6 +168,7 @@ def export_report(figs: dict, path: str):
 
 
 app = dash.Dash(__name__)
+
 app.layout = html.Div(
     [
         html.H1("Session Analysis Dashboard"),
@@ -181,6 +188,7 @@ app.layout = html.Div(
     Input("browse-btn", "n_clicks"),
     prevent_initial_call=True,
 )
+
 def on_browse(n_clicks):
     root = tk.Tk()
     root.withdraw()
@@ -196,17 +204,19 @@ def on_browse(n_clicks):
     Input("load-btn", "n_clicks"),
     State("folder-input", "value"),
 )
+
 def on_load(n_clicks, folder):
     if not n_clicks or not folder or not os.path.isdir(folder):
         raise PreventUpdate
     df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
     figs = build_figures(df_analysis, df_class, weather_df, tracklimits_df)
-    tabs = dcc.Tabs([
-        dcc.Tab(dcc.Graph(figure=fig), label=name)
+    graphs = [
+        element
         for name, fig in figs.items()
-    ])
+        for element in (html.H3(name), dcc.Graph(figure=fig))
+    ]
     serialized = {name: fig.to_dict() for name, fig in figs.items()}
-    return tabs, serialized
+    return html.Div(graphs), serialized
 
 @app.callback(
     Output("download-report", "data"),

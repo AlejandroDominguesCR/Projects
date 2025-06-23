@@ -50,6 +50,7 @@ def compute_top_speeds(df: pd.DataFrame) -> pd.DataFrame:
         result['team'] = None
         result = result[['driver', 'team', 'max_top_speed']]
 
+    result.sort_values('max_top_speed', ascending=False, inplace=True)
     return result
 
 def pace_comparison(df: pd.DataFrame, baseline: str) -> pd.DataFrame:
