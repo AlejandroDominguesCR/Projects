@@ -6,6 +6,10 @@ from dash.exceptions import PreventUpdate
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.offline import plot
+import tkinter as tk
+from tkinter import filedialog
+import webbrowser
+
 
 from session_io import load_session_data
 from data_process import unify_timestamps
@@ -60,18 +64,28 @@ def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
 
     return df_analysis, df_class, weather_df, tracklimits_df
 
-
 def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
     """Compute KPI figures using Plotly."""
     figs = {}
     try:
         ts = compute_top_speeds(df_analysis)
-        figs["Top Speeds"] = px.bar(ts, x="driver", y="max_top_speed", title="Top Speeds")
+        figs["Top Speeds"] = px.bar(
+            ts,
+            x="driver",
+            y="max_top_speed",
+            color="team",
+            color_discrete_map={
+                "Campos Racing": "#custom1",
+                "Griffin Core": "#custom2",
+            },
+        )
     except Exception:
         pass
     try:
-        hist = lap_time_histogram(df_analysis, df_analysis["driver"].iloc[0])
-        figs["Lap Time Histogram"] = px.histogram(hist, nbins=20, title="Lap Time Histogram")
+        laps = lap_time_histogram(df_analysis)
+        fig_lt = px.scatter(laps, x="lap", y="lap_time", color="driver", title="Lap Times")
+        fig_lt.update_layout(xaxis=dict(rangeslider=dict(visible=True)))
+        figs["Lap Times"] = fig_lt
     except Exception:
         pass
     try:
@@ -86,8 +100,11 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
     except Exception:
         pass
     try:
-        sec = sector_comparison(df_analysis)
-        figs["Sector Comparison"] = px.bar(sec, x="driver", y=sec.columns[1:], barmode="group", title="Sector Comparison")
+        sec_df = sector_comparison(df_analysis)
+        sector_cols = [c for c in sec_df.columns if c.startswith("sector") and not c.endswith("_rank")]
+        for col in sector_cols:
+            df_sorted = sec_df.sort_values(col)
+            figs[f"{col.capitalize()} Times"] = px.bar(df_sorted, x="driver", y=col, title=f"{col.capitalize()} Times")
     except Exception:
         pass
     try:
@@ -120,11 +137,15 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
     try:
         team = team_ranking(df_analysis)
         if not team.empty:
-            figs["Team Ranking"] = px.bar(team, x="team", y="max_top_speed", title="Team Ranking")
+            figs["Team Ranking"] = px.bar(
+                team,
+                x="team",
+                y="mean_top_speed",
+                title="Team Average Top Speed",
+            )
     except Exception:
         pass
     return figs
-
 
 def export_report(figs: dict, path: str):
     """Export all figures to a single HTML file."""
@@ -145,6 +166,7 @@ app.layout = html.Div(
     [
         html.H1("Session Analysis Dashboard"),
         dcc.Input(id="folder-input", type="text", placeholder="Session folder"),
+        html.Button("Browse", id="browse-btn"),
         html.Button("Load Session", id="load-btn"),
         html.Button("Export Report", id="export-btn"),
         dcc.Download(id="download-report"),
@@ -154,6 +176,19 @@ app.layout = html.Div(
     ]
 )
 
+@app.callback(
+    Output("folder-input", "value"),
+    Input("browse-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def on_browse(n_clicks):
+    root = tk.Tk()
+    root.withdraw()
+    folder = filedialog.askdirectory()
+    root.destroy()
+    if not folder:
+        raise PreventUpdate
+    return folder
 
 @app.callback(
     Output("graphs-container", "children"),
@@ -173,13 +208,13 @@ def on_load(n_clicks, folder):
     serialized = {name: fig.to_dict() for name, fig in figs.items()}
     return tabs, serialized
 
-
 @app.callback(
     Output("download-report", "data"),
     Input("export-btn", "n_clicks"),
     State("fig-store", "data"),
     prevent_initial_call=True,
 )
+
 def on_export(n_clicks, data):
     if not data:
         raise PreventUpdate
@@ -191,10 +226,10 @@ def on_export(n_clicks, data):
     os.remove(path)
     return dict(content=content, filename="session_report.html")
 
-
 def run_app():
+    # Open dashboard in the default browser. Update URL if the port changes.
+    webbrowser.open_new("http://127.0.0.1:8050/")
     app.run(debug=False)
-
 
 if __name__ == "__main__":
     run_app()

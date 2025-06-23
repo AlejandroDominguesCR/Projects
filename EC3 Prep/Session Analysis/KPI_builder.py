@@ -34,14 +34,21 @@ def compute_top_speeds(df: pd.DataFrame) -> pd.DataFrame:
         raise KeyError('No se encontró columna top_speed')
     # Agrupar y calcular máxima velocidad y equipo asociado
     if team_col:
-        grouped = df.groupby([driver_col, team_col])['top_speed'].max().reset_index()
-        result = grouped.rename(columns={driver_col: 'driver', team_col: 'team', 'top_speed': 'max_top_speed'})
+        grouped = (
+            df.groupby([driver_col, team_col])['top_speed']
+            .max()
+            .reset_index()
+        )
+        result = grouped.rename(
+            columns={driver_col: 'driver', team_col: 'team', 'top_speed': 'max_top_speed'}
+        )
     else:
         grouped = df.groupby(driver_col)['top_speed'].max().reset_index()
-        result = grouped.rename(columns={driver_col: 'driver', 'top_speed': 'max_top_speed'})
-    # Ordenar de mayor a menor
-    result = result.sort_values('max_top_speed', ascending=False).reset_index(drop=True)
-    return result
+        result = grouped.rename(
+            columns={driver_col: 'driver', 'top_speed': 'max_top_speed'}
+        )
+        result['team'] = None
+        result = result[['driver', 'team', 'max_top_speed']]
 
 def pace_comparison(df: pd.DataFrame, baseline: str) -> pd.DataFrame:
     """Compara lap times contra piloto de referencia."""
@@ -78,10 +85,41 @@ def position_trace(df: pd.DataFrame) -> pd.DataFrame:
         raise KeyError('No se encontró columna de piloto')
     return df.pivot(index=lap_col, columns=driver_col, values=pos_col)
 
-def lap_time_histogram(df: pd.DataFrame, driver: str) -> pd.DataFrame:
-    """Datos para histograma de lap times de un piloto."""
-    series = df[df['driver'] == driver]['lap_time']
-    return series.dropna()
+def lap_time_histogram(df: pd.DataFrame, lap_start: int | None = None, lap_end: int | None = None) -> pd.DataFrame:
+    """Return lap time data optionally limited to a lap range.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing at least ``lap``, ``lap_time`` and ``driver`` columns.
+    lap_start : int, optional
+        First lap of the range to keep. If ``None`` it defaults to the minimum lap
+        in the dataframe.
+    lap_end : int, optional
+        Last lap of the range to keep. If ``None`` it defaults to the maximum lap
+        in the dataframe.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with the columns ``lap``, ``lap_time`` and ``driver`` filtered
+        by the requested lap range.
+    """
+
+    required = {"lap", "lap_time", "driver"}
+    if not required.issubset(df.columns):
+        missing = required.difference(df.columns)
+        raise KeyError(f"Missing columns in dataframe: {', '.join(missing)}")
+
+    out = df.loc[:, ["lap", "lap_time", "driver"]].copy()
+    if lap_start is not None or lap_end is not None:
+        if lap_start is None:
+            lap_start = int(out["lap"].min())
+        if lap_end is None:
+            lap_end = int(out["lap"].max())
+        out = out[(out["lap"] >= lap_start) & (out["lap"] <= lap_end)]
+
+    return out.dropna(subset=["lap_time"]).reset_index(drop=True)
 
 def pace_delta(df: pd.DataFrame, reference: str) -> pd.DataFrame:
     """Delta de lap_time vuelta a vuelta vs reference."""
@@ -91,9 +129,24 @@ def pace_delta(df: pd.DataFrame, reference: str) -> pd.DataFrame:
     return df2.reset_index()
 
 def sector_comparison(df: pd.DataFrame) -> pd.DataFrame:
-    """Media de sectores por piloto."""
-    sectors = [c for c in df.columns if c.startswith('sector')]
-    return df.groupby('driver')[sectors].mean().reset_index()
+    """Ranking medio de tiempos por sector para cada piloto.
+
+    La función calcula la media de cada sector para todos los pilotos y
+    genera una columna adicional con el ranking por sector (1 = el más
+    rápido). Las columnas de ranking se denominan ``<sector>_rank``.
+    """
+
+    sectors = [c for c in df.columns if c.startswith("sector") and not c.endswith("_rank")]
+    if not sectors:
+        return pd.DataFrame()
+
+    result = df.groupby("driver")[sectors].mean().reset_index()
+
+    for sec in sectors:
+        rank_col = f"{sec}_rank"
+        result[rank_col] = result[sec].rank(method="min", ascending=True).astype(int)
+
+    return result
 
 def gap_matrix(df: pd.DataFrame) -> pd.DataFrame:
     """Matriz de diferencias medias entre pilotos."""
@@ -125,8 +178,15 @@ def stint_boxplots(df: pd.DataFrame) -> pd.DataFrame:
     return df[['driver','stint','lap_time']]
 
 def team_ranking(df: pd.DataFrame) -> pd.DataFrame:
-    """Ranking de equipos por suma de max_top_speed."""
+    """Ranking de equipos por velocidad media."""
     tops = compute_top_speeds(df)
     if 'team' in tops.columns:
-        return tops.groupby('team')['max_top_speed'].sum().sort_values(ascending=False).reset_index()
+        result = (
+            tops.groupby('team')['max_top_speed']
+            .mean()
+            .sort_values(ascending=False)
+            .reset_index()
+        )
+        result = result.rename(columns={'max_top_speed': 'mean_top_speed'})
+        return result
     return pd.DataFrame()

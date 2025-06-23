@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
                 df_class['driver'] = df_class[class_driver]
         # Definir KPIs
         kpis = {
-            'top_speeds': lambda: compute_top_speeds(df_analysis),
+            'lap_times': lambda: lap_time_histogram(df_analysis),
             'lap_histogram': lambda: lap_time_histogram(df_analysis, df_analysis['driver'].iloc[0]),
             'pace_delta': lambda: pace_delta(df_analysis, df_analysis['driver'].iloc[0]),
             'position_trace': lambda: position_trace(df_class) if not df_class.empty else None,
@@ -122,7 +122,11 @@ class MainWindow(QMainWindow):
             # Guardar output
             try:
                 if isinstance(df_out, pd.DataFrame):
-                    fig = px.bar(df_out, x=df_out.columns[0], y=df_out.columns[1], title=name)
+                    if name == 'lap_times':
+                        fig = px.scatter(df_out, x='lap', y='lap_time', color='driver', title='Lap Times')
+                        fig.update_layout(xaxis=dict(rangeslider=dict(visible=True)))
+                    else:
+                        fig = px.bar(df_out, x=df_out.columns[0], y=df_out.columns[1], title=name)
                     html = fig.to_html(include_plotlyjs='cdn')
                     path = os.path.join(folder, f"{name}.html")
                     with open(path, 'w') as f:
