@@ -11,7 +11,12 @@ def load_session_data(folder_path: str) -> dict:
         if fname.lower().endswith('.csv'):
             key = os.path.splitext(fname)[0]
             path = os.path.join(folder_path, fname)
-            df = pd.read_csv(path, sep=';', engine='python')
+            df = pd.read_csv(
+                path,
+                sep=';',
+                engine='python',
+                encoding='utf-8-sig',
+            )
             # Normalizar nombres de columnas
             df.columns = (
                 df.columns

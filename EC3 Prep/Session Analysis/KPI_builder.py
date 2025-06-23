@@ -47,8 +47,19 @@ def pace_comparison(df: pd.DataFrame, baseline: str) -> pd.DataFrame:
     """Compara lap times contra piloto de referencia."""
     if 'lap_time' not in df.columns:
         raise KeyError('No se encontró columna lap_time')
-    # Tiempo medio de referencia
-    ref = df[df.get('driver_name', df.get('driver_shortname', '')) == baseline]['lap_time'].mean()
+
+    # Detectar columna de piloto (igual que compute_top_speeds)
+    for col in ('driver_name', 'driver_shortname', 'driver_number'):
+        if col in df.columns:
+            driver_col = col
+            break
+    else:
+        raise KeyError('No se encontró columna de piloto')
+
+    # Tiempo medio de referencia usando la columna detectada
+    ref = df[df[driver_col] == baseline]['lap_time'].mean()
+
+    # Diferencia respecto a la referencia
     df['delta'] = df['lap_time'] - ref
     return df
 
@@ -72,7 +83,6 @@ def lap_time_histogram(df: pd.DataFrame, driver: str) -> pd.DataFrame:
     series = df[df['driver'] == driver]['lap_time']
     return series.dropna()
 
-
 def pace_delta(df: pd.DataFrame, reference: str) -> pd.DataFrame:
     """Delta de lap_time vuelta a vuelta vs reference."""
     ref = df[df['driver'] == reference].set_index('lap')['lap_time']
@@ -80,17 +90,10 @@ def pace_delta(df: pd.DataFrame, reference: str) -> pd.DataFrame:
     df2['delta'] = df2['lap_time'] - ref
     return df2.reset_index()
 
-
-def position_trace(df: pd.DataFrame) -> pd.DataFrame:
-    """Pivot de posición por vuelta."""
-    return df.pivot(index='lap', columns='driver', values='pos')
-
-
 def sector_comparison(df: pd.DataFrame) -> pd.DataFrame:
     """Media de sectores por piloto."""
     sectors = [c for c in df.columns if c.startswith('sector')]
     return df.groupby('driver')[sectors].mean().reset_index()
-
 
 def gap_matrix(df: pd.DataFrame) -> pd.DataFrame:
     """Matriz de diferencias medias entre pilotos."""
@@ -102,29 +105,24 @@ def gap_matrix(df: pd.DataFrame) -> pd.DataFrame:
             mat.loc[i,j] = mean_times[i] - mean_times[j]
     return mat
 
-
 def climate_impact(df: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     """Join de lap_times con datos meteorológicos por timestamp y regresión."""
     merged = pd.merge_asof(df.sort_values('time'), weather.sort_values('time'), on='time')
     slope, intercept, r, p, stderr = linregress(merged['temperature'], merged['lap_time'])
     return {'slope': slope, 'r_value': r, 'data': merged}
 
-
 def track_limits_incidents(df: pd.DataFrame) -> pd.DataFrame:
     """Cuenta de incidentes de track limits por piloto."""
     return df.groupby('driver')['incident'].sum().reset_index()
-
 
 def top_speed_locations(df: pd.DataFrame) -> pd.DataFrame:
     """Lugar de cada top_speed por piloto (track position)."""
     idx = df.groupby('driver')['top_speed'].idxmax()
     return df.loc[idx, ['driver','track_pos','top_speed']]
 
-
 def stint_boxplots(df: pd.DataFrame) -> pd.DataFrame:
     """Distribución de lap_time por stint y piloto."""
     return df[['driver','stint','lap_time']]
-
 
 def team_ranking(df: pd.DataFrame) -> pd.DataFrame:
     """Ranking de equipos por suma de max_top_speed."""
