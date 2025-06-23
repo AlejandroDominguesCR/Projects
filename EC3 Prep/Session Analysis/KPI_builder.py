@@ -50,6 +50,8 @@ def compute_top_speeds(df: pd.DataFrame) -> pd.DataFrame:
         result['team'] = None
         result = result[['driver', 'team', 'max_top_speed']]
 
+    return result
+
 def pace_comparison(df: pd.DataFrame, baseline: str) -> pd.DataFrame:
     """Compara lap times contra piloto de referencia."""
     if 'lap_time' not in df.columns:

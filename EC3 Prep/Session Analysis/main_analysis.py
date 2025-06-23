@@ -75,8 +75,8 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
             y="max_top_speed",
             color="team",
             color_discrete_map={
-                "Campos Racing": "#custom1",
-                "Griffin Core": "#custom2",
+                "Campos Racing": "#1f77b4",
+                "Griffin Core": "#ff7f0e",
             },
         )
     except Exception:
