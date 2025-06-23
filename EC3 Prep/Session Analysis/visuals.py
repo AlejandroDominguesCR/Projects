@@ -127,6 +127,8 @@ class MainWindow(QMainWindow):
             # Guardar output
             try:
                 if isinstance(df_out, pd.DataFrame):
+                    if df_out.empty:
+                        continue
                     if name == 'lap_times':
                         fig = px.scatter(df_out, x='lap', y='lap_time', color='driver', title='Lap Times')
                         fig.update_layout(xaxis=dict(rangeslider=dict(visible=True)))

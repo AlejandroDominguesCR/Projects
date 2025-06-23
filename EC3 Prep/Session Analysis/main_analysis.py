@@ -14,23 +14,10 @@ logging.basicConfig(level=logging.INFO)
 
 from session_io import load_session_data
 from data_process import unify_timestamps, convert_time_column
-from KPI_builder import (
-    compute_top_speeds,
-    lap_time_histogram,
-    pace_delta,
-    position_trace,
-    sector_comparison,
-    gap_matrix,
-    climate_impact,
-    track_limits_incidents,
-    track_limit_rate,
-    top_speed_locations,
-    stint_boxplots,
-    team_ranking,
-    lap_time_consistency,
+from KPI_builder import (compute_top_speeds, lap_time_histogram, pace_delta, position_trace, sector_comparison, gap_matrix,
+    climate_impact, track_limits_incidents, track_limit_rate, top_speed_locations, stint_boxplots, team_ranking, lap_time_consistency,
     ideal_lap_gap,
 )
-
 
 def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load and preprocess session CSV files."""
@@ -108,8 +95,26 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
         logging.exception("Failed to build Pace Delta")
     try:
         if not df_class.empty:
-            pos = position_trace(df_class)
-            figs["Position Trace"] = px.line(pos, title="Position Trace")
+            lap_col = "lap" if "lap" in df_class.columns else (
+                "lap_number" if "lap_number" in df_class.columns else None
+            )
+            if lap_col and df_class.groupby("driver")[lap_col].nunique().max() > 1:
+                pos = position_trace(df_class)
+                figs["Position Trace"] = px.line(pos, title="Position Trace")
+            else:
+                logging.info(
+                    "Classification data lacks sequential laps; skipping position trace"
+                )
+                notice = go.Figure()
+                notice.add_annotation(
+                    text="Sequential lap data not available",
+                    x=0.5,
+                    y=0.5,
+                    xref="paper",
+                    yref="paper",
+                    showarrow=False,
+                )
+                figs["Position Trace"] = notice
     except Exception as e:
         logging.exception("Failed to build Position Trace")
     try:
@@ -133,7 +138,9 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
     try:
         if not weather_df.empty:
             clim = climate_impact(df_analysis, weather_df)
-            figs["Climate Impact"] = px.scatter(clim["data"], x="temperature", y="lap_time", title="Climate Impact")
+            figs["Climate Impact"] = px.scatter(
+                clim["data"], x=clim["temp_col"], y="lap_time", title="Climate Impact"
+            )
     except Exception as e:
         logging.exception("Failed to build Climate Impact")
     try:
@@ -149,7 +156,14 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
         logging.exception("Failed to build Track Limits")
     try:
         loc = top_speed_locations(df_analysis)
-        figs["Top Speed Locations"] = px.scatter(loc, x="track_pos", y="top_speed", color="driver", title="Top Speed Locations")
+        if not loc.empty:
+            figs["Top Speed Locations"] = px.scatter(
+                loc,
+                x="track_pos",
+                y="top_speed",
+                color="driver",
+                title="Top Speed Locations",
+            )
     except Exception as e:
         logging.exception("Failed to build Top Speed Locations")
     try:

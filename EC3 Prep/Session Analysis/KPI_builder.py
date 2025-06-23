@@ -4,6 +4,7 @@ import numpy as np
 from scipy.stats import linregress
 from data_process import parse_time_to_seconds
 import warnings
+import re
 
 def detect_stints(laps: pd.DataFrame) -> pd.DataFrame:
     """Detecta secuencias de vueltas según reglas de stint (O, W, P)."""
@@ -192,7 +193,12 @@ def gap_matrix(df: pd.DataFrame) -> pd.DataFrame:
     return mat
 
 def climate_impact(df: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
-    """Join de lap_times con datos meteorológicos por timestamp y regresión."""
+    """Join de lap_times con datos meteorológicos por timestamp y regresión.
+
+    La función detecta automáticamente la columna de temperatura en ``weather``
+    (``temperature``, ``air_temp`` o ``track_temp``) y la usa en la regresión.
+    """
+
     df = df.dropna(subset=["time"])
     weather = weather.dropna(subset=["time"])
     merged = pd.merge_asof(
@@ -200,12 +206,23 @@ def climate_impact(df: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
         weather.sort_values("time"),
         on="time",
     )
-    laps = merged['lap_time']
+
+    laps = merged["lap_time"]
     if not np.issubdtype(laps.dtype, np.number):
         laps = laps.apply(parse_time_to_seconds)
 
-    slope, intercept, r, p, stderr = linregress(merged['temperature'], laps)
-    return {'slope': slope, 'r_value': r, 'data': merged}
+    # Detectar columna de temperatura
+    temp_col = next(
+        (c for c in ["temperature", "air_temp", "track_temp"] if c in merged.columns),
+        None,
+    )
+    if temp_col is None:
+        raise KeyError(
+            "No se encontró columna de temperatura (temperature, air_temp, track_temp)"
+        )
+
+    slope, intercept, r, p, stderr = linregress(merged[temp_col], laps)
+    return {"slope": slope, "r_value": r, "data": merged, "temp_col": temp_col}
 
 def track_limits_incidents(df: pd.DataFrame) -> pd.DataFrame:
     """Cuenta de incidentes de track limits por piloto."""
@@ -276,14 +293,28 @@ def track_limit_rate(track_df: pd.DataFrame, laps_df: pd.DataFrame) -> pd.DataFr
     return result
 
 def top_speed_locations(df: pd.DataFrame) -> pd.DataFrame:
-    """Lugar de cada ``top_speed`` por piloto (``track_pos``)."""
+    """Lugar de cada ``top_speed`` por piloto.
 
-    if 'track_pos' not in df.columns:
-        warnings.warn("Missing 'track_pos' column", UserWarning)
-        return pd.DataFrame()
+    The function expects a ``track_pos`` column with the position on the
+    track. If that column is not present it tries to fall back to
+    ``lap_distance`` or ``distance``. When no suitable column is found an
+    empty :class:`pandas.DataFrame` is returned and a warning is emitted.
+    """
 
-    idx = df.groupby('driver')['top_speed'].idxmax().dropna()
-    result = df.loc[idx, ['driver', 'track_pos', 'top_speed']]
+    pos_col = None
+    for cand in ("track_pos", "lap_distance", "distance"):
+        if cand in df.columns:
+            pos_col = cand
+            break
+
+    if pos_col is None:
+        warnings.warn("No track position column found", UserWarning)
+        return pd.DataFrame(columns=["driver", "track_pos", "top_speed"])
+
+    idx = df.groupby("driver")["top_speed"].idxmax().dropna()
+    result = df.loc[idx, ["driver", pos_col, "top_speed"]].rename(
+        columns={pos_col: "track_pos"}
+    )
     return result.dropna()
 
 def stint_boxplots(df: pd.DataFrame) -> pd.DataFrame:
@@ -337,11 +368,24 @@ def ideal_lap_gap(df: pd.DataFrame) -> pd.DataFrame:
     if "driver" not in df.columns or "lap_time" not in df.columns:
         raise KeyError("Missing 'driver' or 'lap_time' column")
 
-    sectors = [c for c in df.columns if c.startswith("sector") and not c.endswith("_rank")]
-    if not sectors:
-        raise KeyError("No sector columns found")
+    # detect sector columns with either "sector" or "s<number>" naming
+    sector_map = {}
+    for col in df.columns:
+        if col.endswith("_rank"):
+            continue
+        m = re.match(r"(?i)^sector(\d+)", col)
+        if not m:
+            m = re.match(r"(?i)^s(\d+)", col)
+        if m:
+            sector_map[col] = f"sector{m.group(1)}"
 
-    df_num = df[["driver", "lap_time", *sectors]].copy()
+    sectors = sorted(set(sector_map.values()), key=lambda x: int(re.search(r"\d+", x).group()))
+
+    if not sectors:
+        raise KeyError("No sector columns found (expected columns like 'sector1' or 's1')")
+
+    df_num = df[["driver", "lap_time", *sector_map.keys()]].copy()
+    df_num.rename(columns=sector_map, inplace=True)
 
     for col in ["lap_time", *sectors]:
         if not np.issubdtype(df_num[col].dtype, np.number):
