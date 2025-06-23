@@ -23,9 +23,12 @@ from KPI_builder import (
     gap_matrix,
     climate_impact,
     track_limits_incidents,
+    track_limit_rate,
     top_speed_locations,
     stint_boxplots,
     team_ranking,
+    lap_time_consistency,
+    ideal_lap_gap,
 )
 
 
@@ -86,7 +89,14 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
         logging.exception("Failed to build Top Speeds")
     try:
         laps = lap_time_histogram(df_analysis)
-        fig_lt = px.scatter(laps, x="lap", y="lap_time", color="driver", title="Lap Times")
+        fig_lt = px.line(
+            laps,
+            x="lap",
+            y="lap_time",
+            color="driver",
+            markers=True,
+            title="Lap Times",
+        )
         fig_lt.update_layout(xaxis=dict(rangeslider=dict(visible=True)))
         figs["Lap Times"] = fig_lt
     except Exception as e:
@@ -116,6 +126,11 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
     except Exception as e:
         logging.exception("Failed to build Gap Matrix")
     try:
+        ideal = ideal_lap_gap(df_analysis)
+        figs["Ideal Lap Gap"] = px.bar(ideal.sort_values("ideal_gap"), x="driver", y="ideal_gap", title="Ideal Lap Gap")
+    except Exception as e:
+        logging.exception("Failed to build Ideal Lap Gap")
+    try:
         if not weather_df.empty:
             clim = climate_impact(df_analysis, weather_df)
             figs["Climate Impact"] = px.scatter(clim["data"], x="temperature", y="lap_time", title="Climate Impact")
@@ -123,8 +138,13 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
         logging.exception("Failed to build Climate Impact")
     try:
         if not tracklimits_df.empty:
-            inc = track_limits_incidents(tracklimits_df)
-            figs["Track Limits"] = px.bar(inc, x="driver", y="incident", title="Track Limits Incidents")
+            rate_df = track_limit_rate(tracklimits_df, df_analysis)
+            figs["Track Limits per Lap"] = px.bar(
+                rate_df,
+                x="driver",
+                y="rate",
+                title="Track Limits per Lap",
+            )
     except Exception as e:
         logging.exception("Failed to build Track Limits")
     try:
@@ -138,11 +158,15 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
     except Exception as e:
         logging.exception("Failed to build Stint Boxplot")
     try:
+        cons = lap_time_consistency(df_analysis)
+        figs["Lap Consistency"] = px.bar(cons, x="driver", y="lap_std", title="Lap Consistency")
+    except Exception as e:
+        logging.exception("Failed to build Lap Consistency")
+    try:
         team = team_ranking(df_analysis)
         if not team.empty:
             figs["Team Ranking"] = px.bar(
                 team,
-                x="team",
                 y="mean_top_speed",
                 color="team",
                 color_discrete_map={

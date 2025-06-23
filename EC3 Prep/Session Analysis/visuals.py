@@ -16,7 +16,8 @@ from KPI_builder import (
     position_trace, sector_comparison, gap_matrix,
     climate_impact, track_limits_incidents,
     top_speed_locations, stint_boxplots,
-    team_ranking
+    team_ranking, lap_time_consistency, 
+    ideal_lap_gap, track_limit_rate,
 )
 
 class MainWindow(QMainWindow):
@@ -101,11 +102,14 @@ class MainWindow(QMainWindow):
             'position_trace': lambda: position_trace(df_class) if not df_class.empty else None,
             'sector_comp': lambda: sector_comparison(df_analysis),
             'gap_matrix': lambda: gap_matrix(df_analysis),
+            'ideal_lap_gap': lambda: ideal_lap_gap(df_analysis),
             'climate_impact': lambda: climate_impact(df_analysis, weather_df) if not weather_df.empty else None,
             'track_incidents': lambda: track_limits_incidents(tracklimits_df) if not tracklimits_df.empty else None,
+            'track_rate': lambda: track_limit_rate(tracklimits_df, df_analysis) if not tracklimits_df.empty else None,
             'top_speed_loc': lambda: top_speed_locations(df_analysis),
             'stint_box': lambda: stint_boxplots(df_analysis),
             'team_ranking': lambda: team_ranking(df_analysis),
+            'lap_consistency': lambda: lap_time_consistency(df_analysis),
         }
         # Generar archivos para cada KPI
         for name, func in kpis.items():
@@ -126,6 +130,8 @@ class MainWindow(QMainWindow):
                     if name == 'lap_times':
                         fig = px.scatter(df_out, x='lap', y='lap_time', color='driver', title='Lap Times')
                         fig.update_layout(xaxis=dict(rangeslider=dict(visible=True)))
+                    elif name == 'track_rate':
+                        fig = px.bar(df_out, x='driver', y='rate', title='Track Limits per Lap')
                     else:
                         fig = px.bar(df_out, x=df_out.columns[0], y=df_out.columns[1], title=name)
                     html = fig.to_html(include_plotlyjs='cdn')

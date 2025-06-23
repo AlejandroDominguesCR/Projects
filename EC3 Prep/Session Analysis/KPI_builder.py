@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from scipy.stats import linregress
 from data_process import parse_time_to_seconds
+import warnings
 
 def detect_stints(laps: pd.DataFrame) -> pd.DataFrame:
     """Detecta secuencias de vueltas según reglas de stint (O, W, P)."""
@@ -81,7 +82,12 @@ def pace_comparison(df: pd.DataFrame, baseline: str) -> pd.DataFrame:
 
 def position_trace(df: pd.DataFrame) -> pd.DataFrame:
     """Evolución de posiciones vuelta a vuelta."""
-    lap_col = "lap" if "lap" in df.columns else "lap_number"
+    if "lap" in df.columns:
+        lap_col = "lap"
+    elif "lap_number" in df.columns:
+        lap_col = "lap_number"
+    else:
+        raise KeyError("lap column not found in classification data")
     pos_col = 'pos'
     # Piloto: preferimos shortname o driver_name
     if 'driver_shortname' in df.columns:
@@ -187,8 +193,13 @@ def gap_matrix(df: pd.DataFrame) -> pd.DataFrame:
 
 def climate_impact(df: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
     """Join de lap_times con datos meteorológicos por timestamp y regresión."""
-    merged = pd.merge_asof(df.sort_values('time'), weather.sort_values('time'), on='time')
-
+    df = df.dropna(subset=["time"])
+    weather = weather.dropna(subset=["time"])
+    merged = pd.merge_asof(
+        df.sort_values("time"),
+        weather.sort_values("time"),
+        on="time",
+    )
     laps = merged['lap_time']
     if not np.issubdtype(laps.dtype, np.number):
         laps = laps.apply(parse_time_to_seconds)
@@ -200,10 +211,80 @@ def track_limits_incidents(df: pd.DataFrame) -> pd.DataFrame:
     """Cuenta de incidentes de track limits por piloto."""
     return df.groupby('driver')['incident'].sum().reset_index()
 
+def track_limit_rate(track_df: pd.DataFrame, laps_df: pd.DataFrame) -> pd.DataFrame:
+    """Calcula la tasa de infracciones de track limits por vuelta.
+
+    Parameters
+    ----------
+    track_df : pd.DataFrame
+        DataFrame con incidencias de track limits. Debe contener una columna
+        de piloto y una columna ``incident`` con el recuento de infracciones.
+    laps_df : pd.DataFrame
+        DataFrame con las vueltas completadas. Debe incluir columna de piloto y
+        ``lap`` o ``lap_number``.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame con ``driver``, ``incidents``, ``laps`` y ``rate``.
+    """
+
+    track_driver = next(
+        (c for c in ['driver', 'driver_name', 'driver_shortname', 'driver_number'] if c in track_df.columns),
+        None,
+    )
+    if track_driver is None:
+        raise KeyError('No se encontró columna de piloto en track_df')
+
+    lap_driver = next(
+        (c for c in ['driver', 'driver_name', 'driver_shortname', 'driver_number'] if c in laps_df.columns),
+        None,
+    )
+    if lap_driver is None:
+        raise KeyError('No se encontró columna de piloto en laps_df')
+
+    lap_col = 'lap' if 'lap' in laps_df.columns else 'lap_number'
+    if lap_col not in laps_df.columns:
+        raise KeyError('No se encontró columna de vueltas en laps_df')
+
+    if 'incident' not in track_df.columns:
+        if 'total_infractions' in track_df.columns:
+            track_df = track_df.rename(columns={'total_infractions': 'incident'})
+        else:
+            raise KeyError('No se encontró columna de incidentes en track_df')
+
+    incidents = track_df.groupby(track_driver)['incident'].sum()
+
+    laps = (
+        laps_df.drop_duplicates(subset=[lap_driver, lap_col])
+        .groupby(lap_driver)[lap_col]
+        .count()
+    )
+
+    result = (
+        pd.DataFrame({'driver': incidents.index, 'incidents': incidents.values})
+        .merge(
+            pd.DataFrame({'driver': laps.index, 'laps': laps.values}),
+            on='driver',
+            how='outer'
+        )
+        .fillna(0)
+    )
+
+    result['rate'] = result['incidents'] / result['laps'].replace(0, np.nan)
+    result['rate'] = result['rate'].fillna(0)
+    return result
+
 def top_speed_locations(df: pd.DataFrame) -> pd.DataFrame:
-    """Lugar de cada top_speed por piloto (track position)."""
-    idx = df.groupby('driver')['top_speed'].idxmax()
-    return df.loc[idx, ['driver','track_pos','top_speed']]
+    """Lugar de cada ``top_speed`` por piloto (``track_pos``)."""
+
+    if 'track_pos' not in df.columns:
+        warnings.warn("Missing 'track_pos' column", UserWarning)
+        return pd.DataFrame()
+
+    idx = df.groupby('driver')['top_speed'].idxmax().dropna()
+    result = df.loc[idx, ['driver', 'track_pos', 'top_speed']]
+    return result.dropna()
 
 def stint_boxplots(df: pd.DataFrame) -> pd.DataFrame:
     """Distribución de lap_time por stint y piloto."""
@@ -222,3 +303,61 @@ def team_ranking(df: pd.DataFrame) -> pd.DataFrame:
         result = result.rename(columns={'max_top_speed': 'mean_top_speed'})
         return result
     return pd.DataFrame()
+
+def lap_time_consistency(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute lap time standard deviation by driver.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing ``lap_time`` and ``driver`` columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns ``driver``, ``lap_std`` and ``lap_mean``
+        sorted by ``lap_std`` ascending.
+    """
+
+    if "lap_time" not in df.columns or "driver" not in df.columns:
+        raise KeyError("Missing 'lap_time' or 'driver' column")
+
+    laps = df["lap_time"]
+    if not np.issubdtype(laps.dtype, np.number):
+        laps = laps.apply(parse_time_to_seconds)
+
+    grouped = df.assign(lap_time=laps).groupby("driver")
+    result = grouped["lap_time"].agg(lap_std="std", lap_mean="mean").reset_index()
+    result.sort_values("lap_std", inplace=True)
+    return result
+
+def ideal_lap_gap(df: pd.DataFrame) -> pd.DataFrame:
+    """Calculate ideal lap from sector bests and compare to best lap time."""
+
+    if "driver" not in df.columns or "lap_time" not in df.columns:
+        raise KeyError("Missing 'driver' or 'lap_time' column")
+
+    sectors = [c for c in df.columns if c.startswith("sector") and not c.endswith("_rank")]
+    if not sectors:
+        raise KeyError("No sector columns found")
+
+    df_num = df[["driver", "lap_time", *sectors]].copy()
+
+    for col in ["lap_time", *sectors]:
+        if not np.issubdtype(df_num[col].dtype, np.number):
+            df_num[col] = df_num[col].apply(parse_time_to_seconds)
+
+    best_sectors = df_num.groupby("driver")[sectors].min()
+    ideal_lap = best_sectors.sum(axis=1)
+    best_lap = df_num.groupby("driver")["lap_time"].min()
+
+    result = (
+        pd.DataFrame({
+            "driver": best_lap.index,
+            "ideal_lap": ideal_lap.values,
+            "best_lap": best_lap.values,
+        })
+        .reset_index(drop=True)
+    )
+    result["ideal_gap"] = result["best_lap"] - result["ideal_lap"]
+    return result
