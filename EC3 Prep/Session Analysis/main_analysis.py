@@ -14,10 +14,7 @@ logging.basicConfig(level=logging.INFO)
 
 from session_io import load_session_data
 from data_process import unify_timestamps, convert_time_column
-from KPI_builder import (compute_top_speeds, lap_time_histogram, pace_delta, position_trace, sector_comparison, gap_matrix,
-    climate_impact, track_limits_incidents, track_limit_rate, top_speed_locations, stint_boxplots, team_ranking, lap_time_consistency,
-    ideal_lap_gap,
-)
+from KPI_builder import compute_top_speeds, track_limit_rate, team_ranking, sector_comparison, best_sector_ranking
 
 def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load and preprocess session CSV files."""
@@ -57,140 +54,47 @@ def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
     return df_analysis, df_class, weather_df, tracklimits_df
 
 def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
-    """Compute KPI figures using Plotly."""
-    figs = {}
-    try:
-        ts = compute_top_speeds(df_analysis)
-        figs["Top Speeds"] = px.bar(
-            ts,
+    """Compute a minimal set of KPI figures."""
+    figs: dict[str, go.Figure] = {}
+
+    # Top Speeds for each driver
+    ts = compute_top_speeds(df_analysis)
+    figs["Top Speeds"] = px.bar(
+        ts,
+        x="driver",
+        y="max_top_speed",
+        color="team",
+        color_discrete_map={
+            "Campos Racing": "#1f77b4",
+            "Griffin Core": "#ff7f0e",
+        },
+        category_orders={"driver": ts["driver"].tolist()},
+    )
+
+    # Track limits rate per lap if data available
+    if not tracklimits_df.empty:
+        rate_df = track_limit_rate(tracklimits_df, df_analysis)
+        figs["Track Limits per Lap"] = px.bar(
+            rate_df,
             x="driver",
-            y="max_top_speed",
+            y="rate",
+            title="Track Limits per Lap",
+        )
+
+    # Team ranking based on mean top speed
+    team = team_ranking(df_analysis)
+    if not team.empty:
+        figs["Team Ranking"] = px.bar(
+            team,
+            y="mean_top_speed",
             color="team",
             color_discrete_map={
                 "Campos Racing": "#1f77b4",
                 "Griffin Core": "#ff7f0e",
             },
-            category_orders={"driver": ts["driver"].tolist()},
+            title="Team Average Top Speed",
         )
-    except Exception as e:
-        logging.exception("Failed to build Top Speeds")
-    try:
-        laps = lap_time_histogram(df_analysis)
-        fig_lt = px.line(
-            laps,
-            x="lap",
-            y="lap_time",
-            color="driver",
-            markers=True,
-            title="Lap Times",
-        )
-        fig_lt.update_layout(xaxis=dict(rangeslider=dict(visible=True)))
-        figs["Lap Times"] = fig_lt
-    except Exception as e:
-        logging.exception("Failed to build Lap Times")
-    try:
-        delta = pace_delta(df_analysis, df_analysis["driver"].iloc[0])
-        figs["Pace Delta"] = px.line(delta, x="lap", y="delta", color="driver", title="Pace Delta")
-    except Exception as e:
-        logging.exception("Failed to build Pace Delta")
-    try:
-        if not df_class.empty:
-            lap_col = "lap" if "lap" in df_class.columns else (
-                "lap_number" if "lap_number" in df_class.columns else None
-            )
-            if lap_col and df_class.groupby("driver")[lap_col].nunique().max() > 1:
-                pos = position_trace(df_class)
-                figs["Position Trace"] = px.line(pos, title="Position Trace")
-            else:
-                logging.info(
-                    "Classification data lacks sequential laps; skipping position trace"
-                )
-                notice = go.Figure()
-                notice.add_annotation(
-                    text="Sequential lap data not available",
-                    x=0.5,
-                    y=0.5,
-                    xref="paper",
-                    yref="paper",
-                    showarrow=False,
-                )
-                figs["Position Trace"] = notice
-    except Exception as e:
-        logging.exception("Failed to build Position Trace")
-    try:
-        sec_df = sector_comparison(df_analysis)
-        sector_cols = [c for c in sec_df.columns if c.startswith("sector") and not c.endswith("_rank")]
-        for col in sector_cols:
-            df_sorted = sec_df.sort_values(col)
-            figs[f"{col.capitalize()} Times"] = px.bar(df_sorted, x="driver", y=col, title=f"{col.capitalize()} Times")
-    except Exception as e:
-        logging.exception("Failed to build Sector Comparison")
-    try:
-        gap = gap_matrix(df_analysis)
-        figs["Gap Matrix"] = px.imshow(gap, text_auto=True, title="Gap Matrix")
-    except Exception as e:
-        logging.exception("Failed to build Gap Matrix")
-    try:
-        ideal = ideal_lap_gap(df_analysis)
-        figs["Ideal Lap Gap"] = px.bar(ideal.sort_values("ideal_gap"), x="driver", y="ideal_gap", title="Ideal Lap Gap")
-    except Exception as e:
-        logging.exception("Failed to build Ideal Lap Gap")
-    try:
-        if not weather_df.empty:
-            clim = climate_impact(df_analysis, weather_df)
-            figs["Climate Impact"] = px.scatter(
-                clim["data"], x=clim["temp_col"], y="lap_time", title="Climate Impact"
-            )
-    except Exception as e:
-        logging.exception("Failed to build Climate Impact")
-    try:
-        if not tracklimits_df.empty:
-            rate_df = track_limit_rate(tracklimits_df, df_analysis)
-            figs["Track Limits per Lap"] = px.bar(
-                rate_df,
-                x="driver",
-                y="rate",
-                title="Track Limits per Lap",
-            )
-    except Exception as e:
-        logging.exception("Failed to build Track Limits")
-    try:
-        loc = top_speed_locations(df_analysis)
-        if not loc.empty:
-            figs["Top Speed Locations"] = px.scatter(
-                loc,
-                x="track_pos",
-                y="top_speed",
-                color="driver",
-                title="Top Speed Locations",
-            )
-    except Exception as e:
-        logging.exception("Failed to build Top Speed Locations")
-    try:
-        stint = stint_boxplots(df_analysis)
-        figs["Stint Boxplot"] = px.box(stint, x="stint", y="lap_time", color="driver", title="Lap Time by Stint")
-    except Exception as e:
-        logging.exception("Failed to build Stint Boxplot")
-    try:
-        cons = lap_time_consistency(df_analysis)
-        figs["Lap Consistency"] = px.bar(cons, x="driver", y="lap_std", title="Lap Consistency")
-    except Exception as e:
-        logging.exception("Failed to build Lap Consistency")
-    try:
-        team = team_ranking(df_analysis)
-        if not team.empty:
-            figs["Team Ranking"] = px.bar(
-                team,
-                y="mean_top_speed",
-                color="team",
-                color_discrete_map={
-                    "Campos Racing": "#1f77b4",
-                    "Griffin Core": "#ff7f0e",
-                },
-                title="Team Average Top Speed",
-            )
-    except Exception as e:
-        logging.exception("Failed to build Team Ranking")
+
     return figs
 
 def export_report(figs: dict, path: str):

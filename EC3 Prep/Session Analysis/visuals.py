@@ -12,12 +12,9 @@ import random
 from session_io import load_session_data
 from data_process import unify_timestamps, convert_time_column
 from KPI_builder import (
-    compute_top_speeds, lap_time_histogram, pace_delta,
-    position_trace, sector_comparison, gap_matrix,
-    climate_impact, track_limits_incidents,
-    top_speed_locations, stint_boxplots,
-    team_ranking, lap_time_consistency, 
-    ideal_lap_gap, track_limit_rate,
+    compute_top_speeds,
+    track_limit_rate,
+    team_ranking,
 )
 
 class MainWindow(QMainWindow):
@@ -96,20 +93,13 @@ class MainWindow(QMainWindow):
                 df_class['driver'] = df_class[class_driver]
         # Definir KPIs
         kpis = {
-            'lap_times': lambda: lap_time_histogram(df_analysis),
-            'lap_histogram': lambda: lap_time_histogram(df_analysis, df_analysis['driver'].iloc[0]),
-            'pace_delta': lambda: pace_delta(df_analysis, df_analysis['driver'].iloc[0]),
-            'position_trace': lambda: position_trace(df_class) if not df_class.empty else None,
-            'sector_comp': lambda: sector_comparison(df_analysis),
-            'gap_matrix': lambda: gap_matrix(df_analysis),
-            'ideal_lap_gap': lambda: ideal_lap_gap(df_analysis),
-            'climate_impact': lambda: climate_impact(df_analysis, weather_df) if not weather_df.empty else None,
-            'track_incidents': lambda: track_limits_incidents(tracklimits_df) if not tracklimits_df.empty else None,
-            'track_rate': lambda: track_limit_rate(tracklimits_df, df_analysis) if not tracklimits_df.empty else None,
-            'top_speed_loc': lambda: top_speed_locations(df_analysis),
-            'stint_box': lambda: stint_boxplots(df_analysis),
-            'team_ranking': lambda: team_ranking(df_analysis),
-            'lap_consistency': lambda: lap_time_consistency(df_analysis),
+            "top_speeds": lambda: compute_top_speeds(df_analysis),
+            "track_rate": (
+                lambda: track_limit_rate(tracklimits_df, df_analysis)
+                if not tracklimits_df.empty
+                else None
+            ),
+            "team_ranking": lambda: team_ranking(df_analysis),
         }
         # Generar archivos para cada KPI
         for name, func in kpis.items():
@@ -129,19 +119,34 @@ class MainWindow(QMainWindow):
                 if isinstance(df_out, pd.DataFrame):
                     if df_out.empty:
                         continue
-                    if name == 'lap_times':
-                        fig = px.scatter(df_out, x='lap', y='lap_time', color='driver', title='Lap Times')
-                        fig.update_layout(xaxis=dict(rangeslider=dict(visible=True)))
-                    elif name == 'track_rate':
-                        fig = px.bar(df_out, x='driver', y='rate', title='Track Limits per Lap')
-                    else:
-                        fig = px.bar(df_out, x=df_out.columns[0], y=df_out.columns[1], title=name)
-                    html = fig.to_html(include_plotlyjs='cdn')
+                    if name == "top_speeds":
+                        fig = px.bar(
+                            df_out,
+                            x="driver",
+                            y="max_top_speed",
+                            title="Top Speeds",
+                        )
+                    elif name == "track_rate":
+                        fig = px.bar(
+                            df_out,
+                            x="driver",
+                            y="rate",
+                            title="Track Limits per Lap",
+                        )
+                    else:  # team_ranking
+                        fig = px.bar(
+                            df_out,
+                            x="team",
+                            y="mean_top_speed",
+                            title="Team Ranking by Speed",
+                        )
+
+                    html = fig.to_html(include_plotlyjs="cdn")
                     path = os.path.join(folder, f"{name}.html")
-                    with open(path, 'w') as f:
+                    with open(path, "w") as f:
                         f.write(html)
                 else:
-                    with open(os.path.join(folder, f"{name}.txt"), 'w') as f:
+                    with open(os.path.join(folder, f"{name}.txt"), "w") as f:
                         f.write(str(out))
             except Exception:
                 pass

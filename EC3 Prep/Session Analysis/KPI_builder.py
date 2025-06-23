@@ -56,178 +56,6 @@ def compute_top_speeds(df: pd.DataFrame) -> pd.DataFrame:
     result.sort_values('max_top_speed', ascending=False, inplace=True)
     return result
 
-def pace_comparison(df: pd.DataFrame, baseline: str) -> pd.DataFrame:
-    """Compara lap times contra piloto de referencia."""
-    if 'lap_time' not in df.columns:
-        raise KeyError('No se encontró columna lap_time')
-
-    # Detectar columna de piloto (igual que compute_top_speeds)
-    for col in ('driver_name', 'driver_shortname', 'driver_number'):
-        if col in df.columns:
-            driver_col = col
-            break
-    else:
-        raise KeyError('No se encontró columna de piloto')
-
-    laps = df['lap_time']
-    if not np.issubdtype(laps.dtype, np.number):
-        laps = laps.apply(parse_time_to_seconds)
-
-    # Tiempo medio de referencia usando la columna detectada
-    ref = laps[df[driver_col] == baseline].mean()
-
-    # Diferencia respecto a la referencia
-    df = df.copy()
-    df['delta'] = laps - ref
-    return df
-
-def position_trace(df: pd.DataFrame) -> pd.DataFrame:
-    """Evolución de posiciones vuelta a vuelta."""
-    if "lap" in df.columns:
-        lap_col = "lap"
-    elif "lap_number" in df.columns:
-        lap_col = "lap_number"
-    else:
-        raise KeyError("lap column not found in classification data")
-    pos_col = 'pos'
-    # Piloto: preferimos shortname o driver_name
-    if 'driver_shortname' in df.columns:
-        driver_col = 'driver_shortname'
-    elif 'driver_name' in df.columns:
-        driver_col = 'driver_name'
-    elif 'driver_number' in df.columns:
-        driver_col = 'driver_number'
-    else:
-        raise KeyError('No se encontró columna de piloto')
-
-    df_clean = (
-        df.groupby([lap_col, driver_col], as_index=False)[pos_col]
-        .last()
-    )
-    return df_clean.pivot(index=lap_col, columns=driver_col, values=pos_col)
-
-def lap_time_histogram(df: pd.DataFrame, lap_start: int | None = None, lap_end: int | None = None) -> pd.DataFrame:
-    """Return lap time data optionally limited to a lap range.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame containing at least ``lap``, ``lap_time`` and ``driver`` columns.
-    lap_start : int, optional
-        First lap of the range to keep. If ``None`` it defaults to the minimum lap
-        in the dataframe.
-    lap_end : int, optional
-        Last lap of the range to keep. If ``None`` it defaults to the maximum lap
-        in the dataframe.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with the columns ``lap``, ``lap_time`` and ``driver`` filtered
-        by the requested lap range.
-    """
-    lap_col = "lap" if "lap" in df.columns else "lap_number"
-
-    required = {lap_col, "lap_time", "driver"}
-    if not required.issubset(df.columns):
-        missing = required.difference(df.columns)
-        raise KeyError(f"Missing columns in dataframe: {', '.join(missing)}")
-
-    out = df.loc[:, [lap_col, "lap_time", "driver"]].copy()
-    if lap_start is not None or lap_end is not None:
-        if lap_start is None:
-            lap_start = int(out[lap_col].min())
-        if lap_end is None:
-            lap_end = int(out[lap_col].max())
-        out = out[(out[lap_col] >= lap_start) & (out[lap_col] <= lap_end)]
-
-    return out.dropna(subset=["lap_time"]).reset_index(drop=True)
-
-def pace_delta(df: pd.DataFrame, reference: str) -> pd.DataFrame:
-    """Delta de lap_time vuelta a vuelta vs reference."""
-    laps = df['lap_time']
-    if not np.issubdtype(laps.dtype, np.number):
-        laps = laps.apply(parse_time_to_seconds)
-
-    ref = laps[df['driver'] == reference]
-    ref = ref.set_axis(df.loc[df['driver'] == reference, 'lap'])
-
-    df2 = df.set_index('lap').copy()
-    df2['delta'] = laps.values - ref.reindex(df2.index).values
-    return df2.reset_index()
-
-def sector_comparison(df: pd.DataFrame) -> pd.DataFrame:
-    """Ranking medio de tiempos por sector para cada piloto.
-
-    La función calcula la media de cada sector para todos los pilotos y
-    genera una columna adicional con el ranking por sector (1 = el más
-    rápido). Las columnas de ranking se denominan ``<sector>_rank``.
-    """
-
-    sectors = [c for c in df.columns if c.startswith("sector") and not c.endswith("_rank")]
-    if not sectors:
-        return pd.DataFrame()
-
-    result = df.groupby("driver")[sectors].mean().reset_index()
-
-    for sec in sectors:
-        rank_col = f"{sec}_rank"
-        result[rank_col] = result[sec].rank(method="min", ascending=True).astype(int)
-
-    return result
-
-def gap_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    """Matriz de diferencias medias entre pilotos."""
-    drivers = df['driver'].unique()
-    mat = pd.DataFrame(index=drivers, columns=drivers, dtype=float)
-
-    if not np.issubdtype(df['lap_time'].dtype, np.number):
-        laps = df['lap_time'].apply(parse_time_to_seconds)
-    else:
-        laps = df['lap_time']
-
-    mean_times = df.groupby('driver').apply(lambda d: laps.loc[d.index].mean())
-    for i in drivers:
-        for j in drivers:
-            mat.loc[i,j] = mean_times[i] - mean_times[j]
-    return mat
-
-def climate_impact(df: pd.DataFrame, weather: pd.DataFrame) -> pd.DataFrame:
-    """Join de lap_times con datos meteorológicos por timestamp y regresión.
-
-    La función detecta automáticamente la columna de temperatura en ``weather``
-    (``temperature``, ``air_temp`` o ``track_temp``) y la usa en la regresión.
-    """
-
-    df = df.dropna(subset=["time"])
-    weather = weather.dropna(subset=["time"])
-    merged = pd.merge_asof(
-        df.sort_values("time"),
-        weather.sort_values("time"),
-        on="time",
-    )
-
-    laps = merged["lap_time"]
-    if not np.issubdtype(laps.dtype, np.number):
-        laps = laps.apply(parse_time_to_seconds)
-
-    # Detectar columna de temperatura
-    temp_col = next(
-        (c for c in ["temperature", "air_temp", "track_temp"] if c in merged.columns),
-        None,
-    )
-    if temp_col is None:
-        raise KeyError(
-            "No se encontró columna de temperatura (temperature, air_temp, track_temp)"
-        )
-
-    slope, intercept, r, p, stderr = linregress(merged[temp_col], laps)
-    return {"slope": slope, "r_value": r, "data": merged, "temp_col": temp_col}
-
-def track_limits_incidents(df: pd.DataFrame) -> pd.DataFrame:
-    """Cuenta de incidentes de track limits por piloto."""
-    return df.groupby('driver')['incident'].sum().reset_index()
-
 def track_limit_rate(track_df: pd.DataFrame, laps_df: pd.DataFrame) -> pd.DataFrame:
     """Calcula la tasa de infracciones de track limits por vuelta.
 
@@ -292,34 +120,48 @@ def track_limit_rate(track_df: pd.DataFrame, laps_df: pd.DataFrame) -> pd.DataFr
     result['rate'] = result['rate'].fillna(0)
     return result
 
-def top_speed_locations(df: pd.DataFrame) -> pd.DataFrame:
-    """Lugar de cada ``top_speed`` por piloto.
+def sector_comparison(df: pd.DataFrame) -> pd.DataFrame:
+    """Ranking medio de tiempos por sector para cada piloto.
 
-    The function expects a ``track_pos`` column with the position on the
-    track. If that column is not present it tries to fall back to
-    ``lap_distance`` or ``distance``. When no suitable column is found an
-    empty :class:`pandas.DataFrame` is returned and a warning is emitted.
+    La función detecta automáticamente columnas de sector llamadas
+    ``sector1``, ``s1`` o ``s1_seconds`` (lo mismo para sectores 2 y 3),
+    ignorando mayúsculas/minúsculas. Estas columnas se convierten a
+    segundos mediante :func:`parse_time_to_seconds` antes de calcular la
+    media de cada sector. Además se generan columnas ``<sector>_rank`` con
+    la posición de cada piloto en dicho sector (1 = el más rápido).
     """
 
-    pos_col = None
-    for cand in ("track_pos", "lap_distance", "distance"):
-        if cand in df.columns:
-            pos_col = cand
-            break
+    # Detectar columnas de sector (sector1, s1, s1_seconds, ...)
+    sector_map: dict[str, str] = {}
+    for col in df.columns:
+        m = re.match(r"(?i)^(?:sector|s)([123])(?:_seconds)?$", col)
+        if m and int(m.group(1)) in (1, 2, 3) and m.group(1) not in sector_map:
+            sector_map[m.group(1)] = col
 
-    if pos_col is None:
-        warnings.warn("No track position column found", UserWarning)
-        return pd.DataFrame(columns=["driver", "track_pos", "top_speed"])
+    if not sector_map:
+        return pd.DataFrame()
 
-    idx = df.groupby("driver")["top_speed"].idxmax().dropna()
-    result = df.loc[idx, ["driver", pos_col, "top_speed"]].rename(
-        columns={pos_col: "track_pos"}
-    )
-    return result.dropna()
+    # Crear DataFrame con driver y columnas de sector normalizadas
+    use_cols = ["driver"] + [sector_map[k] for k in sorted(sector_map.keys())]
+    df_sectors = df[use_cols].copy()
 
-def stint_boxplots(df: pd.DataFrame) -> pd.DataFrame:
-    """Distribución de lap_time por stint y piloto."""
-    return df[['driver','stint','lap_time']]
+    for c in sector_map.values():
+        if not np.issubdtype(df_sectors[c].dtype, np.number):
+            df_sectors[c] = df_sectors[c].apply(parse_time_to_seconds)
+
+    # Renombrar a formato canonical sector<n>
+    rename_dict = {sector_map[k]: f"sector{int(k)}" for k in sector_map}
+    df_sectors.rename(columns=rename_dict, inplace=True)
+
+    sectors = list(rename_dict.values())
+    result = df_sectors.groupby("driver")[sectors].mean().reset_index()
+
+    # Añadir columnas de ranking
+    for sec in sectors:
+        rank_col = f"{sec}_rank"
+        result[rank_col] = result[sec].rank(method="min", ascending=True).astype(int)
+
+    return result
 
 def team_ranking(df: pd.DataFrame) -> pd.DataFrame:
     """Ranking de equipos por velocidad media."""
@@ -335,34 +177,6 @@ def team_ranking(df: pd.DataFrame) -> pd.DataFrame:
         return result
     return pd.DataFrame()
 
-def lap_time_consistency(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute lap time standard deviation by driver.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        DataFrame containing ``lap_time`` and ``driver`` columns.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame with columns ``driver``, ``lap_std`` and ``lap_mean``
-        sorted by ``lap_std`` ascending.
-    """
-
-    if "lap_time" not in df.columns or "driver" not in df.columns:
-        raise KeyError("Missing 'lap_time' or 'driver' column")
-
-    laps = df["lap_time"]
-    if not np.issubdtype(laps.dtype, np.number):
-        laps = laps.apply(parse_time_to_seconds)
-
-    grouped = df.assign(lap_time=laps).groupby("driver")
-    result = grouped["lap_time"].agg(lap_std="std", lap_mean="mean").reset_index()
-    result.sort_values("lap_std", inplace=True)
-    return result
-
-def ideal_lap_gap(df: pd.DataFrame) -> pd.DataFrame:
     """Calculate ideal lap from sector bests and compare to best lap time."""
 
     if "driver" not in df.columns or "lap_time" not in df.columns:
@@ -405,3 +219,38 @@ def ideal_lap_gap(df: pd.DataFrame) -> pd.DataFrame:
     )
     result["ideal_gap"] = result["best_lap"] - result["ideal_lap"]
     return result
+
+def best_sector_ranking(df: pd.DataFrame) -> pd.DataFrame:
+    """Best sector times per driver with rankings.
+
+    The function detects columns named either ``sectorN`` or ``sN`` (case
+    insensitive). For each sector it computes the minimum time by driver and
+    adds a ranking column ``<sector>_rank`` where ``1`` represents the fastest
+    driver.
+    """
+
+    if "driver" not in df.columns:
+        raise KeyError("'driver' column not found")
+
+    sector_cols = []
+    for col in df.columns:
+        if col.lower().startswith("sector") and col[6:].isdigit():
+            sector_cols.append(col)
+        elif re.match(r"(?i)^s\d+$", col):
+            sector_cols.append(col)
+
+    if not sector_cols:
+        return pd.DataFrame()
+
+    df_num = df[["driver", *sector_cols]].copy()
+    for col in sector_cols:
+        if not np.issubdtype(df_num[col].dtype, np.number):
+            df_num[col] = df_num[col].apply(parse_time_to_seconds)
+
+    best = df_num.groupby("driver")[sector_cols].min().reset_index()
+
+    for col in sector_cols:
+        best[f"{col}_rank"] = best[col].rank(method="min", ascending=True).astype(int)
+
+    return best
+

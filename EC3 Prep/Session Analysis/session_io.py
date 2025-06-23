@@ -1,6 +1,9 @@
 import os
 import warnings
 import pandas as pd
+import logging
+logging.basicConfig(level=logging.INFO)
+import re
 
 # Mapeo de sinónimos a nombres estándar
 COLUMN_MAP = {
