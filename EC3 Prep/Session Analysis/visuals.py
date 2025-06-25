@@ -193,7 +193,8 @@ class MainWindow(QMainWindow):
                     fig = px.line(
                         df_hist,
                         x='lap', y='lap_time',
-                        color='team', color_discrete_map=team_colors,
+                        color='team', line_group='driver',
+                        color_discrete_map=team_colors,
                         title="Histórico de tiempos por vuelta"
                     )
                     vals = df_hist['lap_time']

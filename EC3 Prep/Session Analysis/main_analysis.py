@@ -13,7 +13,7 @@ import logging
 import random   
 logging.basicConfig(level=logging.INFO)
 
-from session_io import load_session_data
+from session_io import load_session_data, export_raw_session
 from data_process import unify_timestamps, convert_time_column
 from KPI_builder import (
     compute_top_speeds,
@@ -21,7 +21,8 @@ from KPI_builder import (
     team_ranking,
     best_sector_times,
     ideal_lap_gap,
-    lap_time_history
+    lap_time_history,
+    extract_session_summary
 )
 
 
@@ -63,8 +64,22 @@ def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
 
     return df_analysis, df_class, weather_df, tracklimits_df
 
-def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
-    """Compute a minimal set of KPI figures."""
+def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None):
+    """Compute a minimal set of KPI figures.
+
+    Parameters
+    ----------
+    df_analysis : pd.DataFrame
+        Analysis dataframe.
+    df_class : pd.DataFrame
+    weather_df : pd.DataFrame
+    tracklimits_df : pd.DataFrame
+    teams : list[str] | None
+        Optional list of team names to filter ``df_analysis``.
+    """
+
+    if teams:
+        df_analysis = df_analysis[df_analysis["team"].isin(teams)]
     figs = {}
 
     # Top Speeds for each driver & generar colores por piloto
@@ -175,15 +190,12 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
     hist_df = lap_time_history(df_analysis)
     if not hist_df.empty:
         lap_col = 'lap_number' if 'lap_number' in hist_df.columns else 'lap'
-        # Ordenar correctamente
-        hist_df = hist_df.sort_values([lap_col, 'driver']).reset_index(drop=True)
         fig_hist = px.line(
-            hist_df,
-            x=lap_col,
-            y='lap_time',
-            color='driver',
+            hist_df.sort_values([lap_col, 'driver']),
+            x=lap_col, y='lap_time',
+            color='team', line_group='driver',
             color_discrete_map=team_colors,
-            title="Histórico de tiempos por vuelta"
+            title="Histórico de tiempos por vuelta",
         )
         fig_hist.update_layout(
             xaxis_title="Vuelta",
@@ -243,7 +255,7 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
             # 6) Añadimos la figura al diccionario
             figs[f"{sec.upper()} Diff"] = fig
 
-
+    extract_session_summary(df_analysis, tracklimits_df, "session_summary.xlsx")
     return figs
 
 def export_report(figs: dict, path: str):
@@ -271,6 +283,7 @@ app.layout = html.Div(
         html.Button("Export Report", id="export-btn"),
         dcc.Download(id="download-report"),
         dcc.Store(id="fig-store"),
+        dcc.Dropdown(id="team-filter", multi=True),
         html.Hr(),
         html.Div(id="graphs-container"),
     ]
@@ -294,22 +307,32 @@ def on_browse(n_clicks):
 @app.callback(
     Output("graphs-container", "children"),
     Output("fig-store", "data"),
+    Output("team-filter", "options"),
+    Output("team-filter", "value"),
     Input("load-btn", "n_clicks"),
+    Input("team-filter", "value"),
     State("folder-input", "value"),
 )
-
-def on_load(n_clicks, folder):
+def on_load(n_clicks, teams, folder):
     if not n_clicks or not folder or not os.path.isdir(folder):
         raise PreventUpdate
     df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
-    figs = build_figures(df_analysis, df_class, weather_df, tracklimits_df)
+    # 0) Extraemos la base “raw” en Excel
+    raw_path = os.path.join(folder, "session_raw_data.xlsx")
+    export_raw_session(folder, raw_path)
+    logging.info(f"Raw data exported to {raw_path}")
+    team_names = sorted(df_analysis["team"].dropna().unique().tolist())
+    if not teams:
+        teams = team_names
+    figs = build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams)
     graphs = [
         element
         for name, fig in figs.items()
         for element in (html.H3(name), dcc.Graph(figure=fig))
     ]
     serialized = {name: fig.to_dict() for name, fig in figs.items()}
-    return html.Div(graphs), serialized
+    options = [{"label": t, "value": t} for t in team_names]
+    return html.Div(graphs), serialized, options, teams
 
 @app.callback(
     Output("download-report", "data"),
