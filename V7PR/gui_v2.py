@@ -64,7 +64,7 @@ def parse_json_setup(json_data):
 
     # Neumático (ejemplo)
     kt_f = 373100 #276500
-    kt_r = 295000 #282100, 282100, 269000, 397900
+    kt_r = 397900 #295000 #282100, 269000, 397900
 
     hRideF = json_data["config"]["chassis"].get("hRideFSetup")
     hRideR = json_data["config"]["chassis"].get("hRideRSetup")
@@ -161,10 +161,10 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
-    mr_f_wd = 1.437 #0.696 1.437
-    mr_r_wd = 1.328 #0.752 1.328
+    mr_f_wd = 1.43456 #0.696 1.437
+    mr_r_wd = 1.32579 #0.752 1.328
 
-    mr_f_rd = 0.01695 #-0.01695
+    mr_f_rd = 0.016786 #-0.01695
     mr_r_rd = 1
 
     mr_f_arb= 2000/((60**2)*(0.72)**2)
@@ -257,8 +257,8 @@ def prepare_simple_params(params, global_setup):
     kRL = params[2]['kSpring']
     kRR = params[3]['kSpring']
 
-    kFL = kFL / global_setup["MR_FL"]**2
-    kFR = kFR / global_setup["MR_FR"]**2
+    kFL = kFL / (global_setup["MR_FL_rd"] ** 2)
+    kFR = kFR / (global_setup["MR_FL_rd"] ** 2)
     kRL = kRL / global_setup["MR_RL"]**2
     kRR = kRR / global_setup["MR_RR"]**2
 
@@ -452,6 +452,35 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
     post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx)
 
     return sol, post, setup_path, track_path
+
+def simulate_dict_combo(setup_data_raw, track_path, setup_label, kt_overrides=None):
+    from gui_v2 import parse_json_setup, prepare_simple_params, load_track_channels
+    from model import run_vehicle_model_simple, postprocess_7dof
+    from pathlib import Path
+
+    params, global_setup = parse_json_setup(setup_data_raw)
+    simple_params = prepare_simple_params(params, global_setup)
+
+    if kt_overrides is not None:
+        if kt_overrides.get('front') is not None:
+            simple_params['ktf'] = kt_overrides['front']
+        if kt_overrides.get('rear') is not None:
+            simple_params['ktr'] = kt_overrides['rear']
+
+    track_data = load_track_channels(track_path)
+    t_vec   = track_data['t']
+    z_tracks= track_data['z_tracks']
+    vx      = track_data['vx']
+    ax      = track_data['ax']
+    ay      = track_data['ay']
+    rpedal  = track_data['rpedal']
+    pbrake  = track_data['brake']
+
+    sol = run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, simple_params)
+    simple_params['track_name'] = Path(track_path).stem
+    post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx)
+
+    return sol, post, setup_label, track_path
 
 def load_track_channels(track_path):
     import pandas as pd
@@ -653,6 +682,31 @@ class SevenPostRigGUI(QWidget):
         params_layout.addWidget(self.apply_params_btn)
         self.params_tab.setLayout(params_layout)
         self.tabs.addTab(self.params_tab, "Editar Setup")
+
+        # --- Sweep / Parametric Study ---
+        self.sweep_tab = QWidget()
+        sweep_layout = QVBoxLayout()
+        sweep_layout.addWidget(QLabel("Parámetro a barrer:"))
+        self.sweep_param_combo = QComboBox()
+        self.sweep_param_combo.addItems([
+            "None",
+            "kSpring_front",
+            "kSpring_rear",
+            "damper_curve_front",
+            "damper_curve_rear",
+        ])
+        sweep_layout.addWidget(self.sweep_param_combo)
+        sweep_layout.addWidget(QLabel("Valores explícitos (coma separados):"))
+        self.sweep_values_edit = QLineEdit()
+        sweep_layout.addWidget(self.sweep_values_edit)
+        sweep_layout.addWidget(QLabel("Rango porcentual inicio,fin,paso:"))
+        self.sweep_range_edit = QLineEdit()
+        sweep_layout.addWidget(self.sweep_range_edit)
+        self.sweep_set_btn = QPushButton("Aplicar Sweep")
+        self.sweep_set_btn.clicked.connect(self.set_sweep_config)
+        sweep_layout.addWidget(self.sweep_set_btn)
+        self.sweep_tab.setLayout(sweep_layout)
+        self.tabs.addTab(self.sweep_tab, "Sweep")
 
         # --- Simulación ---
         self.sim_tab = QWidget()
@@ -888,21 +942,6 @@ class SevenPostRigGUI(QWidget):
                 self.params_table_group.setVisible(False)
                 self.apply_params_btn.setVisible(False)
 
-    def remove_selected(self, list_widget):
-        for item in list_widget.selectedItems():
-            row = list_widget.row(item)
-            list_widget.takeItem(row)
-        if list_widget is self.setup_list:
-            # actualizar selector de edición
-            self.edit_setup_selector.clear()
-            for i in range(self.setup_list.count()):
-                self.edit_setup_selector.addItem(self.setup_list.item(i).text())
-            if self.setup_list.count() > 0:
-                self.load_setup_params_tab(self.setup_list.item(0).text())
-            else:
-                self.params_table_group.setVisible(False)
-                self.apply_params_btn.setVisible(False)
-
     def on_edit_setup_changed(self, idx):
         if idx < 0 or idx >= self.edit_setup_selector.count():
             return
@@ -1043,9 +1082,69 @@ class SevenPostRigGUI(QWidget):
         # recargar la UI
         self.load_setup_params_tab(self.current_editing_setup)
 
+    def set_sweep_config(self):
+        param = self.sweep_param_combo.currentText()
+        if param == "None":
+            self.sweep_config = None
+            self.feedback("Sweep desactivado.", "success")
+            return
+
+        values_text = self.sweep_values_edit.text().strip()
+        range_text = self.sweep_range_edit.text().strip()
+        values = []
+        sweep_type = "absolute"
+        if values_text:
+            try:
+                values = [float(v) for v in values_text.split(',') if v]
+            except ValueError:
+                self.feedback("Valores inválidos.", "error")
+                return
+        elif range_text:
+            try:
+                start, end, step = [float(v) for v in range_text.split(',')]
+                values = list(np.arange(start, end + step, step))
+                sweep_type = "percent"
+            except Exception:
+                self.feedback("Rango inválido.", "error")
+                return
+        else:
+            self.feedback("Introduce valores o rango para el sweep.", "warning")
+            return
+
+        self.sweep_config = {"param": param, "values": values, "type": sweep_type}
+        self.feedback(f"Sweep aplicado a {param}: {values}", "success")
+
+    @staticmethod
+    def apply_sweep_value(setup_dict, param, val, sweep_type):
+        susp = setup_dict['config']['suspension']
+        if param == 'kSpring_front':
+            base = susp['front']['internal']['spring']['kSpring']
+            new_val = base * val if sweep_type == 'percent' else val
+            susp['front']['internal']['spring']['kSpring'] = new_val
+        elif param == 'kSpring_rear':
+            base = susp['rear']['internal']['spring']['kSpring']
+            new_val = base * val if sweep_type == 'percent' else val
+            susp['rear']['internal']['spring']['kSpring'] = new_val
+        elif param == 'damper_curve_front':
+            arr = susp['front']['internal']['damper']['FDamperLU']
+            if sweep_type == 'percent':
+                arr = [x * val for x in arr]
+            else:
+                arr = [x + val for x in arr]
+            susp['front']['internal']['damper']['FDamperLU'] = arr
+        elif param == 'damper_curve_rear':
+            arr = susp['rear']['internal']['damper']['FDamperLU']
+            if sweep_type == 'percent':
+                arr = [x * val for x in arr]
+            else:
+                arr = [x + val for x in arr]
+            susp['rear']['internal']['damper']['FDamperLU'] = arr
+
     def run_simulation(self):
         from concurrent.futures import ProcessPoolExecutor, as_completed
         import traceback
+        import json
+        import copy
 
         if self.setup_list.count() == 0 or self.track_list.count() == 0:
             self.feedback("❌ Debes añadir al menos un setup y un track.", "error")
@@ -1060,21 +1159,33 @@ class SevenPostRigGUI(QWidget):
         combo_list = []
         for i in range(self.setup_list.count()):
             setup_path = self.setup_list.item(i).text()
-            for j in range(self.track_list.count()):
-                track_path = self.track_list.item(j).text()
-                combo_list.append((setup_path, track_path))
+            with open(setup_path, 'r') as f:
+                base_setup = json.load(f)
+            variations = [(base_setup, os.path.basename(setup_path))]
+            if getattr(self, 'sweep_config', None):
+                param = self.sweep_config['param']
+                for val in self.sweep_config['values']:
+                    mod_setup = copy.deepcopy(base_setup)
+                    self.apply_sweep_value(mod_setup, param, val, self.sweep_config['type'])
+                    label = f"{os.path.basename(setup_path)}_{param}={val}"
+                    variations.append((mod_setup, label))
+
+            for setup_dict, label in variations:
+                for j in range(self.track_list.count()):
+                    track_path = self.track_list.item(j).text()
+                    combo_list.append((setup_dict, track_path, label))
 
         self.progress.setMaximum(len(combo_list))
 
         with ProcessPoolExecutor() as executor:
             futures = [
-                executor.submit(simulate_combo, setup, track, self.kt_overrides)
-                for setup, track in combo_list
+                executor.submit(simulate_dict_combo, setup, track, label, self.kt_overrides)
+                for setup, track, label in combo_list
             ]
 
             for i, future in enumerate(as_completed(futures)):
                 try:
-                    sol, post, setup_path, track_path = future.result()
+                    sol, post, setup_label, track_path = future.result()
 
                     # === VALIDACIÓN DE TRACK ===
                     import pandas as pd
@@ -1106,9 +1217,9 @@ class SevenPostRigGUI(QWidget):
                             self.feedback(msg, "warning")
 
                     # === GUARDAR RESULTADOS ===
-                    self.sim_results.append((sol, post, setup_path, track_path))
+                    self.sim_results.append((sol, post, setup_label, track_path))
                     name = (
-                        f"Setup: {os.path.basename(setup_path)} | "
+                        f"Setup: {setup_label} | "
                         f"Track: {os.path.basename(track_path)}"
                     )
                     self.result_selector.addItem(name)
@@ -1166,8 +1277,8 @@ class SevenPostRigGUI(QWidget):
         idx = self.result_selector.currentIndex() if idx is None else idx
         if idx < 0 or idx >= len(self.sim_results):
             return
-        sol, post, setup_path, track_path = self.sim_results[idx]
-        setup_name = os.path.basename(setup_path).replace(".json", "")
+        sol, post, setup_label, track_path = self.sim_results[idx]
+        setup_name = os.path.basename(setup_label).replace(".json", "") if os.path.splitext(setup_label)[1] else setup_label
         visualizer_dash.run_in_thread(sol, post, setup_name=setup_name)
         self.web_view.load(QUrl("http://127.0.0.1:8050"))
 

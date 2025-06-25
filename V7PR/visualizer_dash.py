@@ -5,9 +5,11 @@ from dash import dcc, html
 from threading import Thread
 import numpy as np
 import os 
+import pandas as pd
 from plotly.offline import plot
 from scipy.signal import savgol_filter
 from datetime import datetime
+import plotly.graph_objects as go
 
 app = dash.Dash(__name__)
 app.layout = html.Div([html.H3("Resultados no cargados")])
@@ -29,8 +31,6 @@ def launch_dash(sol, post, setup_name="Setup"):
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
         spring_travel = smooth_signal(post['travel']) * 1000
-        #f_spring = smooth_signal(post['f_spring'])
-        #f_damper = smooth_signal(post['f_damper'])
         travel = post['travel']
         wheel_f = post['f_wheel']          # shape (4, N)
         grip_mask = post['grip_limited_lateral_mask']  # (N,)
@@ -603,9 +603,6 @@ def get_results_figures(sol, post, save_dir=None):
     return figures
 
 def get_kpi_figures(setups, save_dir=None):
-    import os
-    import numpy as np
-    import plotly.graph_objects as go
 
     # ── Nombres de setups y etiquetas fijas ──
     setup_names = [os.path.splitext(os.path.basename(p))[0] for _, _, p, _ in setups]
@@ -935,6 +932,36 @@ def export_full_report(setups, export_path="export_full_report.html"):
         for section in html_sections:
             f.write(section)
         f.write("</body></html>")
+
+    # --- EXPORTAR CSV POR SETUP ---
+    out_dir = os.path.dirname(export_path) or "."
+    for sol, post, setup_path, track_path in setups:
+        setup_name = os.path.basename(setup_path).replace(".json","")
+        # 1) Leemos canales de entrada
+        df_in = pd.read_csv(track_path)
+        # 2) Preparamos DataFrame de salidas
+        #    Ajusta las claves según lo que postprocess_7dof devuelve
+        df_out = pd.DataFrame({
+            "Travel_FL_mm":   post["travel"][0]*1000,
+            "Travel_FR_mm":   post["travel"][1]*1000,
+            "Travel_RL_mm":   post["travel"][2]*1000,
+            "Travel_RR_mm":   post["travel"][3]*1000,
+            "Heave_mm":       sol.y[0]*1000,
+            "Pitch_deg":      np.degrees(sol.y[2]),
+            "Roll_deg":       np.degrees(sol.y[4]),
+            "WheelLoad_FL_N": post["wheel_load"][0],
+            "WheelLoad_FR_N": post["wheel_load"][1],
+            "WheelLoad_RL_N": post["wheel_load"][2],
+            "WheelLoad_RR_N": post["wheel_load"][3],
+            # añade aquí más canales: bumpstop, downforce, f_spring, f_damper...
+        })
+        # 3) Unimos side-by-side
+        df_all = pd.concat([df_in.reset_index(drop=True),
+                             df_out.reset_index(drop=True)], axis=1)
+        # 4) Guardamos CSV
+        csv_path = os.path.join(out_dir, f"{setup_name}_results.csv")
+        df_all.to_csv(csv_path, index=False)
+        print(f"[INFO] CSV de resultados guardado en {csv_path}")
 
 def run_in_thread(sol, post, setup_name="Setup"):
     thread = Thread(target=launch_dash, args=(sol, post, setup_name))

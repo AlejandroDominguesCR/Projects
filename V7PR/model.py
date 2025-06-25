@@ -752,18 +752,12 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     # ──────────────────────────────────────────────────────────────────────────────
     margen_ext       = x_spring - z_topout[:,None]
     margen_comp      = z_bottomout[:,None] - x_spring
-    xRL_static       = x_spring[2,0]
-    xRR_static       = x_spring[3,0]
-    z_free_RL        = params['z_RL_free']
-    z_free_RR        = params['z_RR_free']
 
     travel_static   = x_spring[:,0][:,None]
     travel_rel      = x_spring - travel_static
     travel_max      = np.max(travel_rel,axis=1)
     travel_min      = np.min(travel_rel,axis=1)
-    travel_range    = travel_max - travel_min
-    travel_used_pct = 100 * travel_range / stroke
-
+    
     # ──────────────────────────────────────────────────────────────────────────────
     # 4) Fuerzas suspensión: muelle, bumpstop y damper
     # ──────────────────────────────────────────────────────────────────────────────
@@ -812,7 +806,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         f_arb[3] += -arb_torque_rear / lever_r
 
         # 4d) Fuerza neta en rueda (nunca negativa)
-    wheel_load = (static - aero + f_arb) / 9.81   #  + f_tire(4, N)
+    wheel_load = (static - aero + f_arb + f_damper) / 9.81   #  + f_tire(4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
     f_wheel = (static - aero + f_arb)    # (4, N)
