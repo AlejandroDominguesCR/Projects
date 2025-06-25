@@ -13,8 +13,12 @@ import logging
 import random   
 logging.basicConfig(level=logging.INFO)
 
-from session_io import load_session_data, export_raw_session
-from data_process import unify_timestamps, convert_time_column
+from data_process import (
+    load_session_data,
+    export_raw_session,
+    unify_timestamps,
+    convert_time_column,
+)
 from KPI_builder import (
     compute_top_speeds,
     track_limit_rate,

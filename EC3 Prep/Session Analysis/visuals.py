@@ -10,8 +10,7 @@ import os
 import webbrowser
 import plotly.graph_objects as go
 import random
-from session_io import load_session_data
-from data_process import unify_timestamps, convert_time_column
+from data_process import load_session_data, unify_timestamps, convert_time_column
 from KPI_builder import (
     compute_top_speeds, track_limit_rate, team_ranking,
     ideal_lap_gap, best_sector_times, lap_time_history
