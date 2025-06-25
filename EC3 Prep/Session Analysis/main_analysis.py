@@ -259,7 +259,6 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
             # 6) Añadimos la figura al diccionario
             figs[f"{sec.upper()} Diff"] = fig
 
-    extract_session_summary(df_analysis, tracklimits_df, "session_summary.xlsx")
     return figs
 
 def export_report(figs: dict, path: str):
