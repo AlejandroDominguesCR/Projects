@@ -10,11 +10,21 @@ import tkinter as tk
 from tkinter import filedialog
 import webbrowser
 import logging
+import random   
 logging.basicConfig(level=logging.INFO)
 
 from session_io import load_session_data
 from data_process import unify_timestamps, convert_time_column
-from KPI_builder import compute_top_speeds, track_limit_rate, team_ranking, sector_comparison, best_sector_ranking
+from KPI_builder import (
+    compute_top_speeds,
+    track_limit_rate,
+    team_ranking,
+    best_sector_times,
+    ideal_lap_gap,
+    lap_time_history
+)
+
+
 
 def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load and preprocess session CSV files."""
@@ -55,21 +65,41 @@ def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
 
 def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
     """Compute a minimal set of KPI figures."""
-    figs: dict[str, go.Figure] = {}
+    figs = {}
 
-    # Top Speeds for each driver
+    # Top Speeds for each driver & generar colores por piloto
     ts = compute_top_speeds(df_analysis)
-    figs["Top Speeds"] = px.bar(
+    # Mapa de colores por equipo (igual que Team Ranking)
+    team_colors = {}
+    for team in ts['team'].unique():
+        if team == 'Campos Racing':
+            team_colors[team] = '#FF5733'
+        elif team == 'Griffin Core':
+            team_colors[team] = '#33C1FF'
+        else:
+            team_colors[team] = f'#{random.randint(0, 0xFFFFFF):06x}'
+
+    # Gráfico Top Speeds con colores por piloto
+    fig_ts = px.bar(
         ts,
-        x="driver",
-        y="max_top_speed",
-        color="team",
-        color_discrete_map={
-            "Campos Racing": "#1f77b4",
-            "Griffin Core": "#ff7f0e",
-        },
-        category_orders={"driver": ts["driver"].tolist()},
+        x="driver", y="max_top_speed",
+        color="team", color_discrete_map=team_colors,
+        title="Top Speeds (ordenado desc)"
     )
+    fig_ts.update_layout(
+        xaxis={'categoryorder':'array','categoryarray':ts['driver'].tolist()}
+    )
+    # Límite dinámico Y
+    ymin, ymax = ts['max_top_speed'].min(), ts['max_top_speed'].max()
+    delta = ymax - ymin
+    fig_ts.update_layout(
+        yaxis=dict(
+            range=[ymin - 0.05*delta, ymax + 0.10*delta],
+            title="Velocidad Máxima (km/h)"
+        )
+    )
+    figs["Top Speeds"] = fig_ts
+
 
     # Track limits rate per lap if data available
     if not tracklimits_df.empty:
@@ -81,19 +111,135 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
             title="Track Limits per Lap",
         )
 
-    # Team ranking based on mean top speed
-    team = team_ranking(df_analysis)
-    if not team.empty:
-        figs["Team Ranking"] = px.bar(
-            team,
-            y="mean_top_speed",
-            color="team",
-            color_discrete_map={
-                "Campos Racing": "#1f77b4",
-                "Griffin Core": "#ff7f0e",
-            },
-            title="Team Average Top Speed",
+    # 3) Team Ranking
+    team_df = team_ranking(df_analysis)
+    if not team_df.empty:
+        fig_team = px.bar(
+            team_df,
+            x="team", y="mean_top_speed",
+            color="team", color_discrete_map=team_colors,
+            title="Team Ranking (mean top speed)"
         )
+        ymin, ymax = team_df['mean_top_speed'].min(), team_df['mean_top_speed'].max()
+        delta = ymax - ymin
+        fig_team.update_layout(
+            yaxis=dict(
+                range=[ymin - 0.05*delta, ymax + 0.10*delta],
+                title="Velocidad Media por Equipo"
+            )
+        )
+        figs["Team Ranking"] = fig_team
+
+    # 4) Gap a Vuelta Ideal vs Mejor Vuelta Real
+    ig = ideal_lap_gap(df_analysis)
+    if not ig.empty:
+        ig_sorted = ig.sort_values('ideal_gap', ascending=False).reset_index(drop=True)
+        drivers = ig_sorted['driver'].tolist()
+        cols = [team_colors[t] for t in ig_sorted['team']]
+
+        fig_gap = go.Figure()
+        fig_gap.add_trace(go.Bar(
+            x=drivers, y=ig_sorted['ideal_time'],
+            marker_color=cols, name='Vuelta Ideal'
+        ))
+        fig_gap.add_trace(go.Scatter(
+            x=drivers, y=ig_sorted['best_lap'],
+            mode='markers', marker=dict(size=10, color=cols),
+            name='Mejor Vuelta Real'
+        ))
+        for i in range(len(drivers)):
+            fig_gap.add_shape(type='line',
+                x0=i, x1=i,
+                y0=ig_sorted.loc[i,'ideal_time'],
+                y1=ig_sorted.loc[i,'best_lap'],
+                line=dict(color=cols[i], dash='dash'),
+            )
+        fig_gap.update_layout(
+            title="Gap a Vuelta Ideal vs Mejor Vuelta Real",
+            xaxis={'categoryorder':'array','categoryarray':drivers}
+        )
+        # Límite dinámico Y sobre ideal_gap
+        ymin, ymax = ig_sorted['ideal_gap'].min(), ig_sorted['ideal_gap'].max()
+        delta = ymax - ymin
+        fig_gap.update_layout(
+            yaxis=dict(
+                range=[ymin - 0.05*delta, ymax + 0.10*delta],
+                title="Gap Ideal (s)"
+            )
+        )
+        figs["Gap a Vuelta Ideal"] = fig_gap
+
+    hist_df = lap_time_history(df_analysis)
+    if not hist_df.empty:
+        lap_col = 'lap_number' if 'lap_number' in hist_df.columns else 'lap'
+        # Ordenar correctamente
+        hist_df = hist_df.sort_values([lap_col, 'driver']).reset_index(drop=True)
+        fig_hist = px.line(
+            hist_df,
+            x=lap_col,
+            y='lap_time',
+            color='driver',
+            color_discrete_map=team_colors,
+            title="Histórico de tiempos por vuelta"
+        )
+        fig_hist.update_layout(
+            xaxis_title="Vuelta",
+            yaxis_title="Tiempo (s)",
+            legend_title="Piloto",
+        )
+        # Ajuste dinámico de eje Y (–5% … +10%)
+        ymin, ymax = hist_df['lap_time'].min(), hist_df['lap_time'].max()
+        delta = ymax - ymin
+        fig_hist.update_layout(
+            yaxis=dict(
+                range=[ymin - 0.05 * delta, ymax + 0.10 * delta]
+            )
+        )
+        figs["Lap Time History"] = fig_hist
+
+    bst = best_sector_times(df_analysis)
+    if not bst.empty:
+        for sec in ['sector1', 'sector2', 'sector3']:
+            # 1) DataFrame con driver, team y mejor tiempo de sector
+            df_sec = bst[['driver', 'team', sec]].copy()
+
+            # 2) Calculamos la diferencia vs el tiempo mínimo (0.0 para el más rápido)
+            best_time = df_sec[sec].min()
+            df_sec['diff'] = df_sec[sec] - best_time
+
+            # 3) Orden ascendente (0.0 primero)
+            df_sec = df_sec.sort_values('diff', ascending=True).reset_index(drop=True)
+
+            # 4) Gráfico de barras coloreado por equipo
+            fig = px.bar(
+                df_sec,
+                x='driver',
+                y='diff',
+                color='team',
+                color_discrete_map=team_colors,
+                title=f"Diferencia en {sec.upper()} vs mejor"
+            )
+            # Forzamos el orden de los pilotos
+            fig.update_layout(
+                xaxis={
+                    'categoryorder': 'array',
+                    'categoryarray': df_sec['driver'].tolist()
+                }
+            )
+
+            # 5) Ajustamos el rango Y (–5% … +10%)
+            ymin, ymax = df_sec['diff'].min(), df_sec['diff'].max()
+            delta = ymax - ymin
+            fig.update_layout(
+                yaxis=dict(
+                    range=[ymin - 0.05 * delta, ymax + 0.10 * delta],
+                    title="Diferencia (s)"
+                )
+            )
+
+            # 6) Añadimos la figura al diccionario
+            figs[f"{sec.upper()} Diff"] = fig
+
 
     return figs
 
