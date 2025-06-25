@@ -148,23 +148,26 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df):
             name='Mejor Vuelta Real'
         ))
         for i in range(len(drivers)):
-            fig_gap.add_shape(type='line',
-                x0=i, x1=i,
-                y0=ig_sorted.loc[i,'ideal_time'],
-                y1=ig_sorted.loc[i,'best_lap'],
-                line=dict(color=cols[i], dash='dash'),
+            fig_gap.add_shape(
+                type="line",
+                x0=drivers[i],
+                x1=drivers[i],
+                y0=ig_sorted.loc[i, "ideal_time"],
+                y1=ig_sorted.loc[i, "best_lap"],
+                line=dict(color=cols[i], dash="dash"),
             )
         fig_gap.update_layout(
             title="Gap a Vuelta Ideal vs Mejor Vuelta Real",
             xaxis={'categoryorder':'array','categoryarray':drivers}
         )
-        # Límite dinámico Y sobre ideal_gap
-        ymin, ymax = ig_sorted['ideal_gap'].min(), ig_sorted['ideal_gap'].max()
+        # Límite dinámico Y usando tiempos ideal y real
+        ymin = min(ig_sorted['ideal_time'].min(), ig_sorted['best_lap'].min())
+        ymax = max(ig_sorted['ideal_time'].max(), ig_sorted['best_lap'].max())
         delta = ymax - ymin
         fig_gap.update_layout(
             yaxis=dict(
                 range=[ymin - 0.05*delta, ymax + 0.10*delta],
-                title="Gap Ideal (s)"
+                title="Tiempo (s)"
             )
         )
         figs["Gap a Vuelta Ideal"] = fig_gap

@@ -165,10 +165,12 @@ class MainWindow(QMainWindow):
                                             marker=dict(size=10, color=cols, symbol='circle'),
                                             name='Mejor Vuelta Real'))
                     for i in range(len(drivers)):
-                        fig.add_shape(type='line',
-                            x0=i, x1=i,
-                            y0=ig.loc[i,'ideal_time'],
-                            y1=ig.loc[i,'best_lap'],
+                        fig.add_shape(
+                            type='line',
+                            x0=drivers[i],
+                            x1=drivers[i],
+                            y0=ig.loc[i, 'ideal_time'],
+                            y1=ig.loc[i, 'best_lap'],
                             line=dict(color=cols[i], dash='dash'),
                         )
                     fig.update_layout(
@@ -177,13 +179,13 @@ class MainWindow(QMainWindow):
                         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
                     )
                     # ── bloque dinámico ──
-                    vals = ig['ideal_gap']
-                    ymin, ymax = vals.min(), vals.max()
+                    ymin = min(ig['ideal_time'].min(), ig['best_lap'].min())
+                    ymax = max(ig['ideal_time'].max(), ig['best_lap'].max())
                     delta = ymax - ymin
                     fig.update_layout(
                         yaxis=dict(
                             range=[ymin - 0.05 * delta, ymax + 0.10 * delta],
-                            title="Gap Ideal (s)"
+                            title="Tiempo (s)"
                         )
                     )
                 elif name == 'lap_history':
@@ -194,13 +196,13 @@ class MainWindow(QMainWindow):
                         color='team', color_discrete_map=team_colors,
                         title="Histórico de tiempos por vuelta"
                     )
-                    vals = ig['lap_time']
+                    vals = df_hist['lap_time']
                     ymin, ymax = vals.min(), vals.max()
                     delta = ymax - ymin
                     fig.update_layout(
                         yaxis=dict(
                             range=[ymin - 0.05 * delta, ymax + 0.10 * delta],
-                            title="Gap Ideal (s)"
+                            title="Tiempo (s)"
                         )
                     )
                     html = fig.to_html(include_plotlyjs='cdn')
