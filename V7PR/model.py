@@ -586,7 +586,7 @@ def estimate_h0_from_static_travel(params, phi=0.0, theta=0.0):
     return np.mean(h_list)
 
 # --- POSTPROCESADO BÁSICO ---
-def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
+def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     """
     Calcula travel, fuerzas y outputs básicos para cada esquina a partir de la simulación 7-DOF.
     Todo el cálculo está vectorizado con NumPy para mayor eficiencia.
@@ -654,15 +654,13 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         + pos[:,0:1] * phi_dot[None,:]
         + pos[:,1:2] * theta_dot[None,:]
     )
+
     g    = 9.81
     Wtot = params['ms'] * g
     Wf   = Wtot * params['rWeightBalF']
     Wr   = Wtot - Wf
     static = np.array([Wf/2, Wf/2, Wr/2, Wr/2])[:,None]  # (4,1)
-    # 3. Cinemática de suspensión: travel en rueda (“unsprung”–“chassis”)
-    # v_wheel = velocidad rueda–carrocería
-    # 3. Cinemática de suspensión: travel en rueda (“unsprung”–“chassis”)
-    # 1) Travel a nivel rueda (“unsprung” vs chasis)
+
     x_wheel = zu - zs      # shape: (4, N)
 
     # 2) Extraer MR damper→wheel desde params
@@ -670,46 +668,16 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     # 3.3) Extraer MR damper→wheel desde el dict simple_params
     mr_wd = np.array([params['MR_FL'],params['MR_FR'],params['MR_RL'],params['MR_RR']])[:, None]  # (4,1) damper to wheel
     mr_dw = 1 / mr_wd  # (4,1) wheel to damper
-
-    # 3) Separar front/rear y aplicar su MR correspondiente
     mr_front = mr_dw[0:2, :]    # (2,1) para FL,FR
     mr_rear  = mr_dw[2:4, :]    # (2,1) para RL,RR
 
-    # 4) Desplazamiento real del pistón/muelle en cada eje
     x_spring_front = x_wheel[0:2, :] * mr_front  # (2, N)
     x_spring_rear  = x_wheel[2:4, :] * mr_rear   # (2, N)
-
     x_spring = np.vstack([x_spring_front, x_spring_rear])  # (4, N)
-    travel_abs = x_spring.copy()  
+
     # 5) Guardar para gráficos (front y rear por separado)
     x_spring_front = x_spring[0:2,:]
     x_spring_rear  = x_spring[2:4,:]
-
-    travel_abs_front = x_spring_front.copy()
-    travel_abs_rear  = x_spring_rear.copy()
-
-    # Límites física de recorrido (stop extension/compression)
-    z_topout    = np.array([
-        params['z_topout_FL'], params['z_topout_FR'],
-        params['z_topout_RL'], params['z_topout_RR']
-    ])
-    z_bottomout = np.array([
-        params['z_bottomout_FL'], params['z_bottomout_FR'],
-        params['z_bottomout_RL'], params['z_bottomout_RR']
-    ])
-    stroke = np.array([
-        params['stroke_FL'], params['stroke_FR'],
-        params['stroke_RL'], params['stroke_RR']
-    ])
-    gap_bump = np.array([
-        params['gap_bumpstop_FL'], params['gap_bumpstop_FR'],
-        params['gap_bumpstop_RL'], params['gap_bumpstop_RR']
-    ])
-
-    zt = np.stack(
-        [np.interp(t, t_vec, z_tracks[i]) for i in range(n_corners)],
-        axis=0
-    )  # (4, N)
 
     ae_front = np.zeros_like(h)
     ae_rear  = np.zeros_like(h)
@@ -724,20 +692,18 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         )
         ae_front[i] = Ff
         ae_rear[i]  = Fr
-
-    # peso estático
-    g    = 9.81
-    Wtot = params['ms'] * g
-    Wf   = Wtot * params['rWeightBalF']
-    Wr   = Wtot - Wf
-    static = np.array([Wf/2, Wf/2, Wr/2, Wr/2])[:,None]  # (4,1)
-
+        
     aero = np.vstack([
         0.5 * ae_front,
         0.5 * ae_front,
         0.5 * ae_rear,
         0.5 * ae_rear,
     ])  # (4, N)
+
+    zt = np.stack(
+        [np.interp(t, t_vec, z_tracks[i]) for i in range(n_corners)],
+        axis=0
+    )  # (4, N)
 
     kt = np.array([
         params['ktf'], params['ktf'],
@@ -746,6 +712,48 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
 
     f_tire     = kt[:,None] * (zt - zu)   # (4, N)
 
+    a_x = np.gradient(vx, t_vec)
+    a_y = np.gradient(ay, t_vec)
+    l    = params.get('lf', 0.0) + params.get('lr', 0.0)
+    h_cg = params.get('zCoG', 0.0)
+
+    dFz_long  = params['ms'] * a_x * h_cg / l
+    dFz_lat_f = params['ms'] * a_y * h_cg / params.get('tf', 1.0)
+    dFz_lat_r = params['ms'] * a_y * h_cg / params.get('tr', 1.0)
+
+    Fz_dyn = np.zeros((4, sol.y.shape[1]))
+    # Longitudinal
+    Fz_dyn[0] = static[0] - 0.5 * dFz_long
+    Fz_dyn[1] = static[1] - 0.5 * dFz_long
+    Fz_dyn[2] = static[2] + 0.5 * dFz_long
+    Fz_dyn[3] = static[3] + 0.5 * dFz_long
+    # Lateral delantero
+    Fz_dyn[0] -= 0.5 * dFz_lat_f
+    Fz_dyn[1] += 0.5 * dFz_lat_f
+    # Lateral trasero
+    Fz_dyn[2] -= 0.5 * dFz_lat_r
+    Fz_dyn[3] += 0.5 * dFz_lat_r
+
+    # Recalcular compresión de resorte de equilibrio dinámico
+    k_spring = np.array([params['kFL'], params['kFR'], params['kRL'], params['kRR']])[:, None]
+    x0_equil = Fz_dyn / k_spring
+    x_spring_raw = x_spring.copy()
+    x_spring = x_spring - x0_equil
+
+    # Límites física de recorrido (stop extension/compression)
+    z_topout    = np.array([
+        params['z_topout_FL'], params['z_topout_FR'],
+        params['z_topout_RL'], params['z_topout_RR']
+    ])
+    z_bottomout = np.array([
+        params['z_bottomout_FL'], params['z_bottomout_FR'],
+        params['z_bottomout_RL'], params['z_bottomout_RR']
+    ])
+
+    gap_bump = np.array([
+        params['gap_bumpstop_FL'], params['gap_bumpstop_FR'],
+        params['gap_bumpstop_RL'], params['gap_bumpstop_RR']
+    ])
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 3.3) Márgenes dinámicos y estáticos traseros
@@ -761,30 +769,35 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     # ──────────────────────────────────────────────────────────────────────────────
     # 4) Fuerzas suspensión: muelle, bumpstop y damper
     # ──────────────────────────────────────────────────────────────────────────────
-    k = np.array([
-        params['kFL'], params['kFR'],
-        params['kRL'], params['kRR']
-    ])
+    
+    f_spring = k_spring * x_spring_raw
 
-    f_spring = k[:,None] * x_spring
-
+    # --- bump-stop dinámico ---
     bump_funcs = [
         params['bumpstop_front'], params['bumpstop_front'],
         params['bumpstop_rear'],  params['bumpstop_rear']
     ]
+
+    x0_static = np.array([
+        params['x_static_FL'] , params['x_static_FR'],
+        params['x_static_RL'], params['x_static_RR']
+    ])[:, None]
+
+    threshold = gap_bump[:, None]    # (4,1) + (4,1)
+    comp_bump = np.maximum(0.0, x_spring_raw - threshold)  # (4,N)
+
     f_bump = np.zeros_like(x_spring)
     for i in range(n_corners):
-        comp = np.maximum(0, x_spring[i] - gap_bump[i])
-        f_bump[i] = bump_funcs[i](comp)
+        f_piston     = bump_funcs[i](comp_bump[i])   # fuerza pistón [N]
+        f_bump[i]    = f_piston * mr_dw[i]           # fuerza rueda [N]
 
 
     v_damper = zudot - v_chassis
-
+    f_damper = np.zeros_like(v_damper)
     damper_funcs = [
         params['damper_front'], params['damper_front'],
         params['damper_rear'],  params['damper_rear']
     ]
-    f_damper = np.zeros_like(v_damper)
     for i in range(n_corners):
         f_damper[i] = damper_funcs[i](v_damper[i])
 
@@ -795,18 +808,18 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     arb_torque_front = np.zeros(N)
     arb_torque_rear  = np.zeros(N)
     if k_arb_f != 0.0:
-        arb_torque_front = k_arb_f * (x_spring[0] - x_spring[1])
+        arb_torque_front = k_arb_f * (x_spring_raw[0] - x_spring_raw[1])
         lever_f = track_f / 2.0
         f_arb[0] += arb_torque_front / lever_f
         f_arb[1] += -arb_torque_front / lever_f
     if k_arb_r != 0.0:
-        arb_torque_rear = k_arb_r * (x_spring[2] - x_spring[3])
+        arb_torque_rear = k_arb_r * (x_spring_raw[2] - x_spring_raw[3])
         lever_r = track_r / 2.0
         f_arb[2] += arb_torque_rear / lever_r
         f_arb[3] += -arb_torque_rear / lever_r
 
         # 4d) Fuerza neta en rueda (nunca negativa)
-    wheel_load = (static - aero + f_arb + f_damper) / 9.81   #  + f_tire(4, N)
+    wheel_load = (static - aero + f_arb) / 9.81   #  + f_tire(4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
     f_wheel = (static - aero + f_arb)    # (4, N)
@@ -952,28 +965,26 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     psd_heave_peak = 20 * np.log10(np.max(Pxx_heave) + 1e-30)
     psd_pitch_peak = 20 * np.log10(np.max(Pxx_pitch) + 1e-30)
 
-    # ──────────────────────────────────────────────────────────────────────────────
-    # 9bis) Calcular la FFT/PSD de la Fuerza de Neumático (“carga”) – Front vs Rear
-    # ──────────────────────────────────────────────────────────────────────────────
-    #   f_tire es ya un array (4, N) con [FL, FR, RL, RR].
+    # ————————————————————————————————————————————————————————————————
+    # PSD de Contact Patch Load (Welch)
+    # ————————————————————————————————————————————————————————————————
+    # señal media por eje
+    front_sig = np.mean(wheel_load[0:2, :], axis=0)
+    rear_sig  = np.mean(wheel_load[2:4, :], axis=0)
 
-    front_signal = (f_tire[0, :]) /9.81   # Promedio de fuerza en las dos ruedas delanteras
-    rear_signal  = (f_tire[2, :]) /9.81  # Promedio de fuerza en las dos ruedas traseras
+    # cálculo unilateral
+    f_load, Pxx_f = welch(
+        front_sig, fs=fs,
+        window='hann', nperseg=nperseg, noverlap=noverlap,
+        scaling='density', average='mean'
+    )
+    _,       Pxx_r = welch(
+        rear_sig,  fs=fs,
+        window='hann', nperseg=nperseg, noverlap=noverlap,
+        scaling='density', average='mean'
+    )
 
-    # Usamos FFT unidireccional (solo frecuencias positivas):
-    F_front = np.fft.rfft(front_signal)    # Componente compleja espectral frontal
-    F_rear  = np.fft.rfft(rear_signal)     # Componente compleja espectral trasera
-    f_vals  = np.fft.rfftfreq(N, d=dt)     # Vector de frecuencias (longitud N//2 + 1)
-
-    # Magnitud lineal y a continuación convertimos a dB (normalizo por (N/2)):
-    mag_front_linear = np.abs(F_front)                     
-    mag_rear_linear  = np.abs(F_rear)
-    mag_front_dB = 20.0 * np.log10(mag_front_linear / (N/2) + 1e-30)
-    mag_rear_dB  = 20.0 * np.log10(mag_rear_linear  / (N/2) + 1e-30)
-
-    # Fase en grados:
-    phase_front_deg = np.angle(F_front, deg=True)
-    phase_rear_deg  = np.angle(F_rear,  deg=True)
+ 
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 10) Acumulated Track Noise Normalized by Lap Time (mm/s)
@@ -991,10 +1002,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
     # ──────────────────────────────────────────────────────────────────────────────
     return {
         # --- Cinemática básica ---
-        'travel':             x_spring,               # (4, N)
-        'travel_abs':      travel_abs,          # (4, N)
-        'travel_abs_front': travel_abs_front,   # (2, N)
-        'travel_abs_rear':  travel_abs_rear,    # (2, N)
+        'travel':             x_spring_raw,               # (4, N)
         'travel_rel':         travel_rel,             # (4, N)
         'travel_static':      travel_static,          # (4, 1)
         'travel_max':         travel_max,             # (4,)
@@ -1116,11 +1124,13 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx):
         'z_topout_RR': params['z_topout_RR'],
         'z_bottomout_RR': params['z_bottomout_RR'],
         't_vec':              t,                     # (N,)
-        'f_psd_load'           : f_vals,             # vector de frecuencias [Hz]
-        'psd_load_mag_front'   : mag_front_dB,       # magnitud dB eje frontal
-        'psd_load_phase_front' : phase_front_deg,    # fase [°] eje frontal
-        'psd_load_mag_rear'    : mag_rear_dB,        # magnitud dB eje trasero
-        'psd_load_phase_rear'  : phase_rear_deg,     # fase [°] eje trasero        
+        'f_psd_load'           : f_load,             # vector de frecuencias [Hz]
+        'psd_load_mag_front'   : 10 * np.log10(Pxx_f + 1e-30),       # magnitud dB eje frontal
+        #'psd_load_phase_front' : phase_front_deg,    # fase [°] eje frontal
+        'psd_load_mag_rear'    : 10 * np.log10(Pxx_r + 1e-30),        # magnitud dB eje trasero
+        #'psd_load_phase_rear'  : phase_rear_deg,     # fase [°] eje trasero 
+
+   
     }
 
 

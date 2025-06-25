@@ -161,14 +161,14 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
-    mr_f_wd = 1.43456 #0.696 1.437
-    mr_r_wd = 1.32579 #0.752 1.328
+    mr_f_wd = 1.43456 
+    mr_r_wd = 1.32579 
 
-    mr_f_rd = 0.016786 #-0.01695
+    mr_f_rd = 0.016786 
     mr_r_rd = 1
 
-    mr_f_arb= 2000/((60**2)*(0.72)**2)
-    mr_r_arb= mr_f_arb
+    mr_f_arb= 2000/((60**2)*(0.72**2))
+    mr_r_arb= 2000/((168**2)*(1.12**2))
 
     global_setup["MR_FL"] = mr_f_wd
     global_setup["MR_FR"] = mr_f_wd
@@ -257,10 +257,11 @@ def prepare_simple_params(params, global_setup):
     kRL = params[2]['kSpring']
     kRR = params[3]['kSpring']
 
-    kFL = kFL / (global_setup["MR_FL_rd"] ** 2)
-    kFR = kFR / (global_setup["MR_FL_rd"] ** 2)
-    kRL = kRL / global_setup["MR_RL"]**2
-    kRR = kRR / global_setup["MR_RR"]**2
+    kFL = kFL / global_setup["MR_FL"]**2
+    kFR = kFR / global_setup["MR_FL"]**2
+    kRL = kRL / global_setup["MR_RL"]**2 
+    kRR = kRR / global_setup["MR_RR"]**2   
+    
 
     # Damper y bumpstop interpoladores
     # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
@@ -309,8 +310,8 @@ def prepare_simple_params(params, global_setup):
 
 
     # Rigidez de barra estabilizadora (anti roll bar)
-    k_arb_f = global_setup.get('kARB_F', 0) 
-    k_arb_r = global_setup.get('kARB_R', 0) 
+    k_arb_f = global_setup.get('kARB_F', 0) *1000
+    k_arb_r = global_setup.get('kARB_R', 0) *1000
 
     k_arb_f = k_arb_f * global_setup["MR_F_ARB"]
     k_arb_r = k_arb_r * global_setup["MR_R_ARB"]
@@ -449,7 +450,7 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
 
     sol = run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, simple_params)
     simple_params['track_name'] = Path(track_path).stem
-    post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx)
+    post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx, ax, ay)
 
     return sol, post, setup_path, track_path
 
@@ -478,7 +479,7 @@ def simulate_dict_combo(setup_data_raw, track_path, setup_label, kt_overrides=No
 
     sol = run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, simple_params)
     simple_params['track_name'] = Path(track_path).stem
-    post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx)
+    post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx, ax, ay)
 
     return sol, post, setup_label, track_path
 
@@ -508,7 +509,8 @@ def load_track_channels(track_path):
 
     # Conversión vienen en mm
     data['z_tracks'] = [z / 1000.0 for z in data['z_tracks']]
-
+    data['ax'] = [ax * 9.81 for ax in data['ax']]
+    data['ay'] = [ay * 9.81 for ay in data['ay']]
     return data
 
 class SevenPostRigGUI(QWidget):
