@@ -152,7 +152,7 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
     # 4) Gap a Vuelta Ideal vs Mejor Vuelta Real
     ig = ideal_lap_gap(df_analysis)
     if not ig.empty:
-        ig_sorted = ig.sort_values('ideal_gap', ascending=False).reset_index(drop=True)
+        ig_sorted = ig.sort_values('best_lap', ascending=True).reset_index(drop=True)
         drivers = ig_sorted['driver'].tolist()
         cols = [team_colors[t] for t in ig_sorted['team']]
 

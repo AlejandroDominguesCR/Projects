@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
                         )
                     )
                 elif name == 'ideal_lap_gap':
-                    ig = df_out.sort_values('ideal_gap', ascending=False).reset_index(drop=True)
+                    ig = df_out.sort_values('best_lap', ascending=True).reset_index(drop=True)
                     drivers = ig['driver'].tolist()
                     cols = [team_colors[t] for t in ig['team']]
                     fig = go.Figure()
