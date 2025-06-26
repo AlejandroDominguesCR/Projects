@@ -180,7 +180,9 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
 
     # --- Transferencias de peso ---
     l = lf + lr
-    h_cg = params.get('zCoG', 0.3)
+    # Altura instantánea del centro de gravedad respecto al suelo
+    # (positiva hacia arriba, coherente con los scripts de referencia)
+    h_cg = h - params.get('zCoG', 0.3)
     a_x = params.get('ax', 0.0)
     a_y = params.get('ay', 0.0)
 
@@ -191,9 +193,16 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     F_RL += 0.5 * dFz_long
     F_RR += 0.5 * dFz_long
 
-    # Lateral
-    dFz_lat_f = Ms * a_y * h_cg / tF
-    dFz_lat_r = Ms * a_y * h_cg / tR
+    # Lateral (según la distribución de rigidez al balanceo)
+    K_phi_f = 2 * kFL * (tF / 2)**2 + params.get('k_arb_f', 0.0) * tF**2
+    K_phi_r = 2 * kRL * (tR / 2)**2 + params.get('k_arb_r', 0.0) * tR**2
+    M_roll   = Ms * a_y * h_cg
+    share_f  = lr * K_phi_f
+    share_r  = lf * K_phi_r
+    M_f      = M_roll * share_f / (share_f + share_r)
+    M_r      = M_roll * share_r / (share_f + share_r)
+    dFz_lat_f = M_f / tF
+    dFz_lat_r = M_r / tR
     F_FL += 0.5 * dFz_lat_f
     F_FR -= 0.5 * dFz_lat_f
     F_RL += 0.5 * dFz_lat_r
@@ -709,7 +718,9 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     a_x = np.gradient(vx, t_vec)
     a_y = np.gradient(ay, t_vec)
     l    = params.get('lf', 0.0) + params.get('lr', 0.0)
-    h_cg = params.get('zCoG', 0.0)
+    # Altura dinámica del centro de gravedad respecto al suelo
+    # (convención positiva hacia arriba)
+    h_cg = sol.y[0, :] - params.get('zCoG', 0.0)
 
     # --- 1) Masas no suspendidas ---
     Mu_f = params['mHubF'] * 2
@@ -719,19 +730,17 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     dFz_long_f = (params['ms'] * lr + Mu_f) * a_x * h_cg / (lf + lr)
     dFz_long_r = (params['ms'] * lf + Mu_r) * a_x * h_cg / (lf + lr)
 
-    # --- 3) Transfer lateral total por eje ---
-    dFz_lat_f = (params['ms'] + Mu_f) * a_y * h_cg / track_f
-    dFz_lat_r = (params['ms'] + Mu_r) * a_y * h_cg / track_r
+    # --- 3) Transfer lateral por rigidez al balanceo ---
+    K_roll_f = 2 * params['kFL'] * (track_f / 2)**2 + params.get('k_arb_f', 0.0) * track_f**2
+    K_roll_r = 2 * params['kRL'] * (track_r / 2)**2 + params.get('k_arb_r', 0.0) * track_r**2
+    M_roll   = params['ms'] * a_y * h_cg
+    share_f  = lr * K_roll_f
+    share_r  = lf * K_roll_r
+    M_f      = M_roll * share_f / (share_f + share_r)
+    M_r      = M_roll * share_r / (share_f + share_r)
+    dFz_lat_f = M_f / track_f
+    dFz_lat_r = M_r / track_r
 
-    # --- 4) Transfer elastic por roll stiffness ---
-    K_roll_f = 2*params['kFL']*(track_f/2)**2 + params['k_arb_f']*track_f**2
-    K_roll_r = 2*params['kRL']*(track_r/2)**2 + params['k_arb_r']*track_r**2
-    K_tot    = K_roll_f + K_roll_r
-    phi_el   = params['ms']*a_y*h_cg / K_tot
-    M_f_el   = phi_el * K_roll_f
-    M_r_el   = phi_el * K_roll_r
-    dFz_elast_f = M_f_el / (track_f/2)
-    dFz_elast_r = M_r_el / (track_r/2)
 
     Fz_dyn = np.zeros((4, sol.y.shape[1]))
 
@@ -742,19 +751,20 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     Fz_dyn[2] = static[2] + 0.5*dFz_long_r
     Fz_dyn[3] = static[3] + 0.5*dFz_long_r
 
-    # Lateral + elástica
-    # Delantero
-    Fz_dyn[0] += (-0.5*dFz_lat_f) - 0.5*dFz_elast_f
-    Fz_dyn[1] += ( 0.5*dFz_lat_f) + 0.5*dFz_elast_f
-    # Trasero
-    Fz_dyn[2] += (-0.5*dFz_lat_r) - 0.5*dFz_elast_r
-    Fz_dyn[3] += ( 0.5*dFz_lat_r) + 0.5*dFz_elast_r
+    # Lateral
+    # Delantero␊
+    Fz_dyn[0] += -0.5 * dFz_lat_f
+    Fz_dyn[1] +=  0.5 * dFz_lat_f
+    # Trasero␊
+    Fz_dyn[2] += -0.5 * dFz_lat_r
+    Fz_dyn[3] +=  0.5 * dFz_lat_r
+
 
     # Recalcular compresión de resorte de equilibrio dinámico
     k_spring = np.array([params['kFL'], params['kFR'], params['kRL'], params['kRR']])[:, None]
     x0_equil = Fz_dyn / k_spring
     x_spring_raw = x_spring.copy()
-    x_spring = x_spring - x0_equil
+    x_spring = x_spring + x0_equil
 
     # Límites física de recorrido (stop extension/compression)
     z_topout    = np.array([
