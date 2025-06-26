@@ -73,10 +73,10 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    stroke_FL = 0.029#0.01965
-    stroke_FR = 0.029#0.01965
-    stroke_RL = 0.059#0.0305
-    stroke_RR = 0.059#0.0305
+    stroke_FL = 0.029 #0.01965
+    stroke_FR = 0.029 #0.01965
+    stroke_RL = 0.059 #0.0305
+    stroke_RR = 0.059 #0.0305
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -164,11 +164,11 @@ def parse_json_setup(json_data):
     mr_f_wd = 1.43456 
     mr_r_wd = 1.32579 
 
-    mr_f_rd = 0.016786 
+    mr_f_rd = 1.491587949 
     mr_r_rd = 1
 
     mr_f_arb= 2000/((60**2)*(0.72**2))
-    mr_r_arb= 2000/((168**2)*(1.12**2))
+    mr_r_arb= 2000/((146**2)*(1.59**2))
 
     global_setup["MR_FL"] = mr_f_wd
     global_setup["MR_FR"] = mr_f_wd
@@ -257,8 +257,8 @@ def prepare_simple_params(params, global_setup):
     kRL = params[2]['kSpring']
     kRR = params[3]['kSpring']
 
-    kFL = kFL / global_setup["MR_FL"]**2
-    kFR = kFR / global_setup["MR_FL"]**2
+    kFL = kFL / (global_setup["MR_FL"]**2 * global_setup["MR_FL_rd"]**2)
+    kFR = kFR / (global_setup["MR_FR"]**2 * global_setup["MR_FL_rd"]**2)
     kRL = kRL / global_setup["MR_RL"]**2 
     kRR = kRR / global_setup["MR_RR"]**2   
     
@@ -308,13 +308,12 @@ def prepare_simple_params(params, global_setup):
     kinstf = kaxle_f / 2.0
     kinstr = kaxle_r / 2.0
 
-
     # Rigidez de barra estabilizadora (anti roll bar)
     k_arb_f = global_setup.get('kARB_F', 0) *1000
     k_arb_r = global_setup.get('kARB_R', 0) *1000
 
-    k_arb_f = k_arb_f * global_setup["MR_F_ARB"]
-    k_arb_r = k_arb_r * global_setup["MR_R_ARB"]
+    k_arb_f = (k_arb_f * global_setup["MR_F_ARB"])/ global_setup["MR_FL"]**2
+    k_arb_r = (k_arb_r * global_setup["MR_R_ARB"])/ global_setup["MR_RL"]**2 
 
     # --- Cálculo de topes físicos (top-out y bumpstop) para cada esquina ---
     z_topout_FL = float(min(params[0]['spring_x'][0], params[0]['bump_x'][0]))

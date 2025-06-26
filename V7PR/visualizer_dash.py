@@ -30,7 +30,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         graphs = []
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
-        spring_travel = smooth_signal(post['travel']) * 1000
+        spring_travel = smooth_signal(post['wheel_travel']) * 1000
         travel = post['travel']
         wheel_f = post['f_wheel']          # shape (4, N)
         grip_mask = post['grip_limited_lateral_mask']  # (N,)
@@ -41,6 +41,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         heave_filtered = smooth_signal(sol.y[0])
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
+        wheel_f_filtered = smooth_signal(wheel_f)
 
         # Travel absoluto por rueda 
         graphs.append(dcc.Graph(figure=go.Figure([

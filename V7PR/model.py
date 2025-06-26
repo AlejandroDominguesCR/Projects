@@ -3,6 +3,7 @@ from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 from scipy.signal import welch
 import random
+from scipy.optimize import fsolve
 
 def tope_fuerza(x, topout, bottomout, k_tope=1e6):
     if x < topout:
@@ -219,8 +220,6 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         zRRdot,   zRR_ddot
     ]
 
-from scipy.optimize import fsolve
-
 def compute_aero_forces(vx, hRideF, hRideR, aero_poly, rho_air=1.225, area_ref=1):
     """
     Calcula las fuerzas aerodinámicas verticales y de arrastre (drag).
@@ -270,7 +269,6 @@ def compute_aero_forces(vx, hRideF, hRideR, aero_poly, rho_air=1.225, area_ref=1
     Cd  = evaluate_poly(aero_poly.get('CDragBody',  {}),
                         hRideF, hRideR, aFlapF, aFlapR) * fD
 
-
     # --- Fuerzas ---
     q = 0.5 * rho_air * vx**2  # presión dinámica
 
@@ -285,7 +283,6 @@ def compute_static_equilibrium(params, vx=0):
     Resuelve el equilibrio estático: encuentra h, phi, theta y las posiciones de las masas no suspendidas
     de forma que las fuerzas verticales y los momentos se equilibren.
     """
-
     h0_est = estimate_h0_from_static_travel(params, phi=0.0, theta=0.0)
     # Constantes
     g = 9.81
@@ -503,7 +500,7 @@ def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, throttle, brake, param
         gap0 = params[f'gap_bumpstop_{corner}']
 
         # x_bump = posición a partir de la cual empieza a actuar el bumpstop
-        params[f'x_bump_{corner}'] = x_stat + gap0
+        params[f'x_bump_{corner}'] = gap0
         params[f'z_topout_{corner}']    = x_stat - stroke_top
         params[f'z_bottomout_{corner}'] = x_stat + stroke_bottom
     # Guardamos el punto estático para cálculo de topes reales
@@ -591,9 +588,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     Calcula travel, fuerzas y outputs básicos para cada esquina a partir de la simulación 7-DOF.
     Todo el cálculo está vectorizado con NumPy para mayor eficiencia.
     """
-
-    import numpy as np
-    from scipy.signal import welch
     from model import compute_aero_forces
 
     # ──────────────────────────────────────────────────────────────────────────────
@@ -710,29 +704,51 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         params['ktr'], params['ktr']
     ])  # neumáticos
 
-    f_tire     = kt[:,None] * (zt - zu)   # (4, N)
+    f_tire     = kt[:,None] * x_wheel #(zt - zu)   # (4, N)
 
     a_x = np.gradient(vx, t_vec)
     a_y = np.gradient(ay, t_vec)
     l    = params.get('lf', 0.0) + params.get('lr', 0.0)
     h_cg = params.get('zCoG', 0.0)
 
-    dFz_long  = params['ms'] * a_x * h_cg / l
-    dFz_lat_f = params['ms'] * a_y * h_cg / params.get('tf', 1.0)
-    dFz_lat_r = params['ms'] * a_y * h_cg / params.get('tr', 1.0)
+    # --- 1) Masas no suspendidas ---
+    Mu_f = params['mHubF'] * 2
+    Mu_r = params['mHubR'] * 2
+
+    # --- 2) Transfer longitudinal total por eje ---
+    dFz_long_f = (params['ms'] * lr + Mu_f) * a_x * h_cg / (lf + lr)
+    dFz_long_r = (params['ms'] * lf + Mu_r) * a_x * h_cg / (lf + lr)
+
+    # --- 3) Transfer lateral total por eje ---
+    dFz_lat_f = (params['ms'] + Mu_f) * a_y * h_cg / track_f
+    dFz_lat_r = (params['ms'] + Mu_r) * a_y * h_cg / track_r
+
+    # --- 4) Transfer elastic por roll stiffness ---
+    K_roll_f = 2*params['kFL']*(track_f/2)**2 + params['k_arb_f']*track_f**2
+    K_roll_r = 2*params['kRL']*(track_r/2)**2 + params['k_arb_r']*track_r**2
+    K_tot    = K_roll_f + K_roll_r
+    phi_el   = params['ms']*a_y*h_cg / K_tot
+    M_f_el   = phi_el * K_roll_f
+    M_r_el   = phi_el * K_roll_r
+    dFz_elast_f = M_f_el / (track_f/2)
+    dFz_elast_r = M_r_el / (track_r/2)
 
     Fz_dyn = np.zeros((4, sol.y.shape[1]))
+
+    # --- 5) Aplicar a cada rueda ---
     # Longitudinal
-    Fz_dyn[0] = static[0] - 0.5 * dFz_long
-    Fz_dyn[1] = static[1] - 0.5 * dFz_long
-    Fz_dyn[2] = static[2] + 0.5 * dFz_long
-    Fz_dyn[3] = static[3] + 0.5 * dFz_long
-    # Lateral delantero
-    Fz_dyn[0] -= 0.5 * dFz_lat_f
-    Fz_dyn[1] += 0.5 * dFz_lat_f
-    # Lateral trasero
-    Fz_dyn[2] -= 0.5 * dFz_lat_r
-    Fz_dyn[3] += 0.5 * dFz_lat_r
+    Fz_dyn[0] = static[0] - 0.5*dFz_long_f
+    Fz_dyn[1] = static[1] - 0.5*dFz_long_f
+    Fz_dyn[2] = static[2] + 0.5*dFz_long_r
+    Fz_dyn[3] = static[3] + 0.5*dFz_long_r
+
+    # Lateral + elástica
+    # Delantero
+    Fz_dyn[0] += (-0.5*dFz_lat_f) - 0.5*dFz_elast_f
+    Fz_dyn[1] += ( 0.5*dFz_lat_f) + 0.5*dFz_elast_f
+    # Trasero
+    Fz_dyn[2] += (-0.5*dFz_lat_r) - 0.5*dFz_elast_r
+    Fz_dyn[3] += ( 0.5*dFz_lat_r) + 0.5*dFz_elast_r
 
     # Recalcular compresión de resorte de equilibrio dinámico
     k_spring = np.array([params['kFL'], params['kFR'], params['kRL'], params['kRR']])[:, None]
@@ -783,7 +799,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         params['x_static_RL'], params['x_static_RR']
     ])[:, None]
 
-    threshold = gap_bump[:, None]    # (4,1) + (4,1)
+    threshold = x0_static - gap_bump[:, None]    # (4,1)
     comp_bump = np.maximum(0.0, x_spring_raw - threshold)  # (4,N)
 
     f_bump = np.zeros_like(x_spring)
@@ -808,18 +824,18 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     arb_torque_front = np.zeros(N)
     arb_torque_rear  = np.zeros(N)
     if k_arb_f != 0.0:
-        arb_torque_front = k_arb_f * (x_spring_raw[0] - x_spring_raw[1])
+        arb_torque_front = k_arb_f * (x_spring[0] - x_spring[1])
         lever_f = track_f / 2.0
         f_arb[0] += arb_torque_front / lever_f
         f_arb[1] += -arb_torque_front / lever_f
     if k_arb_r != 0.0:
-        arb_torque_rear = k_arb_r * (x_spring_raw[2] - x_spring_raw[3])
+        arb_torque_rear = k_arb_r * (x_spring[2] - x_spring[3])
         lever_r = track_r / 2.0
         f_arb[2] += arb_torque_rear / lever_r
         f_arb[3] += -arb_torque_rear / lever_r
 
         # 4d) Fuerza neta en rueda (nunca negativa)
-    wheel_load = (static - aero + f_arb) / 9.81   #  + f_tire(4, N)
+    wheel_load = (static - aero  + f_arb) / 9.81   #  + f_tire(4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
     f_wheel = (static - aero + f_arb)    # (4, N)
@@ -984,8 +1000,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         scaling='density', average='mean'
     )
 
- 
-
     # ──────────────────────────────────────────────────────────────────────────────
     # 10) Acumulated Track Noise Normalized by Lap Time (mm/s)
     # ──────────────────────────────────────────────────────────────────────────────
@@ -1033,13 +1047,11 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         'f_tire_variation_front': f_tire_var_f,
         'f_tire_variation_rear':  f_tire_var_r,
         'Fz_aero_front':      ae_front,               # (N,) [N]
-        'Fz_aero_rear':       ae_rear,                # (N,) [N]
-        'f_tire':  f_tire,      
+        'Fz_aero_rear':       ae_rear,                # (N,) [N]     
         'wheel_load':  wheel_load, 
         'wheel_load_max':    wheel_load_max,        # (4,)
         'wheel_load_min':    wheel_load_min,        # (4,)
         'f_wheel':      f_wheel,
-
 
         # --- Grip-limited (lateral, brake, traction) ---
         'grip_limited_lateral_mask':  grip_lateral_mask,      # (N,)
