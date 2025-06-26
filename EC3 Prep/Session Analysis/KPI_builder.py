@@ -6,10 +6,83 @@ from data_process import parse_time_to_seconds
 import warnings
 import re
 
-def detect_stints(laps: pd.DataFrame) -> pd.DataFrame:
-    """Detecta secuencias de vueltas según reglas de stint (O, W, P)."""
-    # TODO: implementar lógica específica del proveedor
-    return laps
+def detect_stints(laps: pd.DataFrame, session: str) -> pd.DataFrame:
+    """Detect stints based on lap time behaviour.
+
+    The lap time column is converted to seconds before evaluating each lap.
+    For race sessions the reference per driver is the mean lap time while for
+    the rest of sessions the best lap is used.  Laps slower than ``1.5`` times
+    the mean (race) are tagged as ``"SC"`` (Safety Car) whereas the rest receive
+    ``"R"``.  In non race sessions laps slower than ``1.3`` times the best lap
+    are tagged as ``"OUT"`` and the quicker ones as ``"PUSH"``.
+
+    Stint boundaries are detected whenever the label changes or when the column
+    ``CROSSING_FINISH_LINE_IN_PIT`` is not empty.  A new ``stint_id`` is
+    generated incrementally for each driver.
+
+    Parameters
+    ----------
+    laps : pd.DataFrame
+        DataFrame with at least ``driver`` and ``lap_time`` columns.
+    session : str
+        Name of the session.  If it contains ``"race"`` the race rules are
+        applied.
+
+    Returns
+    -------
+    pd.DataFrame
+        ``laps`` with two extra columns: ``stint_label`` and ``stint_id``.
+    """
+
+    if "driver" not in laps.columns or "lap_time" not in laps.columns:
+        return laps
+
+    df = laps.copy()
+
+    if not pd.api.types.is_numeric_dtype(df["lap_time"]):
+        df["_lap_time_sec"] = df["lap_time"].apply(parse_time_to_seconds)
+    else:
+        df["_lap_time_sec"] = df["lap_time"].astype(float)
+
+    pit_col = next(
+        (c for c in df.columns if c.lower() == "crossing_finish_line_in_pit"),
+        None,
+    )
+
+    is_race = "race" in session.lower()
+
+    if is_race:
+        ref = df.groupby("driver")["_lap_time_sec"].transform("mean")
+        df["stint_label"] = np.where(
+            df["_lap_time_sec"] >= 1.5 * ref, "SC", "R"
+        )
+    else:
+        ref = df.groupby("driver")["_lap_time_sec"].transform("min")
+        df["stint_label"] = np.where(
+            df["_lap_time_sec"] >= 1.3 * ref, "OUT", "PUSH"
+        )
+
+    lap_col = "lap" if "lap" in df.columns else (
+        "lap_number" if "lap_number" in df.columns else None
+    )
+    sort_cols = ["driver"] + ([lap_col] if lap_col else [])
+    df = df.sort_values(sort_cols).reset_index(drop=True)
+
+    in_pit = (
+        df[pit_col].fillna("").astype(str).str.strip() != ""
+        if pit_col is not None else pd.Series(False, index=df.index)
+    )
+
+    prev_label = df.groupby("driver")["stint_label"].shift(1)
+    new_stint = in_pit | (df["stint_label"] != prev_label) | (
+        df["driver"] != df["driver"].shift(1)
+    )
+
+    df["stint_id"] = df.groupby("driver")[new_stint].cumsum().astype(int)
+    df["stint_id"] += 1
+
+    df = df.drop(columns=["_lap_time_sec"])
+    return df
 
 def compute_top_speeds(df: pd.DataFrame) -> pd.DataFrame:
     """
