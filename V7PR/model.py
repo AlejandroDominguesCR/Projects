@@ -152,17 +152,14 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     x_FR_raw = zFR   - (phi_off_front -  theta_off_front +  h)
     x_RL_raw = zRL   - (phi_off_rear  +  theta_off_rear  +  h)
     x_RR_raw = zRR   - (phi_off_rear  -  theta_off_rear  +  h)
+    
+    F_arb_front = 0.5 * params['k_arb_f'] * (x_FL_raw - x_FR_raw)
+    F_arb_rear  = 0.5 * params['k_arb_r'] * (x_RL_raw - x_RR_raw)
 
-    T_arb_f = params['k_arb_f'] * (x_FL_raw - x_FR_raw)
-    T_arb_r = params['k_arb_r'] * (x_RL_raw - x_RR_raw)
-
-    lever_f = tF / 2
-    lever_r = tR / 2
-
-    F_FL +=  T_arb_f / lever_f
-    F_FR += -T_arb_f / lever_f
-    F_RL +=  T_arb_r / lever_r
-    F_RR += -T_arb_r / lever_r
+    F_FL +=  F_arb_front
+    F_FR += -F_arb_front
+    F_RL +=  F_arb_rear
+    F_RR += -F_arb_rear
 
     # --- Aerodinámica ---
     dyn_hF = h - lf * phi + params.get('hRideF')
@@ -194,8 +191,8 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     F_RR += 0.5 * dFz_long
 
     # Lateral (según la distribución de rigidez al balanceo)
-    K_phi_f = 2 * kFL * (tF / 2)**2 + params.get('k_arb_f', 0.0) * tF**2
-    K_phi_r = 2 * kRL * (tR / 2)**2 + params.get('k_arb_r', 0.0) * tR**2
+    K_phi_f = 2 * kFL * (tF / 2)**2 + 0.5 * params.get('k_arb_f', 0.0) * tF**2
+    K_phi_r = 2 * kRL * (tR / 2)**2 + 0.5 * params.get('k_arb_r', 0.0) * tR**2
     M_roll   = Ms * a_y * h_cg
     share_f  = lr * K_phi_f
     share_r  = lf * K_phi_r
@@ -367,16 +364,15 @@ def compute_static_equilibrium(params, vx=0):
         F_RL = kRL_eff * x_RL + f_bump_RL
 
         if k_arb_f:
-            T_arb_f = k_arb_f * (x_FL - x_FR)
-            lever_f = tf/2
-            F_FL +=  T_arb_f/lever_f
-            F_FR += -T_arb_f/lever_f
+            F_arb_front = 0.5 * k_arb_f * (x_FL - x_FR)
+            F_FL +=  F_arb_front
+            F_FR += -F_arb_front
 
         if k_arb_r:
-            T_arb_r = k_arb_r * (x_RL - x_RR)
-            lever_r = tr/2
-            F_RL +=  T_arb_r/lever_r
-            F_RR += -T_arb_r/lever_r
+            F_arb_rear = 0.5 * k_arb_r * (x_RL - x_RR)
+            F_RL +=  F_arb_rear
+            F_RR += -F_arb_rear
+
 
         # 2) Aerodinámica (con vx pasado a compute_static_equilibrium)
         #    calculamos downforce frontal y trasera:
@@ -727,12 +723,21 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     Mu_r = params['mHubR'] * 2
 
     # --- 2) Transfer longitudinal total por eje ---
-    dFz_long_f = (params['ms'] * lr + Mu_f) * a_x * h_cg / (lf + lr)
-    dFz_long_r = (params['ms'] * lf + Mu_r) * a_x * h_cg / (lf + lr)
+    dFz_long_f = params['ms'] * lr *  a_x * h_cg / (lf + lr)
+    dFz_long_r = params['ms'] * lf  * a_x * h_cg / (lf + lr)
+
+    h_unsprung_f = params.get('mHubF', 0.0)
+    h_unsprung_r = params.get('mHubR', 0.0)
+
+    if h_unsprung_f is not None:
+        dFz_long_f += Mu_f * a_x * h_unsprung_f / (lf + lr)
+    if h_unsprung_r is not None:
+        dFz_long_r += Mu_r * a_x * h_unsprung_r / (lf + lr)
+
 
     # --- 3) Transfer lateral por rigidez al balanceo ---
-    K_roll_f = 2 * params['kFL'] * (track_f / 2)**2 + params.get('k_arb_f', 0.0) * track_f**2
-    K_roll_r = 2 * params['kRL'] * (track_r / 2)**2 + params.get('k_arb_r', 0.0) * track_r**2
+    K_roll_f = 2 * params['kFL'] * (track_f / 2)**2 + 0.5 * params.get('k_arb_f', 0.0) * track_f**2
+    K_roll_r = 2 * params['kRL'] * (track_r / 2)**2 + 0.5 * params.get('k_arb_r', 0.0) * track_r**2
     M_roll   = params['ms'] * a_y * h_cg
     share_f  = lr * K_roll_f
     share_r  = lf * K_roll_r
@@ -759,12 +764,17 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     Fz_dyn[2] += -0.5 * dFz_lat_r
     Fz_dyn[3] +=  0.5 * dFz_lat_r
 
-
     # Recalcular compresión de resorte de equilibrio dinámico
-    k_spring = np.array([params['kFL'], params['kFR'], params['kRL'], params['kRR']])[:, None]
-    x0_equil = Fz_dyn / k_spring
+    k_spring = np.array([
+        params['kFL'], params['kFR'],
+        params['kRL'], params['kRR']
+    ])[:, None]
+
+    delta_Fz  = Fz_dyn - static
+    x0_equil  = delta_Fz / k_spring
+
     x_spring_raw = x_spring.copy()
-    x_spring = x_spring + x0_equil
+    x_spring     = x0_equil
 
     # Límites física de recorrido (stop extension/compression)
     z_topout    = np.array([
@@ -809,7 +819,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         params['x_static_RL'], params['x_static_RR']
     ])[:, None]
 
-    threshold = x0_static - gap_bump[:, None]    # (4,1)
+    threshold = gap_bump[:, None]    # (4,1)
     comp_bump = np.maximum(0.0, x_spring_raw - threshold)  # (4,N)
 
     f_bump = np.zeros_like(x_spring)
@@ -834,20 +844,20 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     arb_torque_front = np.zeros(N)
     arb_torque_rear  = np.zeros(N)
     if k_arb_f != 0.0:
-        arb_torque_front = k_arb_f * (x_spring[0] - x_spring[1])
-        lever_f = track_f / 2.0
-        f_arb[0] += arb_torque_front / lever_f
-        f_arb[1] += -arb_torque_front / lever_f
+        arb_force_front = 0.5 * k_arb_f * (x_spring[0] - x_spring[1])
+        f_arb[0] += arb_force_front
+        f_arb[1] += -arb_force_front
+        arb_torque_front = arb_force_front * (track_f / 2.0)
     if k_arb_r != 0.0:
-        arb_torque_rear = k_arb_r * (x_spring[2] - x_spring[3])
-        lever_r = track_r / 2.0
-        f_arb[2] += arb_torque_rear / lever_r
-        f_arb[3] += -arb_torque_rear / lever_r
+        arb_force_rear = 0.5 * k_arb_r * (x_spring[2] - x_spring[3])
+        f_arb[2] += arb_force_rear
+        f_arb[3] += -arb_force_rear
+        arb_torque_rear = arb_force_rear * (track_r / 2.0)
 
-        # 4d) Fuerza neta en rueda (nunca negativa)
-    wheel_load = (static - aero  + f_arb) / 9.81   #  + f_tire(4, N)
-    wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
-    wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
+        # 4d) Fuerza neta en rueda (nunca negativa)␊
+    wheel_load = (static - aero + f_arb) / 9.81   # (4, N)
+    wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]␊
+    wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]␊
     f_wheel = (static - aero + f_arb)    # (4, N)
     #f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
 
