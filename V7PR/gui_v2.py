@@ -162,9 +162,9 @@ def parse_json_setup(json_data):
     })
 
     mr_f_wd = 1.43456 
-    mr_r_wd = 1 #1.32579 
+    mr_r_wd = 1.32579 
 
-    mr_f_rd = 1.491587949 
+    mr_f_rd = 1.491587949 #mr_wd * mr_rd para sacar el mr_rw, es decir, el paso directo
     mr_r_rd = 1
 
     mr_f_arb= 2000/((60**2)*(0.72**2))
@@ -177,7 +177,7 @@ def parse_json_setup(json_data):
     global_setup["MR_RR"] = mr_r_wd
 
     global_setup["MR_FL_rd"] = mr_f_rd
-    global_setup["MR_FR_rd"] = mr_r_rd
+    global_setup["MR_FR_rd"] = mr_f_rd
 
     global_setup["MR_F_ARB"] = mr_f_arb
     global_setup["MR_R_ARB"] = mr_r_arb
@@ -257,8 +257,8 @@ def prepare_simple_params(params, global_setup):
     kRL = params[2]['kSpring']
     kRR = params[3]['kSpring']
 
-    kFL = kFL / (global_setup["MR_FL"]**2 * global_setup["MR_FL_rd"]**2)
-    kFR = kFR / (global_setup["MR_FR"]**2 * global_setup["MR_FL_rd"]**2)
+    kFL = kFL / (global_setup["MR_FL_rd"]**2)
+    kFR = kFR / (global_setup["MR_FR_rd"]**2)
     kRL = kRL / global_setup["MR_RL"]**2 
     kRR = kRR / global_setup["MR_RR"]**2   
     
