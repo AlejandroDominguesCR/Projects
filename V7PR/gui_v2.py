@@ -162,7 +162,7 @@ def parse_json_setup(json_data):
     })
 
     mr_f_wd = 1.43456 
-    mr_r_wd = 1.32579 
+    mr_r_wd = 1 #1.32579 
 
     mr_f_rd = 1.491587949 
     mr_r_rd = 1
@@ -352,6 +352,7 @@ def prepare_simple_params(params, global_setup):
         'tr': global_setup['track_r'],
         'mHubF': global_setup['mHubF'],
         'mHubR': global_setup['mHubR'],
+        'zCoG': abs(global_setup['zCoG']),
         'hRideF': global_setup['hRideF'],
         'hRideR': global_setup['hRideR'],
         'rWeightBalF': global_setup['rWeightBalF'],
