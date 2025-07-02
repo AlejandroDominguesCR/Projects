@@ -39,8 +39,8 @@ def parse_json_setup(json_data):
     mHubR = json_data["config"]["chassis"]["mHubR"]
     ICar = json_data["config"]["chassis"]["ICar"]
     wheelbase = abs(json_data["config"]["chassis"]["rRideR"][0] - json_data["config"]["chassis"]["rRideF"][0])
-    track_f = json_data["config"]["suspension"]["front"]["external"]["pickUpPts"]["rUserTCP"][1]
-    track_r = json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1]
+    track_f = 2*json_data["config"]["suspension"]["front"]["external"]["pickUpPts"]["rUserTCP"][1]
+    track_r = 2*json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1]
 
     # Extrae rigidez de barra estabilizadora (antiroll bar)
     kARB_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"]
