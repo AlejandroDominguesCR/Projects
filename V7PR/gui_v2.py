@@ -39,8 +39,8 @@ def parse_json_setup(json_data):
     mHubR = json_data["config"]["chassis"]["mHubR"]
     ICar = json_data["config"]["chassis"]["ICar"]
     wheelbase = abs(json_data["config"]["chassis"]["rRideR"][0] - json_data["config"]["chassis"]["rRideF"][0])
-    track_f = 2*json_data["config"]["suspension"]["front"]["external"]["pickUpPts"]["rUserTCP"][1]
-    track_r = 2*json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1]
+    track_f = json_data["config"]["suspension"]["front"]["external"]["pickUpPts"]["rUserTCP"][1]
+    track_r = json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1]
 
     # Extrae rigidez de barra estabilizadora (antiroll bar)
     kARB_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"]
@@ -164,23 +164,22 @@ def parse_json_setup(json_data):
     mr_f_wd = 1.43456 
     mr_r_wd = 1.32579 
 
-    mr_f_rd = 1.491587949 #mr_wd * mr_rd para sacar el mr_rw, es decir, el paso directo
+    mr_f_rd = (1.491587949 * (np.pi / 180.0))/1000  #mr_wd * mr_rd para sacar el mr_rw, es decir, el paso directo
     mr_r_rd = 1
 
-    mr_f_arb= 2000/((60**2)*(0.72**2))
-    mr_r_arb= 2000/((146**2)*(1.59**2))
+    #  Motion ratios principales
+    global_setup["MR_FL"]      = mr_f_wd
+    global_setup["MR_FR"]      = mr_f_wd
+    global_setup["MR_RL"]      = mr_r_wd
+    global_setup["MR_RR"]      = mr_r_wd
+    global_setup["MR_FL_rd"]   = mr_f_rd
+    global_setup["MR_FR_rd"]   = mr_f_rd
 
-    global_setup["MR_FL"] = mr_f_wd
-    global_setup["MR_FR"] = mr_f_wd
-
-    global_setup["MR_RL"] = mr_r_wd
-    global_setup["MR_RR"] = mr_r_wd
-
-    global_setup["MR_FL_rd"] = mr_f_rd
-    global_setup["MR_FR_rd"] = mr_f_rd
-
-    global_setup["MR_F_ARB"] = mr_f_arb
-    global_setup["MR_R_ARB"] = mr_r_arb
+    # ----  ¡NUEVO!  Motion ratio del muelle por esquina ----
+    global_setup["MR_spring_FL"] = global_setup["MR_FL"]   # barra torsión delantera
+    global_setup["MR_spring_FR"] = global_setup["MR_FR"]
+    global_setup["MR_spring_RL"] = global_setup["MR_RL"]      # coil-over trasero
+    global_setup["MR_spring_RR"] = global_setup["MR_RR"]
 
     for idx, corner in enumerate(("FL","FR","RL","RR")):
         params[idx]["mr_dw"] = global_setup[f"MR_{corner}"]
@@ -242,6 +241,29 @@ def parse_json_setup(json_data):
     global_setup['aero_offsets'] = aero_poly.get('coefficientOffsets', {})
     global_setup['aero_DRS'] = aero_poly.get('DRS', {})
     global_setup['tires'] = tires
+
+        # === BRAZO Y RIGIDEZ DE LA BARRA (wheel-rate) ======================
+    def dist(p, q):
+        return ((p[0]-q[0])**2 + (p[1]-q[1])**2 + (p[2]-q[2])**2) ** 0.5
+
+    # 1. Brazo "a" (mm) entre el eje de la barra y el punto de la bieleta
+    pts_f = json_data["config"]["suspension"]["front"]["internal"]["pickUpPts"]
+    pts_r = json_data["config"]["suspension"]["rear"]["internal"]["pickUpPts"]
+    aARB_F_mm = dist(pts_f["rARBAxis"], pts_f["rARBRockerPickup"]) * 1000
+    aARB_R_mm = dist(pts_r["rARBAxis"], pts_r["rARBRockerPickup"]) * 1000
+
+    # 2. Wheel-rate (N/mm) de la barra para UNA rueda
+    kARB_F_wheel = 2 * kARB_F * 1000 / (aARB_F_mm ** 2 * mr_f_wd)
+    kARB_R_wheel = 2 * kARB_R * 1000 / (aARB_R_mm ** 2 * mr_r_wd)
+
+    # 3. Guárdalo en global_setup
+    global_setup.update({
+        "aARB_F_mm": aARB_F_mm,
+        "aARB_R_mm": aARB_R_mm,
+        "kARB_F_wheel": kARB_F_wheel,
+        "kARB_R_wheel": kARB_R_wheel
+    })
+
     return params, global_setup
 
 def prepare_simple_params(params, global_setup):
@@ -251,16 +273,15 @@ def prepare_simple_params(params, global_setup):
     # global_setup: diccionario global
 
     from scipy.interpolate import interp1d
-    # Muelle: usar directamente el valor de kSpring del JSON para cada esquina
-    kFL = params[0]['kSpring']
-    kFR = params[1]['kSpring']
-    kRL = params[2]['kSpring']
-    kRR = params[3]['kSpring']
+    
+    
+    kFL = params[0]['kSpring'] / global_setup['MR_spring_FL']**2
+    kFR = params[1]['kSpring'] / global_setup['MR_spring_FR']**2
+    kRL = params[2]['kSpring'] / global_setup['MR_spring_RL']**2
+    kRR = params[3]['kSpring'] / global_setup['MR_spring_RR']**2
 
-    kFL = kFL / (global_setup["MR_FL_rd"]**2)
-    kFR = kFR / (global_setup["MR_FR_rd"]**2)
-    kRL = kRL / global_setup["MR_RL"]**2 
-    kRR = kRR / global_setup["MR_RR"]**2   
+    kinstf = global_setup['kVerticalSuspensionComplianceF'] / 2    
+    kinstr = global_setup['kVerticalSuspensionComplianceR'] / 2
     
 
     # Damper y bumpstop interpoladores
@@ -300,20 +321,10 @@ def prepare_simple_params(params, global_setup):
     bumpstop_front = lambda x: np.where(x < 0, 0, bumpstop_front_interp(x))
     bumpstop_rear = lambda x: np.where(x < 0, 0, bumpstop_rear_interp(x))
 
-    # Rigidez de instalación (compliance vertical)
-    # Rigidez de instalación total por eje, repartirla entre las dos esquinas
-    kaxle_f = global_setup.get('kVerticalSuspensionComplianceF', 0.0)
-    kaxle_r = global_setup.get('kVerticalSuspensionComplianceR', 0.0)
-    # Cada esquina “ve” la mitad de la rigidez del eje
-    kinstf = kaxle_f / 2.0
-    kinstr = kaxle_r / 2.0
 
-    # Rigidez de barra estabilizadora (anti roll bar)
-    k_arb_f = global_setup.get('kARB_F', 0) *1000
-    k_arb_r = global_setup.get('kARB_R', 0) *1000
+    k_arb_f = global_setup['kARB_F_wheel'] * 1000  
+    k_arb_r = global_setup['kARB_R_wheel'] * 1000
 
-    k_arb_f = (k_arb_f * global_setup["MR_F_ARB"])/ global_setup["MR_FL"]**2
-    k_arb_r = (k_arb_r * global_setup["MR_R_ARB"])/ global_setup["MR_RL"]**2 
 
     # --- Cálculo de topes físicos (top-out y bumpstop) para cada esquina ---
     z_topout_FL = float(min(params[0]['spring_x'][0], params[0]['bump_x'][0]))
@@ -341,6 +352,7 @@ def prepare_simple_params(params, global_setup):
     tire_front = tires.get('front', {})
     tire_rear = tires.get('rear', {})
 
+
     
     return {
         'ms': ms_total,
@@ -352,7 +364,7 @@ def prepare_simple_params(params, global_setup):
         'tr': global_setup['track_r'],
         'mHubF': global_setup['mHubF'],
         'mHubR': global_setup['mHubR'],
-        'zCoG': abs(global_setup['zCoG']),
+        'zCoG': global_setup['zCoG'],
         'hRideF': global_setup['hRideF'],
         'hRideR': global_setup['hRideR'],
         'rWeightBalF': global_setup['rWeightBalF'],
@@ -409,10 +421,10 @@ def prepare_simple_params(params, global_setup):
         'MR_FR': global_setup['MR_FR'],
         'MR_RL': global_setup['MR_RL'],
         'MR_RR': global_setup['MR_RR'],
-        'FSpringPreload_FL': params[0].get('FSpringPreload', 0.0) * global_setup['MR_FL'],
-        'FSpringPreload_FR': params[1].get('FSpringPreload', 0.0) * global_setup['MR_FR'],
-        'FSpringPreload_RL': params[2].get('FSpringPreload', 0.0) * global_setup['MR_RL'],
-        'FSpringPreload_RR': params[3].get('FSpringPreload', 0.0) * global_setup['MR_RR'],      
+        'FSpringPreload_FL': params[0].get('FSpringPreload', 0.0) / global_setup['MR_FL'],
+        'FSpringPreload_FR': params[1].get('FSpringPreload', 0.0) / global_setup['MR_FR'],
+        'FSpringPreload_RL': params[2].get('FSpringPreload', 0.0) / global_setup['MR_RL'],
+        'FSpringPreload_RR': params[3].get('FSpringPreload', 0.0) / global_setup['MR_RR'],      
     }
 
 def simulate_combo(setup_path, track_path, kt_overrides=None):

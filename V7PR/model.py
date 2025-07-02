@@ -48,16 +48,16 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     damper_front = params['damper_front']
     damper_rear  = params['damper_rear']
 
-    z_topout_FL    = params['z_topout_FL']
+    z_topout_FL    = -params['z_topout_FL']
     z_bottomout_FL = params['z_bottomout_FL']
-    z_topout_FR    = params['z_topout_FR']
+    z_topout_FR    = -params['z_topout_FR']
     z_bottomout_FR = params['z_bottomout_FR']
-    z_topout_RL    = params['z_topout_RL']
+    z_topout_RL    = -params['z_topout_RL']
     z_bottomout_RL = params['z_bottomout_RL']
-    z_topout_RR    = params['z_topout_RR']
+    z_topout_RR    = -params['z_topout_RR']
     z_bottomout_RR = params['z_bottomout_RR']
 
-    x_bump_FL = params['x_bump_FL']
+    x_bump_FL = params['x_bump_FL'] 
     x_bump_FR = params['x_bump_FR']
     x_bump_RL = params['x_bump_RL']
     x_bump_RR = params['x_bump_RR']
@@ -81,14 +81,13 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         x_clipped = np.clip(x_raw, z_top, z_bot)
 
         # 3) bumpstop (pistón → rueda)
-        gap_wheel = (x_bump / mr_dw) - x_static                    
-        comp_bump = np.maximum(0.0, x_raw - gap_wheel)              
-        f_bump_p  = bump(comp_bump)    # [N] pistón
-        f_bump    = f_bump_p * mr_dw   # [N] rueda
+        comp_bump = np.maximum(0.0, (x_raw) - x_bump)      
+        f_bump_p  = bump(comp_bump)                                 
+        f_bump    = f_bump_p * mr_dw                                 
 
         # 4) resortes en serie + preload
         k_total = 1.0/(1.0/k_spring + 1.0/k_inst)
-        f_spring = k_total * x_clipped + spring_preload
+        f_spring = k_total * x_clipped - spring_preload
 
         # 5) amortiguador (ya escala internamente con MR)
         rel_vel  = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
@@ -183,7 +182,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     F_RR += 0.5 * Fz_aero_rear
 
     # Altura instantánea del centro de gravedad respecto al suelo            
-    h_cg = h - params.get('zCoG', 0.3)                                      
+    h_cg = params.get('zCoG', 0.3)                                      
     ax   = params.get('ax', 0.0)                                            
     ay   = params.get('ay', 0.0)                                           
 
@@ -191,23 +190,35 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     Mu_f = 2 * params['mHubF']                                         
     Mu_r = 2 * params['mHubR']                                          
     l    = lf + lr                                                      
-    # 1) longitudinal (suspended + unsprung)                            
-    dF_long_f = (Ms*lr + Mu_f) * ax * h_cg / l                         
-    dF_long_r = (Ms*lf + Mu_r) * ax * h_cg / l                         
-    # 2) lateral geometric                                              
-    dF_lat_f  = (Ms + Mu_f) * ay * h_cg / tF                            
-    dF_lat_r  = (Ms + Mu_r) * ay * h_cg / tR                            
-    # 3) lateral elastic (roll-stiffness)                               
-    Kroll_f = (params['kFL'] + params['kFR'] + params['k_arb_f']) * (tF**2)/4   
-    Kroll_r = (params['kRL'] + params['kRR'] + params['k_arb_r']) * (tR**2)/4   
-    phi     = Ms * ay * h_cg / (Kroll_f + Kroll_r)                     
-    dF_el_f = phi * Kroll_f / (tF/2)                                   
-    dF_el_r = phi * Kroll_r / (tR/2)                                  
-    # distribute to each wheel … (use ±0.5 of each dF term)            
-    F_FL += -0.5 * dF_long_f + 0.5 * dF_lat_f + 0.5 * dF_el_f          
-    F_FR += -0.5 * dF_long_f - 0.5 * dF_lat_f - 0.5 * dF_el_f           
-    F_RL +=  0.5 * dF_long_r + 0.5 * dF_lat_r + 0.5 * dF_el_r           
-    F_RR +=  0.5 * dF_long_r - 0.5 * dF_lat_r - 0.5 * dF_el_r           
+                     
+    # 1) longitudinal (conserva peso total)
+    dF_long = (Ms*h_cg + Mu_f*(lf) + Mu_r*(lr)) * ax / l   # signo + => carga al eje trasero
+    F_FL -= 0.5*dF_long
+    F_FR -= 0.5*dF_long
+    F_RL += 0.5*dF_long
+    F_RR += 0.5*dF_long
+                      
+    # 2) lateral geométrico
+    dF_lat_f =  (Ms+Mu_f)*ay*h_cg/tF
+    dF_lat_r =  (Ms+Mu_r)*ay*h_cg/tR
+
+    F_FL += 0.5*dF_lat_f
+    F_FR -= 0.5*dF_lat_f
+    F_RL += 0.5*dF_lat_r
+    F_RR -= 0.5*dF_lat_r
+                          
+    # 3) lateral elástico (roll)  ––– usa θ integrado
+    Kroll_f = (kFL + kFR + params['k_arb_f'] + params['ktf']*(tF/2)**2) / 4
+    Kroll_r = (kRL + kRR + params['k_arb_r'] + params['ktr']*(tR/2)**2) / 4
+    theta   = Ms*ay*h_cg/(Kroll_f+Kroll_r)        # ¡usar theta, no phi!
+
+    dF_el_f = theta*Kroll_f/(tF/2)
+    dF_el_r = theta*Kroll_r/(tR/2)
+
+    F_FL += 0.5*dF_el_f
+    F_FR -= 0.5*dF_el_f
+    F_RL += 0.5*dF_el_r
+    F_RR -= 0.5*dF_el_r        
 
     # === Ecuaciones de dinámica ===
     h_ddot     = (F_FL + F_FR + F_RL + F_RR - Ms*g) / Ms
@@ -304,6 +315,11 @@ def compute_static_equilibrium(params, vx=0):
     tf = params['tf']
     tr = params['tr']
     
+    # Ride-heights de DISEÑO (punto de referencia para el potenciómetro)
+    ride_F_setup = params.get('hRideF', 0.0)   
+    ride_R_setup = params.get('hRideR', 0.0)   
+
+
     mHubF = params['mHubF']
     mHubR = params['mHubR']
 
@@ -316,13 +332,6 @@ def compute_static_equilibrium(params, vx=0):
     ktf = params['ktf']
     ktr = params['ktr']
 
-    bumpstop_front = params['bumpstop_front']
-    bumpstop_rear = params['bumpstop_rear']
-
-    z_FL_free = params['z_FL_free']
-    z_FR_free = params['z_FR_free']
-    z_RL_free = params['z_RL_free']
-    z_RR_free = params['z_RR_free']
 
     # Antirrolbar si está presente
     k_arb_f = params.get('k_arb_f', 0.0)
@@ -345,30 +354,25 @@ def compute_static_equilibrium(params, vx=0):
         x_RR = zRR - zs_RR
         x_RL = zRL - zs_RL
 
-        params['x_static_FL'] = x_FL
-        params['x_static_FR'] = x_FR
-        params['x_static_RL'] = x_RL
-        params['x_static_RR'] = x_RR
+        params['sag_wheel_FL'] = x_FL           
+        params['sag_wheel_FR'] = x_FR
+        params['sag_wheel_RL'] = x_RL
+        params['sag_wheel_RR'] = x_RR
 
-        # Rigidez efectiva muelle + bumpstop + rigidez instalación
+        # Rigidez efectiva muelle + rigidez instalación
         kFR_eff = 1 / (1 / kFR + 1 / kinstf)
         kFL_eff = 1 / (1 / kFL + 1 / kinstf)
         kRR_eff = 1 / (1 / kRR + 1 / kinstr)
         kRL_eff = 1 / (1 / kRL + 1 / kinstr)
 
-        # Fuerzas suspensión: muelle + bump-stop por separado
-        f_bump_FR = bumpstop_front(np.maximum(0, x_FR - z_FR_free))
-        f_bump_FL = bumpstop_front(np.maximum(0, x_FL - z_FL_free))
-        f_bump_RR = bumpstop_rear(np.maximum(0, x_RR - z_RR_free))
-        f_bump_RL = bumpstop_rear(np.maximum(0, x_RL - z_RL_free))
-
-        F_FR = kFR_eff * x_FR + f_bump_FR
-        F_FL = kFL_eff * x_FL + f_bump_FL
-        F_RR = kRR_eff * x_RR + f_bump_RR
-        F_RL = kRL_eff * x_RL + f_bump_RL
+        # Fuerzas de muelle (sin bump-stop en estático)
+        F_FR = kFR_eff * x_FR - params['FSpringPreload_FR']
+        F_FL = kFL_eff * x_FL - params['FSpringPreload_FL']
+        F_RR = kRR_eff * x_RR - params['FSpringPreload_RR']
+        F_RL = kRL_eff * x_RL - params['FSpringPreload_RL']
 
         if k_arb_f:
-            F_arb_front = 0.5 * k_arb_f * (x_FL - x_FR)
+            F_arb_front =  0.5 * k_arb_f * (x_FL - x_FR)
             F_FL +=  F_arb_front
             F_FR += -F_arb_front
 
@@ -446,20 +450,54 @@ def compute_static_equilibrium(params, vx=0):
 
     x0 = [h_init, phi_init, theta_init, zFR0, zFL0, zRL0, zRR0]
 
+    print("kFL damper lineal =", kFL)
+    print("kFL instalación  =", kinstf)
+    print("kFL efectivo =", kf_eff)
+
     sol, info, ier, msg = fsolve(residual, x0, full_output=True)
-    if ier != 1:
-        print(f"[WARNING] fsolve no ha convergido: {msg}")
-    
-    # === Cálculo de márgenes al bumpstop tras resolver el equilibrio estático ===
-    for corner in ['FL','FR','RL','RR']:
-        x_static = params[f'x_static_{corner}']
-        topout   = params[f'z_topout_{corner}']
 
-        # margen respecto a la carrera del amortiguador
-        margen_ext  = topout - x_static
+    # === Diagnóstico estático: sag rueda, lectura de pot y márgenes =====  ### FIX
+    corners = ['FL', 'FR', 'RL', 'RR']
+    # Variables de solución
+    h, phi, theta, zFR, zFL, zRL, zRR = sol
+    z_dict = dict(FL=zFL, FR=zFR, RL=zRL, RR=zRR)
 
-        print(f"[INFO] Márgenes {corner}: "
-            f"extensión = {margen_ext*1000:.2f} mm, ")
+    for corner in corners:
+        if corner == 'FL':
+            zs = h - lf*phi + (tf/2)*theta
+            mr = params['MR_FL']
+            ride_ref = ride_F_setup           #  MOD
+        elif corner == 'FR':
+            zs = h - lf*phi - (tf/2)*theta
+            mr = params['MR_FR']
+            ride_ref = ride_F_setup           #  MOD
+        elif corner == 'RL':
+            zs = h + lr*phi + (tr/2)*theta
+            mr = params['MR_RL']
+            ride_ref = ride_R_setup           #  MOD
+        else:  # RR
+            zs = h + lr*phi - (tr/2)*theta
+            mr = params['MR_RR']
+            ride_ref = ride_R_setup           #  MOD
+
+        # sag respecto al ride-height de diseño
+        x_static = (z_dict[corner] - zs) - ride_ref     #  MOD
+        pot_mm   = (x_static / mr) * 1000
+
+        # Márgenes (stroke damper pasado a rueda)
+        topout    = params[f'z_topout_{corner}']
+        bottom    = params[f'z_bottomout_{corner}']
+        margen_ext  =  (x_static - topout)  * 1000
+        margen_comp = (bottom   - x_static) * 1000
+
+        print(f"[INFO] {corner}: sag rueda = {x_static*1000:.2f} mm | "
+              f"pot = {pot_mm:.2f} mm | "
+              f"margen ext = {margen_ext:.2f} mm | "
+              f"margen comp = {margen_comp:.2f} mm")
+
+        # mantenemos compatibilidad con los nombres antiguos
+        params[f'x_static_{corner}'] = x_static
+
 
     return sol
 
@@ -762,7 +800,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         params['x_static_RL'], params['x_static_RR']
     ])[:, None]
 
-    gap_wheel = (gap_bump / mr_dw) - x0_static      # (4,1)
+    gap_wheel = (gap_bump)      # (4,1)
     comp_bump = np.maximum(0.0, x_spring_raw - gap_wheel)
 
     f_bump = np.zeros_like(x_spring)
