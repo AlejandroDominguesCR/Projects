@@ -15,6 +15,7 @@ from KPI_builder import (
     compute_top_speeds, track_limit_rate, team_ranking,
     ideal_lap_gap, best_sector_times, lap_time_history
 )
+from main_analysis import export_report
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -50,7 +51,7 @@ class MainWindow(QMainWindow):
         # Página de confirmación de generación de KPIs
         self.graphs_page = QWidget()
         layout = QVBoxLayout(self.graphs_page)
-        self.info_label = QLabel("KPIs generados en HTML en la carpeta seleccionada.")
+        self.info_label = QLabel("Reporte HTML generado en la carpeta seleccionada.")
         self.back_btn = QPushButton("Volver")
         self.back_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.intro_page))
         layout.addWidget(self.info_label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -105,7 +106,8 @@ class MainWindow(QMainWindow):
             'sector_comparison': lambda: best_sector_times(df_analysis),
             'lap_history':   lambda: lap_time_history(df_analysis),
         }
-        # Generar archivos para cada KPI
+        figs = {}
+        # Generar figuras para cada KPI
         for name, func in kpis.items():
             try:
                 df_out = func()
@@ -135,8 +137,10 @@ class MainWindow(QMainWindow):
                             title="Velocidad Máxima"
                         )
                     )
+                    figs[name] = fig
                 elif name == 'track_rate':
                     fig = px.bar(df_out, x='driver', y='rate', title='Track Limits per Lap')
+                    figs[name] = fig
                 elif name == 'team_ranking':
                     fig = px.bar(
                         df_out,
@@ -154,6 +158,7 @@ class MainWindow(QMainWindow):
                             title="Velocidad Media de Equipo"
                         )
                     )
+                    figs[name] = fig
                 elif name == 'ideal_lap_gap':
                     ig = df_out.sort_values('best_lap', ascending=True).reset_index(drop=True)
                     drivers = ig['driver'].tolist()
@@ -187,6 +192,7 @@ class MainWindow(QMainWindow):
                             title="Tiempo (s)"
                         )
                     )
+                    figs[name] = fig
                 elif name == 'lap_history':
                     df_hist = df_out.sort_values(['lap','driver'])
                     fig = px.line(
@@ -205,9 +211,7 @@ class MainWindow(QMainWindow):
                             title="Tiempo (s)"
                         )
                     )
-                    html = fig.to_html(include_plotlyjs='cdn')
-                    path = os.path.join(folder, "lap_history.html")
-                    with open(path,'w') as f: f.write(html)
+                    figs[name] = fig
                 elif name == 'sector_comparison':
                     for sec in ['sector1','sector2','sector3']:
                         df_temp = df_out[['driver','team', sec]].copy()
@@ -237,17 +241,14 @@ class MainWindow(QMainWindow):
                                 title="Diferencia (s)"
                             )
                         )
+                        figs[f"{sec.upper()} Diff"] = fig
                 else:
                     continue
-                # Guardar HTML
-                html = fig.to_html(include_plotlyjs='cdn')
-                path = os.path.join(folder, f"{name}.html")
-                with open(path, 'w') as f:
-                    f.write(html)
             except Exception:
                 continue
-        # Abrir carpeta en navegador y mostrar confirmación
-        webbrowser.open(f'file://{folder}')
+        report_path = os.path.join(folder, "session_report.html")
+        export_report(figs, report_path)
+        webbrowser.open(f'file://{report_path}')
         self.stack.setCurrentWidget(self.graphs_page)
 
 if __name__ == '__main__':
