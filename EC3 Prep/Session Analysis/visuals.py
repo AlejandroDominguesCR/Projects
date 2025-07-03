@@ -97,6 +97,9 @@ class MainWindow(QMainWindow):
             else:
                 team_colors[team] = f'#{random.randint(0,0xFFFFFF):06x}'
 
+        # Diccionario de figuras para el reporte
+        figs: dict[str, go.Figure] = {}
+
         ss_df = slipstream_stats(df_analysis)
         if not ss_df.empty:
             fig = px.bar(

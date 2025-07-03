@@ -462,8 +462,6 @@ def lap_time_consistency(df: pd.DataFrame) -> pd.DataFrame:
     )
     return result
 
-
-    import pandas as pd
 from KPI_builder import best_sector_times  # para recuperar los mejores sectores
 
 def extract_session_summary(df_analysis: pd.DataFrame,
