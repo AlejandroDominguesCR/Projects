@@ -101,20 +101,81 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
 
     ss = slipstream_stats(df_analysis)
     if not ss.empty:
+        # ordenamos por la vuelta media con rebufo (ascendente)
+        ss = ss.sort_values("avg_lap_time_with_slip")
+
         fig_slip_lap = px.bar(
             ss,
-            x="slipstream",
-            y="mean_lap_time",
-            title="Lap-time medio – con vs sin rebufo",
+            x="driver",                       #  ← antes ponía "number"
+            y=["avg_lap_time_no_slip", "avg_lap_time_with_slip"],
+            barmode="group",
+            title="Lap-time medio – Con vs Sin rebufo",
         )
+        figs["Slipstream Lap-time"] = fig
+
         fig_slip_speed = px.bar(
             ss,
-            x="slipstream",
-            y="mean_top_speed",
-            title="Top-speed medio – con vs sin rebufo",
+            x="driver",                       #  ← idem
+            y=["avg_top_speed_no_slip", "avg_top_speed_with_slip"],
+            barmode="group",
+            title="Top-speed medio – Con vs Sin rebufo",
         )
+
         figs["Lap-time medio – con vs sin rebufo"] = fig_slip_lap
         figs["Top-speed medio – con vs sin rebufo"] = fig_slip_speed
+
+
+    df_tmp = df_analysis.copy()
+    df_tmp['slipstream'] = False     
+
+    # --- función auxiliar rápida para marcar las vueltas --------------------
+    def _flag_slip(df):
+        df = df.sort_values("hour")                  # hora string 'HH:MM:SS.mmm'
+        best = df["lap_time"].min()
+        df["fast"] = df["lap_time"] <= 1.10 * best
+        delta = pd.to_datetime(df["hour"], format="%H:%M:%S.%f").diff().dt.total_seconds()
+        prev_fast = df["fast"].shift()
+        df.loc[
+            df["fast"]
+            & prev_fast
+            & delta.between(0.4, 2.5)
+            & (df["top_speed"] >= df["top_speed"].median() + 6),
+            "slipstream"
+        ] = True
+        return df
+    
+
+    df_tmp = df_analysis.copy()
+    df_tmp['slipstream'] = False
+
+    # … (define la función _flag_slip y agrupa por driver)
+    df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
+
+    # ① agrupa y saca la punta máxima con y sin rebufo
+    ts_split = (
+        df_tmp
+        .groupby(["driver", "slipstream"])["top_speed"]
+        .max()
+        .reset_index()
+    )
+
+    ts_split["rebufo"] = ts_split["slipstream"].map(
+        {True: "Con rebufo", False: "Sin rebufo"}
+    )
+
+    fig_ts_split = px.bar(
+        ts_split,
+        x="driver",
+        y="top_speed",
+        color="rebufo",
+        barmode="group",
+        title="Top Speed máxima – Con vs Sin rebufo",
+        color_discrete_map={"Con rebufo": "#FF5555", "Sin rebufo": "#AAAAAA"},
+    )
+
+    figs["Top Speed (rebufo)"] = fig_ts_split
+
+    df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
 
     # Gráfico Top Speeds con colores por piloto
     fig_ts = px.bar(
@@ -415,7 +476,7 @@ def on_export(n_clicks, data):
 def run_app():
     # Open dashboard in the default browser. Update URL if the port changes.
     webbrowser.open_new("http://127.0.0.1:8050/")
-    app.run(debug=False)
+    app.run(debug=False, threaded=False, use_reloader=False)
 
 if __name__ == "__main__":
     run_app()

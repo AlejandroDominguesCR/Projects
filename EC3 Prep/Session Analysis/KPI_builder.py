@@ -528,36 +528,60 @@ def extract_session_summary(df_analysis: pd.DataFrame,
     return summary
 
 def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Return mean lap time and top speed for laps with and without slipstream."""
-
-    slip_col = next(
-        (
-            c
-            for c in df.columns
-            if "slip" in c.lower() or "draft" in c.lower() or "rebufo" in c.lower()
-        ),
-        None,
-    )
-    if slip_col is None or "lap_time" not in df.columns or "top_speed" not in df.columns:
+    """
+    Devuelve los KPIs de rebufo por **piloto** (driver).
+    Requiere columnas:
+        number, driver, lap_time, top_speed, hour [, team]
+    """
+    required = {"number", "driver", "lap_time", "top_speed", "hour"}
+    if not required.issubset(df.columns):
         return pd.DataFrame()
 
-    data = df[[slip_col, "lap_time", "top_speed"]].copy()
+    extra = ["team"] if "team" in df.columns else []
+    data = df[list(required | set(extra))].copy()
 
+    # ── parseos y flag de rebufo (igual que antes) ─────────────────────────
     if not pd.api.types.is_numeric_dtype(data["lap_time"]):
         data["lap_time"] = data["lap_time"].apply(parse_time_to_seconds)
 
-    true_vals = {"1", "true", "yes", "y", "si", "sí"}
-    data["slipstream"] = data[slip_col].astype(str).str.lower().isin(true_vals)
+    data["timestamp"] = pd.to_datetime(
+        data["hour"], format="%H:%M:%S.%f", errors="coerce"
+    )
+    data = data.sort_values("timestamp").reset_index(drop=True)
 
-    result = (
-        data.groupby("slipstream")
-        .agg(
-            mean_lap_time=("lap_time", "mean"),
-            mean_top_speed=("top_speed", "mean"),
-            laps=("lap_time", "count"),
-        )
-        .reset_index()
+    best_lap = data.groupby("driver")["lap_time"].transform("min")
+    data["fast"] = data["lap_time"] <= 1.10 * best_lap          # ≤ 110 %
+
+    median_speed = data["top_speed"].median()
+
+    prev_drv   = data["driver"].shift()
+    prev_fast  = data["fast"].shift()
+    delta_t    = (data["timestamp"] - data["timestamp"].shift()).dt.total_seconds()
+
+    data["slipstream"] = (
+        data["fast"] & prev_fast
+        & (prev_drv != data["driver"])
+        & delta_t.between(0.4, 2.5)
+        & (data["top_speed"] >= median_speed + 6)
     )
 
-    result["slipstream"] = result["slipstream"].map({True: "Con rebufo", False: "Sin rebufo"})
-    return result
+    # ── KPIs agregados ─────────────────────────────────────────────────────
+    stats = (
+        data
+        .groupby(["driver"])
+        .apply(lambda g: pd.Series({
+            "avg_lap_time_with_slip":  g.loc[g["slipstream"], "lap_time"].mean(),
+            "avg_lap_time_no_slip":   g.loc[~g["slipstream"], "lap_time"].mean(),
+            "avg_top_speed_with_slip":g.loc[g["slipstream"], "top_speed"].mean(),
+            "avg_top_speed_no_slip":  g.loc[~g["slipstream"], "top_speed"].mean(),
+            "slip_laps":              g["slipstream"].sum(),
+            "total_laps":             len(g),
+        }))
+        .reset_index()
+    )
+    stats["slip_pct"] = stats["slip_laps"] / stats["total_laps"] * 100
+    # añade el equipo si existe
+    if "team" in data.columns:
+        stats = stats.merge(data[["driver", "team"]].drop_duplicates("driver"),
+                            on="driver", how="left")
+    return stats

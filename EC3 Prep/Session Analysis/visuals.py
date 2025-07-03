@@ -102,25 +102,78 @@ class MainWindow(QMainWindow):
 
         ss_df = slipstream_stats(df_analysis)
         if not ss_df.empty:
-            fig = px.bar(
-                ss_df,
-                x='slipstream',
-                y='mean_lap_time',
-                title='Lap-time medio – con vs sin rebufo'
-            )
-            path = os.path.join(folder, 'slipstream_lap_time.html')
-            with open(path, 'w') as f:
-                f.write(fig.to_html(include_plotlyjs='cdn'))
+            ss_df = ss_df.sort_values("avg_lap_time_with_slip")
 
-            fig = px.bar(
+            fig_slip_lap = px.bar(
                 ss_df,
-                x='slipstream',
-                y='mean_top_speed',
-                title='Top-speed medio – con vs sin rebufo'
+                x="driver",                       #  ← antes ponía "number"
+                y=["avg_lap_time_no_slip", "avg_lap_time_with_slip"],
+                barmode="group",
+                title="Lap-time medio – Con vs Sin rebufo",
             )
-            path = os.path.join(folder, 'slipstream_speed.html')
-            with open(path, 'w') as f:
-                f.write(fig.to_html(include_plotlyjs='cdn'))
+            figs["Slipstream Lap-time"] = fig
+
+            fig_slip_speed = px.bar(
+                ss_df,
+                x="driver",                       #  ← idem
+                y=["avg_top_speed_no_slip", "avg_top_speed_with_slip"],
+                barmode="group",
+                title="Top-speed medio – Con vs Sin rebufo",
+            )
+            figs["Slipstream TopSpeed"] = fig
+        
+            df_tmp = df_analysis.copy()
+
+        df_tmp['slipstream'] = False     
+
+        # --- función auxiliar rápida para marcar las vueltas --------------------
+        def _flag_slip(df):
+            df = df.sort_values("hour")                  # hora string 'HH:MM:SS.mmm'
+            best = df["lap_time"].min()
+            df["fast"] = df["lap_time"] <= 1.10 * best
+            delta = pd.to_datetime(df["hour"], format="%H:%M:%S.%f").diff().dt.total_seconds()
+            prev_fast = df["fast"].shift()
+            df.loc[
+                df["fast"]
+                & prev_fast
+                & delta.between(0.4, 2.5)
+                & (df["top_speed"] >= df["top_speed"].median() + 6),
+                "slipstream"
+            ] = True
+            return df
+
+        df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
+        
+        df_tmp = df_analysis.copy()
+        df_tmp['slipstream'] = False
+
+        # … (define la función _flag_slip y agrupa por driver)
+        df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
+
+        # ① agrupa y saca la punta máxima con y sin rebufo
+        ts_split = (
+            df_tmp
+            .groupby(["driver", "slipstream"])["top_speed"]
+            .max()
+            .reset_index()
+        )
+
+        ts_split["rebufo"] = ts_split["slipstream"].map(
+            {True: "Con rebufo", False: "Sin rebufo"}
+        )
+
+        fig_ts_split = px.bar(
+            ts_split,
+            x="driver",
+            y="top_speed",
+            color="rebufo",
+            barmode="group",
+            title="Top Speed máxima – Con vs Sin rebufo",
+            color_discrete_map={"Con rebufo": "#FF5555", "Sin rebufo": "#AAAAAA"},
+        )
+
+        figs["Top Speed (rebufo)"] = fig_ts_split
+
         # Definir KPIs
         kpis = {
             'top_speeds': lambda: compute_top_speeds(df_analysis),
@@ -270,13 +323,7 @@ class MainWindow(QMainWindow):
                             )
                         )
                         figs[f"{sec.upper()} Diff"] = fig
-                                               
-                        fig.update_layout(
-                            yaxis=dict(
-                                range=[ymin - 0.05 * delta, ymax + 0.10 * delta],
-                                title="Diferencia (s)"
-                            )
-                        )
+
                 elif name == 'pit_summary':
                     df_sorted = df_out.sort_values('best_pit_time', ascending=True)
                     drivers = df_sorted['driver'].tolist()
@@ -299,6 +346,7 @@ class MainWindow(QMainWindow):
                         xaxis={'categoryorder':'array','categoryarray':drivers},
                         yaxis_title='Tiempo (s)'
                     )
+                    figs['Pit Stop Summary'] = fig
                 elif name == 'lap_consistency':
                     df_sorted = df_out.sort_values('lap_time_std', ascending=True)
                     fig = px.bar(
@@ -315,13 +363,13 @@ class MainWindow(QMainWindow):
                             title='Desviación (s)'
                         )
                     )
+                    figs['Lap Time Consistency'] = fig
                 else:
                     continue
             except Exception:
                 continue
-        report_path = os.path.join(folder, "session_report.html")
-        export_report(figs, report_path)
-        webbrowser.open(f'file://{report_path}')
+        export_report(figs, os.path.join(folder, 'session_report.html'))
+        webbrowser.open(f"file://{os.path.join(folder, 'session_report.html')}")
         self.stack.setCurrentWidget(self.graphs_page)
 
 if __name__ == '__main__':
