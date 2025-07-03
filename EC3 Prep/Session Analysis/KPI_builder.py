@@ -409,9 +409,58 @@ def lap_time_history(df: pd.DataFrame) -> pd.DataFrame:
 
     df_hist["lap"] = df_hist["lap"].astype(int)
     df_hist["lap_time"] = df_hist["lap_time"].astype(float)
-
     ordered_cols = ["lap", "driver"] + (["team"] if "team" in df_hist.columns else []) + ["lap_time"]
     return df_hist[ordered_cols]
+
+def pit_stop_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Best and mean pit stop time per driver.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame with columns ``driver`` and ``pit_time``.  If ``team`` exists
+        it is also included in the result.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``driver`` [, ``team``] ``best_pit_time`` and ``mean_pit_time``.
+    """
+
+    if "driver" not in df.columns or "pit_time" not in df.columns:
+        raise KeyError("Faltan columnas 'driver' o 'pit_time'")
+
+    cols = ["driver", "pit_time"] + (["team"] if "team" in df.columns else [])
+    data = df[cols].copy()
+
+    if not pd.api.types.is_numeric_dtype(data["pit_time"]):
+        data["pit_time"] = data["pit_time"].apply(parse_time_to_seconds)
+
+    group_cols = ["driver"] + (["team"] if "team" in data.columns else [])
+    result = (
+        data.groupby(group_cols)["pit_time"]
+        .agg(["min", "mean"])
+        .reset_index()
+        .rename(columns={"min": "best_pit_time", "mean": "mean_pit_time"})
+    )
+    return result
+
+def lap_time_consistency(df: pd.DataFrame) -> pd.DataFrame:
+    """Lap time standard deviation per driver."""
+
+    if "driver" not in df.columns or "lap_time" not in df.columns:
+        raise KeyError("Faltan columnas 'driver' o 'lap_time'")
+
+    data = df[["driver", "lap_time"]].copy()
+    if not pd.api.types.is_numeric_dtype(data["lap_time"]):
+        data["lap_time"] = data["lap_time"].apply(parse_time_to_seconds)
+
+    result = (
+        data.groupby("driver")["lap_time"]
+        .std()
+        .reset_index(name="lap_time_std")
+    )
+    return result
 
 
     import pandas as pd
@@ -480,3 +529,37 @@ def extract_session_summary(df_analysis: pd.DataFrame,
 
     return summary
 
+def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """Return mean lap time and top speed for laps with and without slipstream."""
+
+    slip_col = next(
+        (
+            c
+            for c in df.columns
+            if "slip" in c.lower() or "draft" in c.lower() or "rebufo" in c.lower()
+        ),
+        None,
+    )
+    if slip_col is None or "lap_time" not in df.columns or "top_speed" not in df.columns:
+        return pd.DataFrame()
+
+    data = df[[slip_col, "lap_time", "top_speed"]].copy()
+
+    if not pd.api.types.is_numeric_dtype(data["lap_time"]):
+        data["lap_time"] = data["lap_time"].apply(parse_time_to_seconds)
+
+    true_vals = {"1", "true", "yes", "y", "si", "sí"}
+    data["slipstream"] = data[slip_col].astype(str).str.lower().isin(true_vals)
+
+    result = (
+        data.groupby("slipstream")
+        .agg(
+            mean_lap_time=("lap_time", "mean"),
+            mean_top_speed=("top_speed", "mean"),
+            laps=("lap_time", "count"),
+        )
+        .reset_index()
+    )
+
+    result["slipstream"] = result["slipstream"].map({True: "Con rebufo", False: "Sin rebufo"})
+    return result

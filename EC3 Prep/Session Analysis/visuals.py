@@ -13,8 +13,11 @@ import random
 from data_process import load_session_data, unify_timestamps, convert_time_column
 from KPI_builder import (
     compute_top_speeds, track_limit_rate, team_ranking,
-    ideal_lap_gap, best_sector_times, lap_time_history
+    ideal_lap_gap, best_sector_times, lap_time_history,
+    slipstream_stats, pit_stop_summary, lap_time_consistency
 )
+
+from main_analysis import export_report
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -50,7 +53,7 @@ class MainWindow(QMainWindow):
         # Página de confirmación de generación de KPIs
         self.graphs_page = QWidget()
         layout = QVBoxLayout(self.graphs_page)
-        self.info_label = QLabel("KPIs generados en HTML en la carpeta seleccionada.")
+        self.info_label = QLabel("Reporte HTML generado en la carpeta seleccionada.")
         self.back_btn = QPushButton("Volver")
         self.back_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.intro_page))
         layout.addWidget(self.info_label, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -93,6 +96,28 @@ class MainWindow(QMainWindow):
                 team_colors[team] = '#33C1FF'
             else:
                 team_colors[team] = f'#{random.randint(0,0xFFFFFF):06x}'
+
+        ss_df = slipstream_stats(df_analysis)
+        if not ss_df.empty:
+            fig = px.bar(
+                ss_df,
+                x='slipstream',
+                y='mean_lap_time',
+                title='Lap-time medio – con vs sin rebufo'
+            )
+            path = os.path.join(folder, 'slipstream_lap_time.html')
+            with open(path, 'w') as f:
+                f.write(fig.to_html(include_plotlyjs='cdn'))
+
+            fig = px.bar(
+                ss_df,
+                x='slipstream',
+                y='mean_top_speed',
+                title='Top-speed medio – con vs sin rebufo'
+            )
+            path = os.path.join(folder, 'slipstream_speed.html')
+            with open(path, 'w') as f:
+                f.write(fig.to_html(include_plotlyjs='cdn'))
         # Definir KPIs
         kpis = {
             'top_speeds': lambda: compute_top_speeds(df_analysis),
@@ -104,6 +129,8 @@ class MainWindow(QMainWindow):
             'ideal_lap_gap': lambda: ideal_lap_gap(df_analysis),
             'sector_comparison': lambda: best_sector_times(df_analysis),
             'lap_history':   lambda: lap_time_history(df_analysis),
+            'pit_summary':   lambda: pit_stop_summary(df_analysis),
+            'lap_consistency': lambda: lap_time_consistency(df_analysis),
         }
         # Generar archivos para cada KPI
         for name, func in kpis.items():
@@ -135,8 +162,10 @@ class MainWindow(QMainWindow):
                             title="Velocidad Máxima"
                         )
                     )
+                    figs[name] = fig
                 elif name == 'track_rate':
                     fig = px.bar(df_out, x='driver', y='rate', title='Track Limits per Lap')
+                    figs[name] = fig
                 elif name == 'team_ranking':
                     fig = px.bar(
                         df_out,
@@ -154,6 +183,7 @@ class MainWindow(QMainWindow):
                             title="Velocidad Media de Equipo"
                         )
                     )
+                    figs[name] = fig
                 elif name == 'ideal_lap_gap':
                     ig = df_out.sort_values('best_lap', ascending=True).reset_index(drop=True)
                     drivers = ig['driver'].tolist()
@@ -187,6 +217,7 @@ class MainWindow(QMainWindow):
                             title="Tiempo (s)"
                         )
                     )
+                    figs[name] = fig
                 elif name == 'lap_history':
                     df_hist = df_out.sort_values(['lap','driver'])
                     fig = px.line(
@@ -205,9 +236,7 @@ class MainWindow(QMainWindow):
                             title="Tiempo (s)"
                         )
                     )
-                    html = fig.to_html(include_plotlyjs='cdn')
-                    path = os.path.join(folder, "lap_history.html")
-                    with open(path,'w') as f: f.write(html)
+                    figs[name] = fig
                 elif name == 'sector_comparison':
                     for sec in ['sector1','sector2','sector3']:
                         df_temp = df_out[['driver','team', sec]].copy()
@@ -237,17 +266,59 @@ class MainWindow(QMainWindow):
                                 title="Diferencia (s)"
                             )
                         )
+                        figs[f"{sec.upper()} Diff"] = fig
+                                               
+                        fig.update_layout(
+                            yaxis=dict(
+                                range=[ymin - 0.05 * delta, ymax + 0.10 * delta],
+                                title="Diferencia (s)"
+                            )
+                        )
+                elif name == 'pit_summary':
+                    df_sorted = df_out.sort_values('best_pit_time', ascending=True)
+                    drivers = df_sorted['driver'].tolist()
+                    if 'team' in df_sorted.columns:
+                        cols = [team_colors.get(t, '#333333') for t in df_sorted['team']]
+                    else:
+                        cols = ['#333333'] * len(df_sorted)
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        x=drivers, y=df_sorted['best_pit_time'],
+                        marker_color=cols, name='Mejor Parada'
+                    ))
+                    fig.add_trace(go.Bar(
+                        x=drivers, y=df_sorted['mean_pit_time'],
+                        marker_color=cols, opacity=0.6, name='Media Paradas'
+                    ))
+                    fig.update_layout(
+                        barmode='group',
+                        title='Pit Stop Summary',
+                        xaxis={'categoryorder':'array','categoryarray':drivers},
+                        yaxis_title='Tiempo (s)'
+                    )
+                elif name == 'lap_consistency':
+                    df_sorted = df_out.sort_values('lap_time_std', ascending=True)
+                    fig = px.bar(
+                        df_sorted,
+                        x='driver', y='lap_time_std',
+                        color='team', color_discrete_map=team_colors,
+                        title='Lap Time Consistency'
+                    )
+                    ymin, ymax = df_sorted['lap_time_std'].min(), df_sorted['lap_time_std'].max()
+                    delta = ymax - ymin
+                    fig.update_layout(
+                        yaxis=dict(
+                            range=[ymin - 0.05 * delta, ymax + 0.10 * delta],
+                            title='Desviación (s)'
+                        )
+                    )
                 else:
                     continue
-                # Guardar HTML
-                html = fig.to_html(include_plotlyjs='cdn')
-                path = os.path.join(folder, f"{name}.html")
-                with open(path, 'w') as f:
-                    f.write(html)
             except Exception:
                 continue
-        # Abrir carpeta en navegador y mostrar confirmación
-        webbrowser.open(f'file://{folder}')
+        report_path = os.path.join(folder, "session_report.html")
+        export_report(figs, report_path)
+        webbrowser.open(f'file://{report_path}')
         self.stack.setCurrentWidget(self.graphs_page)
 
 if __name__ == '__main__':

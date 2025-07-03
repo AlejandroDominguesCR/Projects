@@ -26,10 +26,11 @@ from KPI_builder import (
     best_sector_times,
     ideal_lap_gap,
     lap_time_history,
-    extract_session_summary
+    pit_stop_summary,
+    lap_time_consistency,
+    extract_session_summary,
+    slipstream_stats,
 )
-
-
 
 def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load and preprocess session CSV files."""
@@ -97,6 +98,23 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
             team_colors[team] = '#33C1FF'
         else:
             team_colors[team] = f'#{random.randint(0, 0xFFFFFF):06x}'
+
+    ss = slipstream_stats(df_analysis)
+    if not ss.empty:
+        fig_slip_lap = px.bar(
+            ss,
+            x="slipstream",
+            y="mean_lap_time",
+            title="Lap-time medio – con vs sin rebufo",
+        )
+        fig_slip_speed = px.bar(
+            ss,
+            x="slipstream",
+            y="mean_top_speed",
+            title="Top-speed medio – con vs sin rebufo",
+        )
+        figs["Lap-time medio – con vs sin rebufo"] = fig_slip_lap
+        figs["Top-speed medio – con vs sin rebufo"] = fig_slip_speed
 
     # Gráfico Top Speeds con colores por piloto
     fig_ts = px.bar(
@@ -258,6 +276,45 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
 
             # 6) Añadimos la figura al diccionario
             figs[f"{sec.upper()} Diff"] = fig
+
+    pit_df = pit_stop_summary(df_analysis)
+    if not pit_df.empty:
+        pit_df = pit_df.sort_values('best_pit_time', ascending=True)
+        drivers = pit_df['driver'].tolist()
+        if 'team' in pit_df.columns:
+            colors = [team_colors.get(t, '#333333') for t in pit_df['team']]
+        else:
+            colors = ['#333333'] * len(pit_df)
+        fig_pit = go.Figure()
+        fig_pit.add_trace(go.Bar(x=drivers, y=pit_df['best_pit_time'], marker_color=colors, name='Mejor Parada'))
+        fig_pit.add_trace(go.Bar(x=drivers, y=pit_df['mean_pit_time'], marker_color=colors, opacity=0.6, name='Media Paradas'))
+        fig_pit.update_layout(
+            barmode='group',
+            title='Pit Stop Summary',
+            xaxis={'categoryorder':'array','categoryarray':drivers},
+            yaxis_title='Tiempo (s)'
+        )
+        figs['Pit Stop Summary'] = fig_pit
+
+    cons_df = lap_time_consistency(df_analysis)
+    if not cons_df.empty:
+        cons_df = cons_df.sort_values('lap_time_std', ascending=True)
+        fig_cons = px.bar(
+            cons_df,
+            x='driver', y='lap_time_std',
+            color='team' if 'team' in cons_df.columns else None,
+            color_discrete_map=team_colors,
+            title='Lap Time Consistency'
+        )
+        ymin, ymax = cons_df['lap_time_std'].min(), cons_df['lap_time_std'].max()
+        delta = ymax - ymin
+        fig_cons.update_layout(
+            yaxis=dict(
+                range=[ymin - 0.05 * delta, ymax + 0.10 * delta],
+                title='Desviación (s)'
+            )
+        )
+        figs['Lap Time Consistency'] = fig_cons
 
     return figs
 
