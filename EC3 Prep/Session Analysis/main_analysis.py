@@ -34,6 +34,7 @@ from KPI_builder import (
     lap_time_consistency,
     extract_session_summary,
     slipstream_stats,
+    sector_slipstream_stats,
     build_driver_tables,
 )
 
@@ -41,6 +42,10 @@ from KPI_builder import (
 # --- añade debajo de los imports ---
 def make_gap_table(df_tbl, driver):
     """Devuelve un Div con título + DataTable coloreado según GapAhead."""
+    df_tbl = df_tbl.copy()
+    if "LapTime" in df_tbl.columns:
+        df_tbl["LapTime"] = df_tbl["LapTime"].apply(seconds_to_mmss)
+
     return html.Div(
         children=[
             html.H4(driver),
@@ -162,6 +167,7 @@ def build_figures(
             team_colors[team] = f'#{random.randint(0, 0xFFFFFF):06x}'
 
     ss = slipstream_stats(df_analysis)
+    ss_sector = sector_slipstream_stats(df_analysis)
 
     if not ss.empty:
         # 1) Lap-time mínimo (orden asc.)
@@ -202,8 +208,46 @@ def build_figures(
         figs["Slipstream Lap-time (min)"] = fig_slip_lap
         figs["Slipstream TopSpeed (max)"] = fig_slip_speed
 
+    if not ss_sector.empty:
+        s1 = ss_sector.sort_values("min_s1_with_slip")
+        order_s1 = s1["driver"].tolist()
+        fig_s1 = px.bar(
+            s1,
+            x="driver",
+            y=["min_s1_no_slip", "min_s1_with_slip"],
+            barmode="group",
+            title="Slipstream Lap-time S1",
+        )
+        first_val = s1.iloc[0][["min_s1_no_slip", "min_s1_with_slip"]].min()
+        last_val = s1.iloc[-1][["min_s1_no_slip", "min_s1_with_slip"]].max()
+        fig_s1.update_layout(
+            xaxis={"categoryorder": "array", "categoryarray": order_s1},
+            yaxis={"range": [first_val * 0.90, last_val * 1.05]},
+        )
+
+        s2 = ss_sector.sort_values("min_s2_with_slip")
+        order_s2 = s2["driver"].tolist()
+        fig_s2 = px.bar(
+            s2,
+            x="driver",
+            y=["min_s2_no_slip", "min_s2_with_slip"],
+            barmode="group",
+            title="Slipstream Lap-time S2",
+        )
+        first_val = s2.iloc[0][["min_s2_no_slip", "min_s2_with_slip"]].min()
+        last_val = s2.iloc[-1][["min_s2_no_slip", "min_s2_with_slip"]].max()
+        fig_s2.update_layout(
+            xaxis={"categoryorder": "array", "categoryarray": order_s2},
+            yaxis={"range": [first_val * 0.90, last_val * 1.05]},
+        )
+
+        figs["Slipstream Lap-time S1"] = fig_s1
+        figs["Slipstream Lap-time S2"] = fig_s2
+
+    if not ss.empty or not ss_sector.empty:
         df_tmp = df_analysis.copy()
-        df_tmp['slipstream'] = False     
+        df_tmp['slipstream'] = False
+               
             
 
 
@@ -485,9 +529,14 @@ def export_report(
                 if rows.empty:
                     continue
                 df_tbl = pd.DataFrame(rows)
+                format_map = {
+                    col: seconds_to_mmss
+                    for col in ["LapTime", "Sector1", "Sector2", "Sector3"]
+                    if col in df_tbl.columns
+                }
                 styler = (
                     df_tbl.style
-                    .format("{:.3f}", na_rep="", precision=3)
+                    .format(format_map, na_rep="")
                     .applymap(_gap_color, subset=["GapAhead"])
                     .set_table_attributes(
                         "border='1' cellspacing='0' cellpadding='3' "

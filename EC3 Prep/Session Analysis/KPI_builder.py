@@ -670,6 +670,131 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     return stats
 
+
+def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """Slipstream KPIs per driver by sector.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Analysis dataframe including ``T1``, ``T2`` and ``T3`` timestamps
+        together with lap metrics (``lap_time``, ``top_speed`` and
+        ``lap_number``).
+
+    Returns
+    -------
+    pd.DataFrame
+        Aggregated slipstream statistics for sector 1 and sector 2.  Column
+        names are suffixed with ``_s1`` or ``_s2``.
+    """
+
+    req_base = {
+        "number",
+        "driver",
+        "lap_number",
+        "lap_time",
+        "top_speed",
+        "T1",
+        "T2",
+        "T3",
+    }
+
+    if not req_base.issubset(df.columns):
+        return pd.DataFrame()
+
+    # locate sector time columns
+    s1_col = next((c for c in df.columns if c.lower() in {"s1_seconds", "s1", "sector1"}), None)
+    s2_col = next((c for c in df.columns if c.lower() in {"s2_seconds", "s2", "sector2"}), None)
+    if s1_col is None or s2_col is None:
+        return pd.DataFrame()
+
+    extra = ["team"] if "team" in df.columns else []
+    use_cols = list(req_base | {s1_col, s2_col} | set(extra))
+    data = df[use_cols].copy()
+
+    if not pd.api.types.is_numeric_dtype(data["lap_time"]):
+        data["lap_time"] = data["lap_time"].apply(parse_time_to_seconds)
+
+    for col in [s1_col, s2_col]:
+        if not pd.api.types.is_numeric_dtype(data[col]):
+            data[col] = data[col].apply(parse_time_to_seconds)
+
+    for tcol in ["T1", "T2", "T3"]:
+        data[tcol] = pd.to_datetime(data[tcol], format="%H:%M:%S.%f", errors="coerce")
+
+    data = data.sort_values("T3").reset_index(drop=True)
+
+    best_lap = data.groupby("driver")["lap_time"].transform("min")
+    data["fast"] = data["lap_time"] <= 1.10 * best_lap
+    median_speed = data["top_speed"].median()
+
+    # ─── Sector 1 detection ────────────────────────────────────────────────
+    s1 = data.sort_values("T1").reset_index()
+    dt1 = (s1["T1"] - s1["T1"].shift()).dt.total_seconds()
+    prev_drv = s1["driver"].shift()
+    prev_fast = s1["fast"].shift()
+    s1["slip_flag_s1"] = (
+        s1["fast"]
+        & prev_fast
+        & (prev_drv != s1["driver"])
+        & dt1.between(0.4, 2.5)
+        & (s1["top_speed"] >= median_speed + 6)
+    )
+    s1 = s1.sort_values(["driver", "lap_number"]).reset_index(drop=True)
+    s1["slip_prev_s1"] = s1.groupby("driver")["slip_flag_s1"].shift(fill_value=False)
+    s1["slipstream_s1"] = s1["slip_flag_s1"] | s1["slip_prev_s1"]
+    s1 = s1.sort_values("index")
+    data["slipstream_s1"] = s1["slipstream_s1"].values
+
+    # ─── Sector 2 detection ────────────────────────────────────────────────
+    s2 = data.sort_values("T2").reset_index()
+    dt2 = (s2["T2"] - s2["T2"].shift()).dt.total_seconds()
+    prev_drv2 = s2["driver"].shift()
+    prev_fast2 = s2["fast"].shift()
+    s2["slip_flag_s2"] = (
+        s2["fast"]
+        & prev_fast2
+        & (prev_drv2 != s2["driver"])
+        & dt2.between(0.4, 2.5)
+        & (s2["top_speed"] >= median_speed + 6)
+    )
+    s2 = s2.sort_values(["driver", "lap_number"]).reset_index(drop=True)
+    s2["slip_prev_s2"] = s2.groupby("driver")["slip_flag_s2"].shift(fill_value=False)
+    s2["slipstream_s2"] = s2["slip_flag_s2"] | s2["slip_prev_s2"]
+    s2 = s2.sort_values("index")
+    data["slipstream_s2"] = s2["slipstream_s2"].values
+
+    # ─── KPIs per driver ─────────────────────────────────────────────────--
+    def _agg(g: pd.DataFrame) -> pd.Series:
+        return pd.Series(
+            {
+                "avg_time_with_slip_s1": g.loc[g["slipstream_s1"], s1_col].mean(),
+                "avg_time_no_slip_s1": g.loc[~g["slipstream_s1"], s1_col].mean(),
+                "min_time_with_slip_s1": g.loc[g["slipstream_s1"], s1_col].min(),
+                "min_time_no_slip_s1": g.loc[~g["slipstream_s1"], s1_col].min(),
+                "slip_laps_s1": g["slipstream_s1"].sum(),
+                "avg_time_with_slip_s2": g.loc[g["slipstream_s2"], s2_col].mean(),
+                "avg_time_no_slip_s2": g.loc[~g["slipstream_s2"], s2_col].mean(),
+                "min_time_with_slip_s2": g.loc[g["slipstream_s2"], s2_col].min(),
+                "min_time_no_slip_s2": g.loc[~g["slipstream_s2"], s2_col].min(),
+                "slip_laps_s2": g["slipstream_s2"].sum(),
+                "total_laps": len(g),
+            }
+        )
+
+    stats = data.groupby("driver").apply(_agg).reset_index()
+    stats["slip_pct_s1"] = stats["slip_laps_s1"] / stats["total_laps"] * 100
+    stats["slip_pct_s2"] = stats["slip_laps_s2"] / stats["total_laps"] * 100
+
+    if "team" in data.columns:
+        stats = stats.merge(
+            data[["driver", "team"]].drop_duplicates("driver"),
+            on="driver",
+            how="left",
+        )
+
+    return stats
+
 def driver_lap_table(
     df: pd.DataFrame,
     teams: list[str] = ("Griffin Core", "Campos Racing"),
