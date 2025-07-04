@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton,
     QVBoxLayout, QFormLayout, QStackedWidget,
-    QFileDialog, QApplication, QLineEdit
+    QFileDialog, QApplication, QLineEdit, QCheckBox
 )
 from PyQt6.QtCore import Qt
 import plotly.express as px
@@ -14,7 +14,8 @@ from data_process import load_session_data, unify_timestamps, convert_time_colum
 from KPI_builder import (
     compute_top_speeds, track_limit_rate, team_ranking,
     ideal_lap_gap, best_sector_times, lap_time_history,
-    slipstream_stats, pit_stop_summary, lap_time_consistency
+    slipstream_stats, pit_stop_summary, lap_time_consistency,
+    driver_lap_table,
 )
 
 from main_analysis import export_report
@@ -43,6 +44,8 @@ class MainWindow(QMainWindow):
         form.addRow("Evento:", self.event_input)
         form.addRow("Sesión (FP, R1, R2, Q, C):", self.session_input)
         layout.addLayout(form)
+        self.sector_toggle = QCheckBox("Incluir sectores en tabla")
+        layout.addWidget(self.sector_toggle, alignment=Qt.AlignmentFlag.AlignLeft)
         self.select_btn = QPushButton("Seleccionar carpeta CSV")
         self.select_btn.clicked.connect(self.on_select)
         layout.addWidget(self.select_btn, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -86,6 +89,10 @@ class MainWindow(QMainWindow):
         df_analysis = df_analysis.copy()
         df_analysis['driver'] = df_analysis[driver_col]
         df_analysis = convert_time_column(df_analysis, 'lap_time')
+        lap_table = driver_lap_table(
+            df_analysis,
+            include_sectors=self.sector_toggle.isChecked()
+        )
         # --- 1) Generar un mapa de colores por piloto ---
         ts = compute_top_speeds(df_analysis)
         team_colors = {}
@@ -373,7 +380,11 @@ class MainWindow(QMainWindow):
                     continue
             except Exception:
                 continue
-        export_report(figs, os.path.join(folder, 'session_report.html'))
+        export_report(
+            figs,
+            os.path.join(folder, 'session_report.html'),
+            table_df=lap_table,
+        )
         webbrowser.open(f"file://{os.path.join(folder, 'session_report.html')}")
         self.stack.setCurrentWidget(self.graphs_page)
 

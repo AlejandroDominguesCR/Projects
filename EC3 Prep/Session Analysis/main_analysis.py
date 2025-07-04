@@ -30,6 +30,7 @@ from KPI_builder import (
     lap_time_consistency,
     extract_session_summary,
     slipstream_stats,
+    driver_lap_table,
 )
 
 def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -69,8 +70,14 @@ def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
 
     return df_analysis, df_class, weather_df, tracklimits_df
 
-def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None):
-    """Compute a minimal set of KPI figures.
+def build_figures(
+    df_analysis,
+    df_class,
+    weather_df,
+    tracklimits_df,
+    teams=None,
+):
+    """Compute a minimal set of KPI figures and a lap table.
 
     Parameters
     ----------
@@ -81,11 +88,21 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
     tracklimits_df : pd.DataFrame
     teams : list[str] | None
         Optional list of team names to filter ``df_analysis``.
+
+    Returns
+    -------
+    tuple[dict, pd.DataFrame]
+        The figures dictionary and the lap table DataFrame.
     """
 
     if teams:
         df_analysis = df_analysis[df_analysis["team"].isin(teams)]
     figs = {}
+    lap_table = driver_lap_table(
+        df_analysis,
+        ["Griffin Core", "Campos Racing"],
+        include_sectors=False,
+    )
 
     # Top Speeds for each driver & generar colores por piloto
     ts = compute_top_speeds(df_analysis)
@@ -396,7 +413,7 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
         )
         figs['Lap Time Consistency'] = fig_cons
 
-    return figs
+    return figs, lap_table
 
 def export_report(figs: dict, path: str,
                   table_df: pd.DataFrame | None = None):
@@ -410,7 +427,7 @@ def export_report(figs: dict, path: str,
 
         # ① inserta la tabla si existe
         if table_df is not None and not table_df.empty:
-            f.write("<h2>Resumen de vueltas – Griffincore & Campos</h2>\n")
+            f.write("<h2>Análisis de Vueltas – GriffinCore / Campos</h2>\n")
             f.write(table_df.to_html(index=False,
                                      float_format=lambda x: f'{x:.3f}'))
             f.write("<hr>\n")
@@ -474,13 +491,18 @@ def on_load(n_clicks, teams, folder):
     team_names = sorted(df_analysis["team"].dropna().unique().tolist())
     if not teams:
         teams = team_names
-    figs = build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams)
+    figs, table_df = build_figures(
+        df_analysis, df_class, weather_df, tracklimits_df, teams
+    )
     graphs = [
         element
         for name, fig in figs.items()
         for element in (html.H3(name), dcc.Graph(figure=fig))
     ]
-    serialized = {name: fig.to_dict() for name, fig in figs.items()}
+    serialized = {
+        "figs": {name: fig.to_dict() for name, fig in figs.items()},
+        "table": table_df.to_dict(orient="records"),
+    }
     options = [{"label": t, "value": t} for t in team_names]
     return html.Div(graphs), serialized, options, teams
 
@@ -494,9 +516,15 @@ def on_load(n_clicks, teams, folder):
 def on_export(n_clicks, data):
     if not data:
         raise PreventUpdate
-    figs = {name: go.Figure(fig) if isinstance(fig, dict) else fig for name, fig in data.items()}
+    figs_dict = data.get("figs", data)
+    table_data = data.get("table")
+    figs = {
+        name: go.Figure(fig) if isinstance(fig, dict) else fig
+        for name, fig in figs_dict.items()
+    }
+    table_df = pd.DataFrame(table_data) if table_data else None
     path = "session_report.html"
-    export_report(figs, path)
+    export_report(figs, path, table_df)
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     os.remove(path)
