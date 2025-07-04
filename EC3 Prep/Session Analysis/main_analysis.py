@@ -619,11 +619,10 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, drivers):
         "figs": {name: fig.to_dict() for name, fig in figs.items()},
         "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
     }
-    options = [{"label": t, "value": t} for t in team_names]
     team_opts   = [{"label": t, "value": t} for t in team_names]
     driver_opts = [{"label": d, "value": d} for d in driver_names]
 
-    return html.Div(graphs), serialized, options, teams, driver_opts, team_opts
+    return html.Div(graphs), serialized, team_opts, teams, driver_opts, drivers
 
 @app.callback(
     Output("download-report", "data"),
