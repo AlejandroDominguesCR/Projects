@@ -10,7 +10,9 @@ datos_registrados_Canopy = []
 def procesar_archivos_wintax(archivos_wintax):
     print("DEBUG: Starting procesar_archivos_wintax for files:", archivos_wintax)  # Debug
     global datos_registrados_WinTAX  # Accede a la variable global
-    carpeta_salida = "procesados"
+    carpeta_salida = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../procesados")
+)
     os.makedirs(carpeta_salida, exist_ok=True)  # Crea la carpeta si no existe
 
     # Collect all data for variance calculation
@@ -81,7 +83,9 @@ def registrar_datos_wintax(ruta_archivo):
 def procesar_archivos_canopy(archivos_canopy):
     print("DEBUG: Starting procesar_archivos_canopy for files:", archivos_canopy)  # Debug
     global datos_registrados_Canopy  # Accede a la variable global
-    carpeta_salida = "procesados"
+    carpeta_salida = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../procesados")
+)
     os.makedirs(carpeta_salida, exist_ok=True)  # Crea la carpeta si no existe
 
     all_data = []

@@ -7,10 +7,10 @@ import base64
 import io
 import json
 import plotly.graph_objs as go
-import matplotlib.pyplot as plt
 import numpy as np
 from dash.exceptions import PreventUpdate
 import procesar_datos
+from Grafico_de_prueba_plotly import matrix_detailed_analysis_plotly
 import webbrowser
 import threading
 from dash import MATCH, ALL, ctx
@@ -37,12 +37,15 @@ def ensure_default_conditions():
     config_path = Path(__file__).parent / "config_conditions.json"
     default_config = get_default_conditions()
 
-    try:
-        with open(config_path, 'w') as f:
-            json.dump(default_config, f, indent=2)
-        print("[INFO] config_conditions.json overwritten with default conditions.")
-    except Exception as e:
-        print(f"[ERROR] Could not write default config: {e}")
+    if not config_path.exists():
+        try:
+            with open(config_path, 'w') as f:
+                json.dump(default_config, f, indent=2)
+            print("[INFO] config_conditions.json created with default conditions.")
+        except Exception as e:
+            print(f"[ERROR] Could not write default config: {e}")
+    else:
+        print("[INFO] config_conditions.json already exists, keeping existing configuration.")
 
 def get_default_conditions():
     return {
@@ -207,63 +210,158 @@ overlay_controls = html.Div([
 
 ensure_default_conditions()
 
-app.layout = html.Div([
-    dcc.Location(id='url', refresh=False),
-    html.H1("WinTAX/Canopy Data Comparison (Dash Version)", className="mb-4 mt-2 text-center"),
-    dbc.Container([
-        dcc.Upload(
-            id='upload-data',
-            children=html.Button('Upload up to 4 CSV Files', className="btn btn-primary mb-3"),
-            multiple=True,
-            max_size=4*1024*1024*10
-        ),
-        html.Div(id='file-list', className="mb-2"),
-        html.Div(id='file-type-selectors', className="mb-2"),
-        html.Div(id='user-message', className="mb-2"),
-        html.Div([
-            html.Button('Confirm File Types', id='confirm-types-btn', className="btn btn-success mb-3"),
-        ]),
-        dbc.Modal([
-            dbc.ModalHeader(dbc.ModalTitle("Edit Plot Conditions")),
-            dbc.ModalBody(id='conditions-modal-body'),
-            dbc.ModalFooter([
-                html.Button('Save', id='save-conditions-btn', className="btn btn-success me-2"),
-                html.Button('Cancel', id='cancel-conditions-btn', className="btn btn-secondary"),
-            ]),
-        ], id='conditions-modal', is_open=False, style={'maxWidth': '2500px', 'width': '90vw'}),
-        dcc.Loading(
-            id="loading-processing",
-            type="default",
-            children=[
-                dcc.Dropdown(id='variable-dropdown', placeholder='Select Y variable', className="mb-2", multi=True, maxHeight=200),
-                dcc.Dropdown(id='canopy-variable-dropdown', placeholder='Select equivalent Y variable for Canopy', className="mb-2", style={'display': 'none'}, multi=True, maxHeight=200),
-                html.Div(id='show-conditions-area', className="mb-2"),
-                html.Div([
-                    html.Button('Export Conditions', id='export-conditions-btn', className="btn btn-warning me-2", style={'marginBottom': '20px'}),
-                    dcc.Download(id="download-conditions"),
-                    dcc.Upload(
-                        id='upload-conditions',
-                        children=html.Button('Import Conditions', className="btn btn-secondary"),
-                        multiple=False,
-                    ),
-                    html.Div(id='import-status-message', className='mb-3'),
-                ], style={'marginBottom': '20px'}),
-                html.Button('Generate Plot', id='plot-btn', className="btn btn-info mb-3", disabled=True),
-                dcc.Graph(id='plot-graph', style={'height': '600px', 'width': '100vw', 'minWidth': '1600px', 'marginBottom': '40px'}),
-                html.Div(id='plots-and-dropdowns-block'),
-                html.Button('Add Plot', id='add-plot-btn', className="btn btn-secondary mb-3"),
-            ]
-        
-        ),
 
-        dcc.Store(id='processed-files-store'),
-        dcc.Store(id='plots-store', data={"figures": []}),
-        dcc.Store(id='plot-state-store', data={'state': 'idle'}),
-        dcc.Store(id='plot-dropdowns-store', data=[]),
-        dcc.Store(id='modal-just-saved', data=False),  
-        overlay_controls 
-    ], fluid=True)
-])
+def build_standard_tab():
+    return html.Div([
+        html.H1(
+            "WinTAX/Canopy Data Comparison (Dash Version)",
+            className="mb-4 mt-2 text-center",
+        ),
+        dbc.Container(
+            [
+                dcc.Upload(
+                    id="upload-data",
+                    children=html.Button(
+                        "Upload up to 4 CSV Files", className="btn btn-primary mb-3"
+                    ),
+                    multiple=True,
+                    max_size=4 * 1024 * 1024 * 10,
+                ),
+                html.Div(id="file-list", className="mb-2"),
+                html.Div(id="file-type-selectors", className="mb-2"),
+                html.Div(id="user-message", className="mb-2"),
+                html.Div([
+                    html.Button(
+                        "Confirm File Types",
+                        id="confirm-types-btn",
+                        className="btn btn-success mb-3",
+                    ),
+                ]),
+                dbc.Modal(
+                    [
+                        dbc.ModalHeader(dbc.ModalTitle("Edit Plot Conditions")),
+                        dbc.ModalBody(id="conditions-modal-body"),
+                        dbc.ModalFooter(
+                            [
+                                html.Button(
+                                    "Save",
+                                    id="save-conditions-btn",
+                                    className="btn btn-success me-2",
+                                ),
+                                html.Button(
+                                    "Cancel",
+                                    id="cancel-conditions-btn",
+                                    className="btn btn-secondary",
+                                ),
+                            ]
+                        ),
+                    ],
+                    id="conditions-modal",
+                    is_open=False,
+                    style={"maxWidth": "2500px", "width": "90vw"},
+                ),
+                dcc.Loading(
+                    id="loading-processing",
+                    type="default",
+                    children=[
+                        dcc.Dropdown(
+                            id="variable-dropdown",
+                            placeholder="Select Y variable",
+                            className="mb-2",
+                            multi=True,
+                            maxHeight=200,
+                        ),
+                        dcc.Dropdown(
+                            id="canopy-variable-dropdown",
+                            placeholder="Select equivalent Y variable for Canopy",
+                            className="mb-2",
+                            style={"display": "none"},
+                            multi=True,
+                            maxHeight=200,
+                        ),
+                        html.Div(id="show-conditions-area", className="mb-2"),
+                        html.Div(
+                            [
+                                html.Button(
+                                    "Export Conditions",
+                                    id="export-conditions-btn",
+                                    className="btn btn-warning me-2",
+                                    style={"marginBottom": "20px"},
+                                ),
+                                dcc.Download(id="download-conditions"),
+                                dcc.Upload(
+                                    id="upload-conditions",
+                                    children=html.Button(
+                                        "Import Conditions", className="btn btn-secondary"
+                                    ),
+                                    multiple=False,
+                                ),
+                                html.Div(id="import-status-message", className="mb-3"),
+                            ],
+                            style={"marginBottom": "20px"},
+                        ),
+                        html.Button(
+                            "Generate Plot",
+                            id="plot-btn",
+                            className="btn btn-info mb-3",
+                            disabled=True,
+                        ),
+                        dcc.Graph(
+                            id="plot-graph",
+                            style={
+                                "height": "600px",
+                                "width": "100vw",
+                                "minWidth": "1600px",
+                                "marginBottom": "40px",
+                            },
+                        ),
+                        html.Div(id="plots-and-dropdowns-block"),
+                        html.Button(
+                            "Add Plot",
+                            id="add-plot-btn",
+                            className="btn btn-secondary mb-3",
+                        ),
+                    ],
+                ),
+                dcc.Store(id="processed-files-store"),
+                dcc.Store(id="plots-store", data={"figures": []}),
+                dcc.Store(id="plot-state-store", data={"state": "idle"}),
+                dcc.Store(id="plot-dropdowns-store", data=[]),
+                dcc.Store(id="modal-just-saved", data=False),
+                overlay_controls,
+            ],
+            fluid=True,
+        ),
+    ])
+
+
+def build_detailed_tab():
+    return dbc.Container(
+        [
+            dcc.Dropdown(
+                id="detailed-variable-dropdown",
+                placeholder="Select variable",
+            ),
+            dcc.Graph(id="detailed-graph"),
+        ],
+        fluid=True,
+    )
+
+
+app.layout = html.Div(
+    [
+        dcc.Location(id="url", refresh=False),
+        dcc.Tabs(
+            id="main-tabs",
+            value="standard",
+            children=[
+                dcc.Tab(label="Standard Analysis", value="standard"),
+                dcc.Tab(label="Detailed Analysis", value="detailed"),
+            ],
+        ),
+        html.Div(id="tab-content"),
+    ]
+)
 
 @app.callback(
     Output('file-list', 'children'),
@@ -1200,6 +1298,36 @@ def generar_overlay(n_clicks, seleccionados, plots_data):
         legend=dict(orientation='h', y=-0.25)
     )
     return merged_fig
+
+
+@app.callback(
+    Output('tab-content', 'children'),
+    Input('main-tabs', 'value')
+)
+def render_tabs(tab):
+    if tab == 'detailed':
+        return build_detailed_tab()
+    return build_standard_tab()
+
+
+@app.callback(
+    Output('detailed-variable-dropdown', 'options'),
+    Input('variable-dropdown', 'options')
+)
+def sync_variables(options):
+    return options or []
+
+
+@app.callback(
+    Output('detailed-graph', 'figure'),
+    Input('detailed-variable-dropdown', 'value'),
+    State('processed-files-store', 'data'),
+    prevent_initial_call=True
+)
+def plot_detailed(variable, processed_files):
+    if not variable or not processed_files:
+        raise PreventUpdate
+    return matrix_detailed_analysis_plotly(processed_files, variable)
 
 def open_browser():
     webbrowser.open_new("http://127.0.0.1:8050/")

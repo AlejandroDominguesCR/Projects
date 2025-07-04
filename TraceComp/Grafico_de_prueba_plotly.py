@@ -1,9 +1,36 @@
 # This is a Plotly version of the original Matplotlib-based Grafico_de_prueba.py
 import numpy as np
 import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 import json
 import os
 import sys
+
+
+CHASSIS_COLOR_MAP = {
+    '006': '#FF0000',  # rojo
+    '018': "#FFCC00",  # amarillo claro
+    '080': '#000000',  #negro
+    '057': "#FF00C8",  # lila claro
+    '099': '#7FD27F',  # verde claro
+    '159': '#7FA6FF',  # azul claro
+}
+
+FALLBACK_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c',
+                   '#d62728', '#9467bd', '#8c564b']
+
+def pick_color(file_name: str, idx: int) -> str:
+    """
+    Devuelve el color fijo si el nombre de archivo contiene un nº de chasis
+    conocido; en caso contrario usa la paleta de respaldo.
+    """
+    base = os.path.basename(file_name)
+    # Busca la sub-cadena '_XXX' dentro del nombre (Campos_006, Campos_159, …)
+    for chassis, col in CHASSIS_COLOR_MAP.items():
+        if f'_{chassis}' in base:
+            return col
+    # Si no coincide, color de respaldo (cíclico)
+    return FALLBACK_COLORS[idx % len(FALLBACK_COLORS)]
 
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
@@ -31,6 +58,117 @@ def get_threshold(config, percent_key, abs_key, reference, mode):
     else:
         return None
 
+
+def extraer_stats_12pts(data, variable_y):
+    """Compute mean and std for the 9 phase labels using WinTAX logic."""
+    config_path = resource_path('config_conditions.json')
+    with open(config_path, 'r') as f:
+        config_all = json.load(f)
+    mode = config_all.get('mode', 'percentage')
+    config = config_all['absolute_conditions'] if mode == 'absolute' else config_all['percentage_conditions']
+
+    def _num_list(values, scale=1.0):
+        return [float(v) * scale if es_numero(v) else np.nan for v in values]
+
+    if 'CarSpeed' in data['Datos']:
+        vel = _num_list(data['Datos']['CarSpeed'])
+        ax_vals = _num_list(data['Datos']['Ax'])
+        brake = _num_list(data['Datos']['Brake_Press'])
+        throttle = _num_list(data['Datos'].get('Throttle', [np.nan]*len(vel)))
+    else:
+        vel = _num_list(data['Datos']['vCar'], 3.6)
+        ax_vals = _num_list(data['Datos']['gLong'])
+        brake = _num_list(data['Datos']['Brake_Total'])
+        throttle = _num_list(data['Datos'].get('rThrottlePedal', [np.nan]*len(vel)))
+
+    y = _num_list(data['Datos'][variable_y])
+
+    min_decel = min([v for v in ax_vals if not np.isnan(v) and v < 0], default=None)
+    max_brake = max([v for v in brake if not np.isnan(v)], default=None)
+    max_vel = max([v for v in vel if not np.isnan(v)], default=None)
+
+    stats = {}
+
+    # Helper to compute mean/std
+    def _mean_std(indices, label, pos):
+        valores = [y[i] for i in indices if i < len(y) and not np.isnan(y[i])]
+        if valores:
+            stats[label] = (float(np.mean(valores)), float(np.std(valores)))
+        else:
+            stats[label] = (None, None)
+
+    # Early Entry LS
+    speed_low = get_threshold(config["early_entry_ls"], "speed_lower_percent", "speed_lower", max_vel, mode)
+    speed_high = get_threshold(config["early_entry_ls"], "speed_upper_percent", "speed_upper", max_vel, mode)
+    brake_low = get_threshold(config["early_entry_ls"], "brake_lower_percent", "brake_lower", max_brake, mode)
+    brake_high = get_threshold(config["early_entry_ls"], "brake_upper_percent", "brake_upper", max_brake, mode)
+    ax_low = get_threshold(config["early_entry_ls"], "ax_lower_percent", "ax_lower", abs(min_decel) if min_decel is not None else None, mode)
+    ax_high = get_threshold(config["early_entry_ls"], "ax_upper_percent", "ax_upper", abs(min_decel) if min_decel is not None else None, mode)
+    if None not in (speed_low, speed_high, brake_low, brake_high, ax_low, ax_high):
+        idx_ls = [i for i in range(len(vel)) if not np.isnan(vel[i]) and speed_low <= vel[i] <= speed_high and not np.isnan(brake[i]) and brake_low <= brake[i] <= brake_high and not np.isnan(ax_vals[i]) and -ax_high <= ax_vals[i] <= -ax_low]
+    else:
+        idx_ls = []
+    _mean_std(idx_ls, 'early_ls', None)
+
+    # Mid Corner LS
+    throttle_thresh = get_threshold(config["mid_corner_ls"], "throttle_threshold_percent", "throttle_threshold", max(throttle) if throttle else 1, mode)
+    try:
+        from app_dash import get_default_conditions
+        defaults = get_default_conditions()
+        default_throttle_thresh = defaults["percentage_conditions"]["mid_corner_ls"]["throttle_threshold"]
+    except Exception:
+        default_throttle_thresh = 0.05
+    if throttle_thresh is None:
+        throttle_thresh = default_throttle_thresh
+    idx_mid_ls = [i for i in range(len(throttle)) if throttle[i] is not None and not np.isnan(throttle[i]) and abs(throttle[i]) < throttle_thresh]
+    _mean_std(idx_mid_ls, 'mid_ls', None)
+
+    # Exit LS
+    throttle_diff = np.diff(throttle)
+    idx_exit_ls = [i + 1 for i, d in enumerate(throttle_diff) if not np.isnan(d) and d > 0.05]
+    _mean_std(idx_exit_ls, 'exit_ls', None)
+
+    # Early Entry MS
+    speed_low = get_threshold(config["early_entry_ms"], "speed_lower_percent", "speed_lower", max_vel, mode)
+    speed_high = get_threshold(config["early_entry_ms"], "speed_upper_percent", "speed_upper", max_vel, mode)
+    brake_low = get_threshold(config["early_entry_ms"], "brake_lower_percent", "brake_lower", max_brake, mode)
+    brake_high = get_threshold(config["early_entry_ms"], "brake_upper_percent", "brake_upper", max_brake, mode)
+    idx_early_ms = [i for i in range(len(vel)) if not np.isnan(vel[i]) and speed_low <= vel[i] <= speed_high and not np.isnan(brake[i]) and brake_low <= brake[i] <= brake_high]
+    _mean_std(idx_early_ms, 'early_ms', None)
+
+    # Mid Corner MS
+    throttle_lower = get_threshold(config["mid_corner_ms"], "throttle_lower_percent", "throttle_lower", max(throttle) if throttle else 1, mode)
+    throttle_upper = get_threshold(config["mid_corner_ms"], "throttle_upper_percent", "throttle_upper", max(throttle) if throttle else 1, mode)
+    idx_mid_ms = [i for i in range(len(throttle)) if throttle[i] is not None and not np.isnan(throttle[i]) and throttle_lower <= throttle[i] <= throttle_upper]
+    _mean_std(idx_mid_ms, 'mid_ms', None)
+
+    # Exit MS
+    throttle_diff = np.diff(throttle)
+    idx_exit_ms = [i + 1 for i, d in enumerate(throttle_diff) if not np.isnan(d) and d > 0.05]
+    _mean_std(idx_exit_ms, 'exit_ms', None)
+
+    # Early Entry HS
+    speed_low = get_threshold(config["early_entry_hs"], "speed_lower_percent", "speed_lower", max_vel, mode)
+    speed_high = get_threshold(config["early_entry_hs"], "speed_upper_percent", "speed_upper", max_vel, mode)
+    brake_upper = get_threshold(config["early_entry_hs"], "brake_upper_percent", "brake_upper", max_brake, mode)
+    throttle_low = get_threshold(config["early_entry_hs"], "throttle_lower_percent", "throttle_lower", max(throttle) if throttle else 1, mode)
+    throttle_high = get_threshold(config["early_entry_hs"], "throttle_upper_percent", "throttle_upper", max(throttle) if throttle else 1, mode)
+    idx_early_hs = [i for i in range(len(vel)) if not np.isnan(vel[i]) and speed_low <= vel[i] <= speed_high and not np.isnan(brake[i]) and brake[i] <= brake_upper and not np.isnan(throttle[i]) and throttle_low <= throttle[i] <= throttle_high]
+    _mean_std(idx_early_hs, 'early_hs', None)
+
+    # Mid Corner HS
+    throttle_lower = get_threshold(config["mid_corner_hs"], "throttle_lower_percent", "throttle_lower", max(throttle) if throttle else 1, mode)
+    throttle_upper = get_threshold(config["mid_corner_hs"], "throttle_upper_percent", "throttle_upper", max(throttle) if throttle else 1, mode)
+    idx_mid_hs = [i for i in range(len(throttle)) if throttle[i] is not None and not np.isnan(throttle[i]) and throttle_lower <= throttle[i] <= throttle_upper]
+    _mean_std(idx_mid_hs, 'mid_hs', None)
+
+    # Exit HS
+    throttle_diff_hs = np.diff(throttle)
+    idx_exit_hs = [i + 1 for i, d in enumerate(throttle_diff_hs) if not np.isnan(d) and d < -0.05]
+    _mean_std(idx_exit_hs, 'exit_hs', None)
+
+    return stats
+
 def main_multiple_archivos_plotly(archivos_json, variable_y):
     import json
     # Load config
@@ -47,10 +185,11 @@ def main_multiple_archivos_plotly(archivos_json, variable_y):
         config["straight_line_points"] = {"v60": 0.6, "v75": 0.75, "vEOS": 1.0, "tol": 0.02}
 
     fig = go.Figure()
-    if not archivos_json or len(archivos_json) > 4:
-        print("Debe proporcionar entre 1 y 4 archivos.")
+    if not archivos_json or len(archivos_json) > 6:
+        print("Debe proporcionar entre 1 y 6 archivos.")
         return go.Figure()
-    colores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+    colores = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+            '#9467bd', '#8c564b']
     posiciones = {
         'v60': 5, 'v75': 12, 'vEOS': 20,
         'early_ls': 32, 'mid_ls': 40, 'exit_ls': 48,
@@ -59,8 +198,8 @@ def main_multiple_archivos_plotly(archivos_json, variable_y):
     }
     for idx, archivo in enumerate(archivos_json):
         data = cargar_datos_json(archivo)
-        color = colores[idx % len(colores)]
         nombre = os.path.basename(archivo)
+        color = pick_color(nombre, idx)
         puntos_x = []
         puntos_y = []
         puntos_std = []
@@ -400,8 +539,8 @@ def main_comparacion_plotly(archivos_json_wintax, archivos_json_canopy, variable
     # Plot WinTAX files
     for idx, archivo in enumerate(archivos_json_wintax):
         data = cargar_datos_json(archivo)
-        color = colores[idx % len(colores)]
         nombre = os.path.basename(archivo) + ' (WinTAX)'
+        color = pick_color(nombre, idx)
         puntos_x = []
         puntos_y = []
         puntos_std = []
@@ -966,6 +1105,47 @@ def main_comparacion_plotly(archivos_json_wintax, archivos_json_canopy, variable
     )
     return fig
 
+def matrix_detailed_analysis_plotly(archivos_json, variable_y):
+    """Return a 3x3 matrix of subplots summarising Entry/Mid/Exit across speeds."""
+    titles = [
+        "Entry HS", "Mid HS", "Exit HS",
+        "Entry MS", "Mid MS", "Exit MS",
+        "Entry LS", "Mid LS", "Exit LS",
+    ]
+    fig = make_subplots(rows=3, cols=3, subplot_titles=titles)
+
+    mapping = {
+        'early_hs': (1, 1), 'mid_hs': (1, 2), 'exit_hs': (1, 3),
+        'early_ms': (2, 1), 'mid_ms': (2, 2), 'exit_ms': (2, 3),
+        'early_ls': (3, 1), 'mid_ls': (3, 2), 'exit_ls': (3, 3),
+    }
+
+    for idx, archivo in enumerate(archivos_json):
+        data = cargar_datos_json(archivo)
+        color = pick_color(None, idx)
+        stats = extraer_stats_12pts(data, variable_y)
+        name = os.path.basename(archivo)
+        for label, (mean, std) in stats.items():
+            if label not in mapping or mean is None:
+                continue
+            r, c = mapping[label]
+            fig.add_trace(
+                go.Scatter(
+                    x=[name],
+                    y=[mean],
+                    mode='markers',
+                    marker=dict(color=color, size=10),
+                    error_y=dict(type='data', array=[std], visible=True),
+                    name=name,
+                    showlegend=(r == 1 and c == 1),
+                ),
+                row=r,
+                col=c,
+            )
+
+    fig.update_layout(height=800, width=900, title=f"{variable_y} Detailed Analysis")
+    return fig
+
 def plot_dual_axis(wintax_jsons, canopy_jsons, y1, y2=None, y1_canopy=None, y2_canopy=None):
     fig = go.Figure()
 
@@ -1028,3 +1208,4 @@ def plot_dual_axis(wintax_jsons, canopy_jsons, y1, y2=None, y1_canopy=None, y2_c
     )
 
     return fig
+
