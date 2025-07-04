@@ -40,11 +40,35 @@ from KPI_builder import (
 
 
 # --- añade debajo de los imports ---
-def make_gap_table(df_tbl, driver):
+def make_gap_table(df_tbl, driver, include_sector_gaps=False):
     """Devuelve un Div con título + DataTable coloreado según GapAhead."""
     df_tbl = df_tbl.copy()
-    if "LapTime" in df_tbl.columns:
-        df_tbl["LapTime"] = df_tbl["LapTime"].apply(seconds_to_mmss)
+
+    time_cols = [c for c in df_tbl.columns if c.startswith("Sector") or c == "LapTime"]
+    for col in time_cols:
+        df_tbl[col] = df_tbl[col].apply(seconds_to_mmss)
+
+    gap_cols = ["GapAhead"]
+    if include_sector_gaps:
+        gap_cols += [c for c in ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"] if c in df_tbl.columns]
+
+    style_cond = []
+    for col in gap_cols:
+        style_cond.extend([
+            {
+                "if": {"filter_query": f"{{{col}}} <= 1", "column_id": col},
+                "backgroundColor": "rgb(255, 102, 102)",
+                "color": "white",
+            },
+            {
+                "if": {"filter_query": f"{{{col}}} > 1 && {{{col}}} < 3", "column_id": col},
+                "backgroundColor": "rgb(255, 178, 102)",
+            },
+            {
+                "if": {"filter_query": f"{{{col}}} >= 3 && {{{col}}} <= 5", "column_id": col},
+                "backgroundColor": "rgb(102, 178, 255)",
+            },
+        ])
 
     return html.Div(
         children=[
@@ -52,26 +76,8 @@ def make_gap_table(df_tbl, driver):
             dash_table.DataTable(
                 data=df_tbl.to_dict("records"),
                 columns=[{"name": c, "id": c} for c in df_tbl.columns],
-                sort_action="native", 
-                style_data_conditional=[
-                    # 0-1 s  → rojo   | 1-3 s → naranja | 3-5 s  → azul
-                    {
-                        "if": {"filter_query": "{GapAhead} <= 1",
-                               "column_id": "GapAhead"},
-                        "backgroundColor": "rgb(255, 102, 102)",
-                        "color": "white",
-                    },
-                    {
-                        "if": {"filter_query": "{GapAhead} > 1 && {GapAhead} < 3",
-                               "column_id": "GapAhead"},
-                        "backgroundColor": "rgb(255, 178, 102)",
-                    },
-                    {
-                        "if": {"filter_query": "{GapAhead} >= 3 && {GapAhead} <= 5",
-                               "column_id": "GapAhead"},
-                        "backgroundColor": "rgb(102, 178, 255)",
-                    },
-                ],
+                sort_action="native",
+                style_data_conditional=style_cond,
                 style_cell={"textAlign": "center"},
                 style_header={"fontWeight": "bold"},
             ),
@@ -123,9 +129,10 @@ def build_figures(
     weather_df,
     tracklimits_df,
     teams=None,
-    *,                          
-    filter_fast=True,          
+    *,
+    filter_fast=True,
     include_sectors=True,
+    include_sector_gaps=False,
 ):
     """Compute a minimal set of KPI figures and a lap table.
 
@@ -153,6 +160,7 @@ def build_figures(
         teams=teams,
         filter_fast=filter_fast,
         include_sectors=include_sectors,
+        include_sector_gaps=include_sector_gaps,
     )
     # Top Speeds for each driver & generar colores por piloto
     ts = compute_top_speeds(df_analysis)
@@ -529,15 +537,13 @@ def export_report(
                 if rows.empty:
                     continue
                 df_tbl = pd.DataFrame(rows)
-                format_map = {
-                    col: seconds_to_mmss
-                    for col in ["LapTime", "Sector1", "Sector2", "Sector3"]
-                    if col in df_tbl.columns
-                }
+                time_cols = [c for c in ["LapTime", "Sector1", "Sector2", "Sector3"] if c in df_tbl.columns]
+                format_map = {c: seconds_to_mmss for c in time_cols}
+                gap_cols = [c for c in ["GapAhead", "GapAhead_S1", "GapAhead_S2", "GapAhead_S3"] if c in df_tbl.columns]
                 styler = (
                     df_tbl.style
                     .format(format_map, na_rep="")
-                    .applymap(_gap_color, subset=["GapAhead"])
+                    .applymap(_gap_color, subset=gap_cols)
                     .set_table_attributes(
                         "border='1' cellspacing='0' cellpadding='3' "
                         "style='text-align:center; font-family:Arial; font-size:13px'"
@@ -593,6 +599,9 @@ app.layout = html.Div(
         dcc.Checklist(id="sector-toggle",
                   options=[{"label": "Mostrar sectores", "value": "SECT"}],
                   value=[], style={"marginBottom": "10px"}),
+        dcc.Checklist(id="gap-toggle",
+                  options=[{"label": "Mostrar gap sectores", "value": "GAP"}],
+                  value=[], style={"marginBottom": "10px"}),
         html.Hr(),
         html.Div(id="graphs-container"),
     ]
@@ -625,10 +634,11 @@ def on_browse(n_clicks):
     State("folder-input", "value"),
     Input("lap-filter-toggle", "value"),
     Input("sector-toggle", "value"),
-    Input("driver-filter", "value"),      
+    Input("gap-toggle", "value"),
+    Input("driver-filter", "value"),
 )
 
-def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, drivers):
+def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers):
     if not n_clicks or not folder or not os.path.isdir(folder):
         raise PreventUpdate
     df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
@@ -648,14 +658,17 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, drivers):
     df_analysis = df_analysis[df_analysis["team"].isin(teams)]
 
     filter_fast   = "ALL" not in (lap_toggle or [])
-    include_sects = "SECT" in (sec_toggle or [])   
+    include_sects = "SECT" in (sec_toggle or [])
+    show_gap      = "GAP" in (gap_toggle or [])
     figs, driver_tables = build_figures(
         df_analysis, df_class, weather_df, tracklimits_df, teams,
-        filter_fast=filter_fast, include_sectors=include_sects 
+        filter_fast=filter_fast,
+        include_sectors=include_sects,
+        include_sector_gaps=show_gap,
     )
 
     table_divs = [
-        make_gap_table(tbl, drv) for drv, tbl in driver_tables.items()
+        make_gap_table(tbl, drv, include_sector_gaps=show_gap) for drv, tbl in driver_tables.items()
     ]
 
     graphs = [html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})]

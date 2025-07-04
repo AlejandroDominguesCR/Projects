@@ -15,7 +15,8 @@ from data_process import load_session_data, unify_timestamps, convert_time_colum
 from KPI_builder import (
     compute_top_speeds, track_limit_rate, team_ranking,
     ideal_lap_gap, best_sector_times, lap_time_history,
-    slipstream_stats, pit_stop_summary, lap_time_consistency,
+    slipstream_stats, sector_slipstream_stats,
+    pit_stop_summary, lap_time_consistency,
     build_driver_tables,
 )
 
@@ -106,6 +107,8 @@ class MainWindow(QMainWindow):
         figs: dict[str, go.Figure] = {}
 
         ss = slipstream_stats(df_analysis)
+        ss_sector = sector_slipstream_stats(df_analysis)
+
         if not ss.empty:
             # Lap-time mínimo
             ss_lap = ss.sort_values("min_lap_time_with_slip")
@@ -136,11 +139,48 @@ class MainWindow(QMainWindow):
             )
 
             figs["Slipstream Lap-time (min)"]  = fig_slip_lap
-            figs["Slipstream TopSpeed (max)"] = fig_slip_speed  
-                
+            figs["Slipstream TopSpeed (max)"] = fig_slip_speed
 
+        if not ss_sector.empty:
+            s1 = ss_sector.sort_values("min_s1_with_slip")
+            order_s1 = s1["driver"].tolist()
+            fig_s1 = px.bar(
+                s1,
+                x="driver",
+                y=["min_s1_no_slip", "min_s1_with_slip"],
+                barmode="group",
+                title="Slipstream Lap-time S1",
+            )
+            first_val = s1.iloc[0][["min_s1_no_slip", "min_s1_with_slip"]].min()
+            last_val = s1.iloc[-1][["min_s1_no_slip", "min_s1_with_slip"]].max()
+            fig_s1.update_layout(
+                xaxis={"categoryorder": "array", "categoryarray": order_s1},
+                yaxis={"range": [first_val * 0.90, last_val * 1.05]},
+            )
+
+            s2 = ss_sector.sort_values("min_s2_with_slip")
+            order_s2 = s2["driver"].tolist()
+            fig_s2 = px.bar(
+                s2,
+                x="driver",
+                y=["min_s2_no_slip", "min_s2_with_slip"],
+                barmode="group",
+                title="Slipstream Lap-time S2",
+            )
+            first_val = s2.iloc[0][["min_s2_no_slip", "min_s2_with_slip"]].min()
+            last_val = s2.iloc[-1][["min_s2_no_slip", "min_s2_with_slip"]].max()
+            fig_s2.update_layout(
+                xaxis={"categoryorder": "array", "categoryarray": order_s2},
+                yaxis={"range": [first_val * 0.90, last_val * 1.05]},
+            )
+
+            figs["Slipstream Lap-time S1"] = fig_s1
+            figs["Slipstream Lap-time S2"] = fig_s2
+
+
+        if not ss.empty or not ss_sector.empty:
             df_tmp = df_analysis.copy()
-            df_tmp['slipstream'] = False     
+            df_tmp['slipstream'] = False
 
         # --- función auxiliar rápida para marcar las vueltas --------------------
         def _flag_slip(df):
