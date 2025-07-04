@@ -358,6 +358,7 @@ app.layout = html.Div([
     ])
 ])
 
+
 @app.callback(
     Output('file-list', 'children'),
     Output('file-type-selectors', 'children'),

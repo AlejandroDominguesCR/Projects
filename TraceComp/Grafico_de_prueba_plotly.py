@@ -1108,19 +1108,19 @@ def main_comparacion_plotly(archivos_json_wintax, archivos_json_canopy, variable
 def matrix_detailed_analysis_plotly(archivos_json, variable_y):
     """Return a 3×3 matrix plot comparing setups without straight-line points."""
 
-    filas = ['High speed', 'Medium speed', 'Low speed']
+    filas = ['Low speed', 'Medium speed', 'High speed']
     columnas = ['Entry', 'Mid', 'Exit']
     label_map = {
-        (0, 0): 'early_hs', (0, 1): 'mid_hs', (0, 2): 'exit_hs',
+        (0, 0): 'early_ls', (0, 1): 'mid_ls', (0, 2): 'exit_ls',
         (1, 0): 'early_ms', (1, 1): 'mid_ms', (1, 2): 'exit_ms',
-        (2, 0): 'early_ls', (2, 1): 'mid_ls', (2, 2): 'exit_ls',
+        (2, 0): 'early_hs', (2, 1): 'mid_hs', (2, 2): 'exit_hs',
     }
 
     fig = make_subplots(
         rows=3,
         cols=3,
         shared_xaxes=False,
-        shared_yaxes=True,
+        shared_yaxes=False,
         horizontal_spacing=0.04,
         vertical_spacing=0.07,
         subplot_titles=[f"{r} – {c}" for r in filas for c in columnas],
@@ -1159,6 +1159,8 @@ def matrix_detailed_analysis_plotly(archivos_json, variable_y):
         legend_title="Setup / Archivo",
     )
     return fig
+
+
 
 def plot_dual_axis(wintax_jsons, canopy_jsons, y1, y2=None, y1_canopy=None, y2_canopy=None):
     fig = go.Figure()
