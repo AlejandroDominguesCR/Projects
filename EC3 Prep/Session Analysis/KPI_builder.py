@@ -529,18 +529,28 @@ def extract_session_summary(df_analysis: pd.DataFrame,
 
 def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Devuelve los KPIs de rebufo por **piloto** (driver).
+    KPIs de rebufo por piloto (driver).
+
+    Una vuelta cuenta como 'con rebufo' si:
+      ▸ En su propio paso de meta el coche llega ≤ 2.5 s detrás de otro coche
+        (y ambos iban en vuelta rápida).
+      ▸ O bien la vuelta anterior cumplía ese criterio
+        → propagamos el efecto de rebufo al inicio de la vuelta actual.
+
     Requiere columnas:
-        number, driver, lap_time, top_speed, hour [, team]
+        number, driver, lap_number, lap_time, top_speed, hour [, team]
     """
-    required = {"number", "driver", "lap_time", "top_speed", "hour"}
+    required = {
+        "number", "driver", "lap_number",
+        "lap_time", "top_speed", "hour"
+    }
     if not required.issubset(df.columns):
         return pd.DataFrame()
 
     extra = ["team"] if "team" in df.columns else []
     data = df[list(required | set(extra))].copy()
 
-    # ── parseos y flag de rebufo (igual que antes) ─────────────────────────
+    # ─── Formatos ──────────────────────────────────────────────────────────
     if not pd.api.types.is_numeric_dtype(data["lap_time"]):
         data["lap_time"] = data["lap_time"].apply(parse_time_to_seconds)
 
@@ -549,39 +559,56 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     )
     data = data.sort_values("timestamp").reset_index(drop=True)
 
+    # ─── Bandera de vuelta rápida / Δt con el coche anterior ───────────────
     best_lap = data.groupby("driver")["lap_time"].transform("min")
-    data["fast"] = data["lap_time"] <= 1.10 * best_lap          # ≤ 110 %
+    data["fast"] = data["lap_time"] <= 1.10 * best_lap        # ≤ 110 %
 
     median_speed = data["top_speed"].median()
 
-    prev_drv   = data["driver"].shift()
-    prev_fast  = data["fast"].shift()
-    delta_t    = (data["timestamp"] - data["timestamp"].shift()).dt.total_seconds()
+    prev_drv  = data["driver"].shift()
+    prev_fast = data["fast"].shift()
+    delta_t   = (data["timestamp"] - data["timestamp"].shift()).dt.total_seconds()
 
-    data["slipstream"] = (
+    data["slip_flag"] = (
         data["fast"] & prev_fast
         & (prev_drv != data["driver"])
         & delta_t.between(0.4, 2.5)
         & (data["top_speed"] >= median_speed + 6)
     )
 
-    # ── KPIs agregados ─────────────────────────────────────────────────────
+    # ─── Propaga rebufo a la vuelta siguiente del mismo piloto ─────────────
+    data = data.sort_values(["driver", "lap_number"]).reset_index(drop=True)
+    data["slip_prev"] = data.groupby("driver")["slip_flag"].shift(fill_value=False)
+    data["slipstream"] = data["slip_flag"] | data["slip_prev"]
+
+    # ─── KPIs agregados ────────────────────────────────────────────────────
     stats = (
         data
-        .groupby(["driver"])
+        .groupby("driver")
         .apply(lambda g: pd.Series({
-            "avg_lap_time_with_slip":  g.loc[g["slipstream"], "lap_time"].mean(),
-            "avg_lap_time_no_slip":   g.loc[~g["slipstream"], "lap_time"].mean(),
-            "avg_top_speed_with_slip":g.loc[g["slipstream"], "top_speed"].mean(),
-            "avg_top_speed_no_slip":  g.loc[~g["slipstream"], "top_speed"].mean(),
-            "slip_laps":              g["slipstream"].sum(),
-            "total_laps":             len(g),
+            # promedios
+            "avg_lap_time_with_slip":   g.loc[g["slipstream"], "lap_time"].mean(),
+            "avg_lap_time_no_slip":    g.loc[~g["slipstream"], "lap_time"].mean(),
+            "avg_top_speed_with_slip": g.loc[g["slipstream"], "top_speed"].mean(),
+            "avg_top_speed_no_slip":   g.loc[~g["slipstream"], "top_speed"].mean(),
+            # extremos
+            "min_lap_time_with_slip":  g.loc[g["slipstream"], "lap_time"].min(),
+            "min_lap_time_no_slip":    g.loc[~g["slipstream"], "lap_time"].min(),
+            "max_top_speed_with_slip": g.loc[g["slipstream"], "top_speed"].max(),
+            "max_top_speed_no_slip":   g.loc[~g["slipstream"], "top_speed"].max(),
+            # conteo
+            "slip_laps":               g["slipstream"].sum(),
+            "total_laps":              len(g),
         }))
         .reset_index()
     )
     stats["slip_pct"] = stats["slip_laps"] / stats["total_laps"] * 100
-    # añade el equipo si existe
+
+    # añade team si existe
     if "team" in data.columns:
-        stats = stats.merge(data[["driver", "team"]].drop_duplicates("driver"),
-                            on="driver", how="left")
+        stats = stats.merge(
+            data[["driver", "team"]].drop_duplicates("driver"),
+            on="driver", how="left"
+        )
+
     return stats

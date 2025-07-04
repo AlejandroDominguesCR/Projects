@@ -100,31 +100,42 @@ class MainWindow(QMainWindow):
         # Diccionario de figuras para el reporte
         figs: dict[str, go.Figure] = {}
 
-        ss_df = slipstream_stats(df_analysis)
-        if not ss_df.empty:
-            ss_df = ss_df.sort_values("avg_lap_time_with_slip")
-
+        ss = slipstream_stats(df_analysis)
+        if not ss.empty:
+            # Lap-time mínimo
+            ss_lap = ss.sort_values("min_lap_time_with_slip")
+            order_lap = ss_lap["driver"].tolist()
             fig_slip_lap = px.bar(
-                ss_df,
-                x="driver",                       #  ← antes ponía "number"
-                y=["avg_lap_time_no_slip", "avg_lap_time_with_slip"],
+                ss_lap,
+                x="driver",
+                y=["min_lap_time_no_slip", "min_lap_time_with_slip"],
                 barmode="group",
-                title="Lap-time medio – Con vs Sin rebufo",
+                title="Lap-time mínimo – Con vs Sin rebufo",
             )
-            figs["Slipstream Lap-time"] = fig
+            fig_slip_lap.update_layout(
+                xaxis={"categoryorder": "array", "categoryarray": order_lap}
+            )
 
+            # Top-speed máximo
+            ss_spd = ss.sort_values("max_top_speed_with_slip", ascending=False)
+            order_spd = ss_spd["driver"].tolist()
             fig_slip_speed = px.bar(
-                ss_df,
-                x="driver",                       #  ← idem
-                y=["avg_top_speed_no_slip", "avg_top_speed_with_slip"],
+                ss_spd,
+                x="driver",
+                y=["max_top_speed_no_slip", "max_top_speed_with_slip"],
                 barmode="group",
-                title="Top-speed medio – Con vs Sin rebufo",
+                title="Top Speed máxima – Con vs Sin rebufo",
             )
-            figs["Slipstream TopSpeed"] = fig
-        
-            df_tmp = df_analysis.copy()
+            fig_slip_speed.update_layout(
+                xaxis={"categoryorder": "array", "categoryarray": order_spd}
+            )
 
-        df_tmp['slipstream'] = False     
+            figs["Slipstream Lap-time (min)"]  = fig_slip_lap
+            figs["Slipstream TopSpeed (max)"] = fig_slip_speed  
+                
+
+            df_tmp = df_analysis.copy()
+            df_tmp['slipstream'] = False     
 
         # --- función auxiliar rápida para marcar las vueltas --------------------
         def _flag_slip(df):
@@ -143,14 +154,8 @@ class MainWindow(QMainWindow):
             return df
 
         df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
-        
-        df_tmp = df_analysis.copy()
-        df_tmp['slipstream'] = False
 
-        # … (define la función _flag_slip y agrupa por driver)
-        df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
-
-        # ① agrupa y saca la punta máxima con y sin rebufo
+ 
         ts_split = (
             df_tmp
             .groupby(["driver", "slipstream"])["top_speed"]

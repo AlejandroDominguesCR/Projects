@@ -99,56 +99,89 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
         else:
             team_colors[team] = f'#{random.randint(0, 0xFFFFFF):06x}'
 
-    ss = slipstream_stats(df_analysis)
-    if not ss.empty:
-        # ordenamos por la vuelta media con rebufo (ascendente)
-        ss = ss.sort_values("avg_lap_time_with_slip")
+        ss = slipstream_stats(df_analysis)
 
-        fig_slip_lap = px.bar(
-            ss,
-            x="driver",                       #  ← antes ponía "number"
-            y=["avg_lap_time_no_slip", "avg_lap_time_with_slip"],
-            barmode="group",
-            title="Lap-time medio – Con vs Sin rebufo",
-        )
-        figs["Slipstream Lap-time"] = fig
+        if not ss.empty:
+            
+            ss_lap = ss.sort_values("min_lap_time_with_slip", ascending=True)          
+            order_lap = ss_lap["driver"].tolist()                                      
+            fig_slip_lap = px.bar(
+                ss_lap,
+                x="driver",
+                y=["min_lap_time_no_slip", "min_lap_time_with_slip"],
+                barmode="group",
+                title="Lap-time mínimo – Con vs Sin rebufo",
+            )
+            fig_slip_lap.update_layout(                                                
+                xaxis={"categoryorder": "array", "categoryarray": order_lap}
+            )
 
-        fig_slip_speed = px.bar(
-            ss,
-            x="driver",                       #  ← idem
-            y=["avg_top_speed_no_slip", "avg_top_speed_with_slip"],
-            barmode="group",
-            title="Top-speed medio – Con vs Sin rebufo",
-        )
+            first_val = ss_lap.iloc[0][["min_lap_time_no_slip",
+                                        "min_lap_time_with_slip"]].min()
+            last_val  = ss_lap.iloc[-1][["min_lap_time_no_slip",
+                                        "min_lap_time_with_slip"]].max()
+            y_lower = first_val * 0.99     # –1 %
+            y_upper = last_val  * 1.05      # +5 %
 
-        figs["Lap-time medio – con vs sin rebufo"] = fig_slip_lap
-        figs["Top-speed medio – con vs sin rebufo"] = fig_slip_speed
+            fig_slip_lap.update_layout(
+                xaxis={"categoryorder": "array", "categoryarray": order_lap},
+                yaxis={"range": [y_lower, y_upper], "title": "Tiempo (s)"}
+            )
+            
+            ss_spd = ss.sort_values("max_top_speed_with_slip", ascending=False)        
+            order_spd = ss_spd["driver"].tolist()                                      
+            fig_slip_speed = px.bar(
+                ss_spd,
+                x="driver",
+                y=["max_top_speed_no_slip", "max_top_speed_with_slip"],
+                barmode="group",
+                title="Top Speed máxima – Con vs Sin rebufo",
+            )
+            first_val = ss_spd.iloc[0][["max_top_speed_no_slip",
+                                        "max_top_speed_with_slip"]].max()
+            last_val  = ss_spd.iloc[-1][["max_top_speed_no_slip",
+                                        "max_top_speed_with_slip"]].min()
+            y_lower = last_val  * 0.99     # –1 % del menor (porque aquí es orden desc.)
+            y_upper = first_val * 1.05      # +5 % del mayor
+
+            fig_slip_speed.update_layout(
+                xaxis={"categoryorder": "array", "categoryarray": order_spd},
+                yaxis={"range": [y_lower, y_upper], "title": "Velocidad (km/h)"}
+            )
+
+        figs["Slipstream Lap-time (min)"] = fig_slip_lap
+        figs["Slipstream TopSpeed (max)"] = fig_slip_speed
 
 
     df_tmp = df_analysis.copy()
     df_tmp['slipstream'] = False     
+    
+
 
     # --- función auxiliar rápida para marcar las vueltas --------------------
     def _flag_slip(df):
-        df = df.sort_values("hour")                  # hora string 'HH:MM:SS.mmm'
+        df = df.sort_values("hour")
         best = df["lap_time"].min()
         df["fast"] = df["lap_time"] <= 1.10 * best
+
         delta = pd.to_datetime(df["hour"], format="%H:%M:%S.%f").diff().dt.total_seconds()
         prev_fast = df["fast"].shift()
-        df.loc[
+
+        df["slip_flag"] = (
             df["fast"]
             & prev_fast
             & delta.between(0.4, 2.5)
-            & (df["top_speed"] >= df["top_speed"].median() + 6),
-            "slipstream"
-        ] = True
+            & (df["top_speed"] >= df["top_speed"].median() + 6)
+        )
+
+        # Propaga al lap siguiente
+        df["slipstream"] = (
+            df["slip_flag"]
+            | df.groupby("driver")["slip_flag"].shift(fill_value=False)
+        )
         return df
-    
 
-    df_tmp = df_analysis.copy()
-    df_tmp['slipstream'] = False
 
-    # … (define la función _flag_slip y agrupa por driver)
     df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
 
     # ① agrupa y saca la punta máxima con y sin rebufo
@@ -162,20 +195,6 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
     ts_split["rebufo"] = ts_split["slipstream"].map(
         {True: "Con rebufo", False: "Sin rebufo"}
     )
-
-    fig_ts_split = px.bar(
-        ts_split,
-        x="driver",
-        y="top_speed",
-        color="rebufo",
-        barmode="group",
-        title="Top Speed máxima – Con vs Sin rebufo",
-        color_discrete_map={"Con rebufo": "#FF5555", "Sin rebufo": "#AAAAAA"},
-    )
-
-    figs["Top Speed (rebufo)"] = fig_ts_split
-
-    df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
 
     # Gráfico Top Speeds con colores por piloto
     fig_ts = px.bar(
@@ -379,19 +398,29 @@ def build_figures(df_analysis, df_class, weather_df, tracklimits_df, teams=None)
 
     return figs
 
-def export_report(figs: dict, path: str):
-    """Export all figures to a single HTML file."""
+def export_report(figs: dict, path: str,
+                  table_df: pd.DataFrame | None = None):
+    """
+    Escribe un HTML con una tabla (opcional) al principio y luego las figuras.
+    """
     with open(path, "w", encoding="utf-8") as f:
-        f.write("<html><head>")
-        f.write('<meta charset="utf-8">')
-        f.write('<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>')
-        f.write("<title>Session Report</title></head><body>")
-        for i, (name, fig) in enumerate(figs.items()):
-            f.write(f"<h2>{name}</h2>")
-            f.write(plot(fig, include_plotlyjs=i == 0, output_type="div"))
-            f.write("<hr>")
-        f.write("</body></html>")
+        f.write("<html><head>\n<meta charset='utf-8'>\n")
+        f.write("<script src='https://cdn.plot.ly/plotly-latest.min.js'></script>\n")
+        f.write("<title>Session Report</title></head><body>\n")
 
+        # ① inserta la tabla si existe
+        if table_df is not None and not table_df.empty:
+            f.write("<h2>Resumen de vueltas – Griffincore & Campos</h2>\n")
+            f.write(table_df.to_html(index=False,
+                                     float_format=lambda x: f'{x:.3f}'))
+            f.write("<hr>\n")
+
+        # ② inserta las figuras
+        for i, (name, fig) in enumerate(figs.items()):
+            f.write(f"<h2>{name}</h2>\n")
+            f.write(plot(fig, include_plotlyjs=i == 0, output_type="div"))
+            f.write("<hr>\n")
+        f.write("</body></html>")
 
 app = dash.Dash(__name__)
 
