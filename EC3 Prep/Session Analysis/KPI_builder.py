@@ -731,102 +731,71 @@ def driver_lap_table(df: pd.DataFrame, include_sectors: bool = False) -> pd.Data
 
 def driver_lap_table(
     df: pd.DataFrame,
-    teams: list[str] | None = None,
+    teams: list[str] = ("Griffin Core", "Campos Racing"),
     *,
-    include_sectors: bool = False,
+    include_sectors: bool = True,
 ) -> pd.DataFrame:
-    """Return a classification style table per driver.
+    """Return per-lap data for selected drivers.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Classification dataframe. It must contain at least ``driver`` and
-        ``time`` related columns. ``gap_first`` and ``gap_previous`` are used
-        when available to compute the gaps ahead and behind.
-    teams : list[str], optional
-        Restrict the table to these teams.
-    include_sectors : bool, default ``False``
-        Whether to keep detected sector time columns.
+        Analysis dataframe with at least ``team``, ``driver``, ``lap_number``,
+        ``lap_time``, ``hour`` and ``top_speed`` columns.
+    teams : list[str], default ("Griffin Core", "Campos Racing")
+        Teams to include in the table.
+    include_sectors : bool, default ``True``
+        When ``True`` sector columns are included if present.
 
     Returns
     -------
     pd.DataFrame
-        Table with standardised column names: ``Pos`` (position), ``Driver``,
-        ``Team``, ``Vuelta`` (lap count), ``LapTime`` (total or best lap time),
-        ``GapAhead`` and ``GapBehind``.  Sector columns ``S1``–``S3`` are
-        appended when requested and present in ``df``.
+        Table ordered by timestamp with gaps ahead/behind and top speed.
     """
 
-    data = df.copy()
+    df = df[df.get("team").isin(teams)].copy()
+    if df.empty:
+        return pd.DataFrame()
 
-    # ─── Optional team filter ──────────────────────────────────────────────
-    if teams is not None and "team" in data.columns:
-        data = data[data["team"].isin(teams)]
+    if not pd.api.types.is_numeric_dtype(df["lap_time"]):
+        df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
-    # ─── Column detection ──────────────────────────────────────────────────
-    def _col(*names: str) -> str | None:
-        for n in names:
-            for c in data.columns:
-                if c.strip().lower() == n.lower():
-                    return c
-        return None
+    df["timestamp"] = pd.to_datetime(df["hour"], format="%H:%M:%S.%f", errors="coerce")
+    df = df.sort_values("timestamp").reset_index(drop=True)
 
-    pos_c = _col("pos", "position")
-    num_c = _col("number", "no", "car")
-    drv_c = next(
-        (c for c in data.columns if "driver" in c.lower() and "short" in c.lower()),
-        None,
-    )
-    if drv_c is None:
-        drv_c = next((c for c in data.columns if "driver" in c.lower()), None)
-    team_c = _col("team")
-    lap_c = _col("lap", "laps")
-    time_c = _col("time", "total_time")
-    gap_prev_c = next((c for c in data.columns if "gap_previous" in c.lower()), None)
-    gap_first_c = next((c for c in data.columns if "gap_first" in c.lower()), None)
+    df["gap_ahead"] = df["timestamp"].diff().dt.total_seconds().abs()
+    df["gap_behind"] = df["timestamp"].shift(-1).sub(df["timestamp"]).dt.total_seconds().abs()
 
-    # ─── Compute gaps ──────────────────────────────────────────────────────
-    if gap_prev_c:
-        gaps = data[gap_prev_c].fillna("0").replace("-", "0")
-        gaps = gaps.apply(parse_time_to_seconds)
-    elif gap_first_c:
-        gfirst = data[gap_first_c].fillna("0").replace("-", "0")
-        gfirst = gfirst.apply(parse_time_to_seconds)
-        gaps = gfirst.diff().fillna(0)
-    else:
-        gaps = pd.Series(np.nan, index=data.index)
+    base_cols = [
+        "team",
+        "driver",
+        "lap_number",
+        "lap_time",
+        "gap_ahead",
+        "gap_behind",
+        "top_speed",
+    ]
 
-    data["GapAhead"] = gaps
-    data["GapBehind"] = gaps.shift(-1)
-
-    # ─── Sector columns ────────────────────────────────────────────────────
-    sector_cols: list[str] = []
     if include_sectors:
-        sec_pattern = re.compile(r"^(?:s|sector)[123]", re.IGNORECASE)
-        sector_cols = [c for c in data.columns if sec_pattern.match(c)]
+        sec_cols = [c for c in df.columns if re.match(r"(?i)^sector[123]$", c)]
+        if not sec_cols:
+            sec_cols = [c for c in df.columns if re.match(r"(?i)^s[123]$", c)]
+        for col in sec_cols:
+            if not pd.api.types.is_numeric_dtype(df[col]):
+                df[col] = df[col].apply(parse_time_to_seconds)
+        base_cols = base_cols[:3] + sec_cols + base_cols[3:]
 
-    rename_map: dict[str, str] = {}
-    if pos_c:
-        rename_map[pos_c] = "Pos"
-    if num_c:
-        rename_map[num_c] = "N"
-    if drv_c:
-        rename_map[drv_c] = "Driver"
-    if team_c:
-        rename_map[team_c] = "Team"
-    if lap_c:
-        rename_map[lap_c] = "Vuelta"
-    if time_c:
-        rename_map[time_c] = "LapTime"
-    for col in sector_cols:
-        m = re.match(r"(?:s|sector)([123])", col, re.IGNORECASE)
-        if m:
-            rename_map[col] = f"S{m.group(1)}"
+    tbl = df[base_cols].copy()
+    rename_map = {
+        "lap_number": "Vuelta",
+        "lap_time": "LapTime",
+        "gap_ahead": "Gap_Ahead",
+        "gap_behind": "Gap_Behind",
+        "top_speed": "TopSpeed",
+    }
+    for c in tbl.columns:
+        if c.lower().startswith("sector"):
+            rename_map[c] = c.capitalize()
 
-    data = data.rename(columns=rename_map)
-
-    keep = [c for c in ["Pos", "N", "Driver", "Team", "Vuelta", "LapTime"] if c in data.columns]
-    keep += ["GapAhead", "GapBehind"]
-    keep += [rename_map[c] for c in sector_cols if c in rename_map]
-
-    return data[keep].reset_index(drop=True)
+    tbl = tbl.rename(columns=rename_map)
+    return tbl
