@@ -5,6 +5,8 @@ from scipy.stats import linregress
 from data_process import parse_time_to_seconds
 import warnings
 import re
+from collections import OrderedDict
+
 
 def detect_stints(laps: pd.DataFrame, session: str) -> pd.DataFrame:
     """Detect stints based on lap time behaviour.
@@ -668,67 +670,6 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     return stats
 
-
-def driver_lap_table(df: pd.DataFrame, include_sectors: bool = False) -> pd.DataFrame:
-    """Return a lap-by-lap table per driver.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Analysis dataframe with at least ``driver``, ``lap_time`` and
-        ``lap``/``lap_number`` columns.
-    include_sectors : bool, optional
-        When ``True`` the table includes available sector columns.
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame sorted by driver and lap with columns ``driver``, ``lap`` and
-        ``lap_time`` plus ``sector1``-``sector3`` if requested and available.
-    """
-
-    lap_col = None
-    for col in ["lap", "lap_number"]:
-        if col in df.columns:
-            lap_col = col
-            break
-
-    if lap_col is None or "driver" not in df.columns or "lap_time" not in df.columns:
-        return pd.DataFrame()
-
-    df_tab = df.copy()
-
-    cols = ["driver"]
-    if "team" in df_tab.columns:
-        cols.append("team")
-    cols += [lap_col, "lap_time"]
-
-    if include_sectors:
-        sector_map = {}
-        for src in df_tab.columns:
-            low = src.lower()
-            if low in {"sector1", "sector2", "sector3"}:
-                sector_map[src] = low
-            elif low in {"s1", "s2", "s3"}:
-                sector_map[src] = f"sector{low[1]}"
-            elif low in {"s1_seconds", "s2_seconds", "s3_seconds"}:
-                sector_map[src] = f"sector{low[1]}"
-
-        for orig, std in sector_map.items():
-            if orig != std:
-                df_tab.rename(columns={orig: std}, inplace=True)
-
-        for sec in ["sector1", "sector2", "sector3"]:
-            if sec in df_tab.columns:
-                cols.append(sec)
-
-    df_tab = df_tab[cols].sort_values(["driver", lap_col])
-    if lap_col != "lap":
-        df_tab = df_tab.rename(columns={lap_col: "lap"})
-
-    return df_tab.reset_index(drop=True)
-
-
 def driver_lap_table(
     df: pd.DataFrame,
     teams: list[str] = ("Griffin Core", "Campos Racing"),
@@ -799,3 +740,69 @@ def driver_lap_table(
 
     tbl = tbl.rename(columns=rename_map)
     return tbl
+
+def build_driver_tables(
+    df: pd.DataFrame,
+    teams: None,
+    *,
+    filter_fast: bool = True,         
+    include_sectors: bool = True,
+) -> "OrderedDict[str, pd.DataFrame]":
+    """
+    Devuelve OrderedDict {driver: DataFrame} con vueltas rápidas y “pegadas”.
+
+    Filtros aplicados por piloto:
+      • LapTime ≤ 120 % de su mejor vuelta
+      • GapAhead ≤ 5 s   (descarta aire limpio)
+
+    Columnas finales:
+        Vuelta | LapTime | Sector1 | Sector2 | Sector3 | GapAhead | TopSpeed
+    """
+    # 1) limita equipos
+    df = df[df["team"].isin(teams)].copy()
+    if df.empty:
+        return OrderedDict()
+
+    # 2) tiempos-a-segundos
+    if not pd.api.types.is_numeric_dtype(df["lap_time"]):
+        df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
+
+    # 3) timestamp y GapAhead
+    df["timestamp"] = pd.to_datetime(df["hour"], format="%H:%M:%S.%f", errors="coerce")
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
+
+    # 4) filtra: lap rápida + gap pequeño
+    if filter_fast:
+        best = df.groupby("driver")["lap_time"].transform("min")
+        mask = (df["lap_time"] <= 1.20 * best) & (df["GapAhead"] <= 5)
+        df = df[mask]
+
+    # 5) sectores (si existen)
+    sector_map = {
+        "sector1": "Sector1", "s1": "Sector1",
+        "sector2": "Sector2", "s2": "Sector2",
+        "sector3": "Sector3", "s3": "Sector3",
+    }
+    sec_cols: list[str] = []
+
+    if include_sectors:                    
+        for raw, std in sector_map.items():
+            if raw in df.columns:
+                if not pd.api.types.is_numeric_dtype(df[raw]):
+                    df[std] = df[raw].apply(parse_time_to_seconds)
+                else:
+                    df[std] = df[raw]
+                sec_cols.append(std)
+
+    base_cols = ["lap_number", "lap_time", *sec_cols, "GapAhead", "top_speed"]
+    rename = {"lap_number": "Vuelta", "lap_time": "LapTime", "top_speed": "TopSpeed"}
+
+    tables = OrderedDict()
+    for drv, g in df.groupby("driver"):
+        tables[drv] = (
+            g[base_cols].rename(columns=rename)
+            .sort_values("LapTime", ascending=True)   # ← más rápida → más lenta
+            .reset_index(drop=True)
+        )
+    return tables

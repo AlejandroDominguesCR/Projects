@@ -4,13 +4,16 @@ import dash
 from dash import dcc, html, Input, Output, State
 from dash.exceptions import PreventUpdate
 import plotly.express as px
+from dash import dash_table  
 import plotly.graph_objects as go
 from plotly.offline import plot
 import tkinter as tk
 from tkinter import filedialog
 import webbrowser
 import logging
-import random   
+import random 
+from collections import OrderedDict
+
 logging.basicConfig(level=logging.INFO)
 
 from data_process import (
@@ -30,8 +33,46 @@ from KPI_builder import (
     lap_time_consistency,
     extract_session_summary,
     slipstream_stats,
-    driver_lap_table,
+    build_driver_tables,
 )
+
+
+# --- añade debajo de los imports ---
+def make_gap_table(df_tbl, driver):
+    """Devuelve un Div con título + DataTable coloreado según GapAhead."""
+    return html.Div(
+        children=[
+            html.H4(driver),
+            dash_table.DataTable(
+                data=df_tbl.to_dict("records"),
+                columns=[{"name": c, "id": c} for c in df_tbl.columns],
+                sort_action="native", 
+                style_data_conditional=[
+                    # 0-1 s  → rojo   | 1-3 s → naranja | 3-5 s  → azul
+                    {
+                        "if": {"filter_query": "{GapAhead} <= 1",
+                               "column_id": "GapAhead"},
+                        "backgroundColor": "rgb(255, 102, 102)",
+                        "color": "white",
+                    },
+                    {
+                        "if": {"filter_query": "{GapAhead} > 1 && {GapAhead} < 3",
+                               "column_id": "GapAhead"},
+                        "backgroundColor": "rgb(255, 178, 102)",
+                    },
+                    {
+                        "if": {"filter_query": "{GapAhead} >= 3 && {GapAhead} <= 5",
+                               "column_id": "GapAhead"},
+                        "backgroundColor": "rgb(102, 178, 255)",
+                    },
+                ],
+                style_cell={"textAlign": "center"},
+                style_header={"fontWeight": "bold"},
+            ),
+        ],
+        style={"flex": "1 0 30%", "padding": "5px"},
+    )
+
 
 def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load and preprocess session CSV files."""
@@ -76,6 +117,9 @@ def build_figures(
     weather_df,
     tracklimits_df,
     teams=None,
+    *,                          
+    filter_fast=True,          
+    include_sectors=True,
 ):
     """Compute a minimal set of KPI figures and a lap table.
 
@@ -91,19 +135,19 @@ def build_figures(
 
     Returns
     -------
-    tuple[dict, pd.DataFrame]
-        The figures dictionary and the lap table DataFrame.
+    tuple[dict, OrderedDict]
+        The figures dictionary and a mapping of driver names to tables.
     """
 
     if teams:
         df_analysis = df_analysis[df_analysis["team"].isin(teams)]
     figs = {}
-    lap_table = driver_lap_table(
+    driver_tables = build_driver_tables(
         df_analysis,
-        ["Griffin Core", "Campos Racing"],
-        include_sectors=False,
+        teams=teams,
+        filter_fast=filter_fast,
+        include_sectors=include_sectors,
     )
-
     # Top Speeds for each driver & generar colores por piloto
     ts = compute_top_speeds(df_analysis)
     # Mapa de colores por equipo (igual que Team Ranking)
@@ -116,63 +160,50 @@ def build_figures(
         else:
             team_colors[team] = f'#{random.randint(0, 0xFFFFFF):06x}'
 
-        ss = slipstream_stats(df_analysis)
+    ss = slipstream_stats(df_analysis)
 
-        if not ss.empty:
-            
-            ss_lap = ss.sort_values("min_lap_time_with_slip", ascending=True)          
-            order_lap = ss_lap["driver"].tolist()                                      
-            fig_slip_lap = px.bar(
-                ss_lap,
-                x="driver",
-                y=["min_lap_time_no_slip", "min_lap_time_with_slip"],
-                barmode="group",
-                title="Lap-time mínimo – Con vs Sin rebufo",
-            )
-            fig_slip_lap.update_layout(                                                
-                xaxis={"categoryorder": "array", "categoryarray": order_lap}
-            )
+    if not ss.empty:
+        # 1) Lap-time mínimo (orden asc.)
+        ss_lap   = ss.sort_values("min_lap_time_with_slip")
+        orderLap = ss_lap["driver"].tolist()
+        fig_slip_lap = px.bar(
+            ss_lap, x="driver",
+            y=["min_lap_time_no_slip", "min_lap_time_with_slip"],
+            barmode="group", title="Lap-time mínimo – Con vs Sin rebufo",
+        )
+        first_val = ss_lap.iloc[0][["min_lap_time_no_slip",
+                                    "min_lap_time_with_slip"]].min()
+        last_val  = ss_lap.iloc[-1][["min_lap_time_no_slip",
+                                    "min_lap_time_with_slip"]].max()
+        fig_slip_lap.update_layout(
+            xaxis={"categoryorder": "array", "categoryarray": orderLap},
+            yaxis={"range": [first_val*0.90, last_val*1.05]}
+        )
 
-            first_val = ss_lap.iloc[0][["min_lap_time_no_slip",
-                                        "min_lap_time_with_slip"]].min()
-            last_val  = ss_lap.iloc[-1][["min_lap_time_no_slip",
-                                        "min_lap_time_with_slip"]].max()
-            y_lower = first_val * 0.99     # –1 %
-            y_upper = last_val  * 1.05      # +5 %
+        # 2) Top-speed máximo (orden desc.)
+        ss_spd   = ss.sort_values("max_top_speed_with_slip", ascending=False)
+        orderSpd = ss_spd["driver"].tolist()
+        fig_slip_speed = px.bar(
+            ss_spd, x="driver",
+            y=["max_top_speed_no_slip", "max_top_speed_with_slip"],
+            barmode="group", title="Top Speed máxima – Con vs Sin rebufo",
+        )
+        first_val = ss_spd.iloc[0][["max_top_speed_no_slip",
+                                    "max_top_speed_with_slip"]].max()
+        last_val  = ss_spd.iloc[-1][["max_top_speed_no_slip",
+                                    "max_top_speed_with_slip"]].min()
+        fig_slip_speed.update_layout(
+            xaxis={"categoryorder": "array", "categoryarray": orderSpd},
+            yaxis={"range": [last_val*0.90, first_val*1.05]}
+        )
 
-            fig_slip_lap.update_layout(
-                xaxis={"categoryorder": "array", "categoryarray": order_lap},
-                yaxis={"range": [y_lower, y_upper], "title": "Tiempo (s)"}
-            )
-            
-            ss_spd = ss.sort_values("max_top_speed_with_slip", ascending=False)        
-            order_spd = ss_spd["driver"].tolist()                                      
-            fig_slip_speed = px.bar(
-                ss_spd,
-                x="driver",
-                y=["max_top_speed_no_slip", "max_top_speed_with_slip"],
-                barmode="group",
-                title="Top Speed máxima – Con vs Sin rebufo",
-            )
-            first_val = ss_spd.iloc[0][["max_top_speed_no_slip",
-                                        "max_top_speed_with_slip"]].max()
-            last_val  = ss_spd.iloc[-1][["max_top_speed_no_slip",
-                                        "max_top_speed_with_slip"]].min()
-            y_lower = last_val  * 0.99     # –1 % del menor (porque aquí es orden desc.)
-            y_upper = first_val * 1.05      # +5 % del mayor
-
-            fig_slip_speed.update_layout(
-                xaxis={"categoryorder": "array", "categoryarray": order_spd},
-                yaxis={"range": [y_lower, y_upper], "title": "Velocidad (km/h)"}
-            )
-
+        # 3) Registrar las figuras ⇣
         figs["Slipstream Lap-time (min)"] = fig_slip_lap
         figs["Slipstream TopSpeed (max)"] = fig_slip_speed
 
-
-    df_tmp = df_analysis.copy()
-    df_tmp['slipstream'] = False     
-    
+        df_tmp = df_analysis.copy()
+        df_tmp['slipstream'] = False     
+            
 
 
     # --- función auxiliar rápida para marcar las vueltas --------------------
@@ -197,9 +228,6 @@ def build_figures(
             | df.groupby("driver")["slip_flag"].shift(fill_value=False)
         )
         return df
-
-
-    df_tmp = df_tmp.groupby("driver", group_keys=False).apply(_flag_slip)
 
     # ① agrupa y saca la punta máxima con y sin rebufo
     ts_split = (
@@ -413,10 +441,23 @@ def build_figures(
         )
         figs['Lap Time Consistency'] = fig_cons
 
-    return figs, lap_table
+    return figs, driver_tables
 
-def export_report(figs: dict, path: str,
-                  table_df: pd.DataFrame | None = None):
+def _gap_color(val: float) -> str:
+    """Color de fondo según el gap en segundos."""
+    if pd.isna(val):
+        return ""
+    if val <= 1:
+        return "background-color: rgb(255,102,102); color:white"
+    if val < 3:
+        return "background-color: rgb(255,178,102)"
+    return "background-color: rgb(102,178,255)"
+
+def export_report(
+    figs: dict,
+    path: str,
+    driver_tables: "OrderedDict[str, pd.DataFrame] | None" = None,
+):
     """
     Escribe un HTML con una tabla (opcional) al principio y luego las figuras.
     """
@@ -425,19 +466,59 @@ def export_report(figs: dict, path: str,
         f.write("<script src='https://cdn.plot.ly/plotly-latest.min.js'></script>\n")
         f.write("<title>Session Report</title></head><body>\n")
 
-        # ① inserta la tabla si existe
-        if table_df is not None and not table_df.empty:
-            f.write("<h2>Análisis de Vueltas – GriffinCore / Campos</h2>\n")
-            f.write(table_df.to_html(index=False,
-                                     float_format=lambda x: f'{x:.3f}'))
-            f.write("<hr>\n")
+        if driver_tables:
+            # --- encabezado + CSS de rejilla 3xN -----------------------------
+            f.write("""
+            <h2>Vueltas – Griffin Core & Campos Racing</h2>
+            <style>
+            .driver-grid  { display:flex; flex-wrap:wrap; gap:12px; }
+            .driver-item  { flex:1 1 calc(33.333% - 12px); box-sizing:border-box; }
+            .driver-item h3 { text-align:center; margin:4px 0; }
+            .driver-item table { width:100%; border-collapse:collapse; }
+            </style>
+            <div class="driver-grid">
+            """)
 
-        # ② inserta las figuras
-        for i, (name, fig) in enumerate(figs.items()):
-            f.write(f"<h2>{name}</h2>\n")
-            f.write(plot(fig, include_plotlyjs=i == 0, output_type="div"))
-            f.write("<hr>\n")
-        f.write("</body></html>")
+            # --- tablas ------------------------------------------------------
+            for drv, rows in driver_tables.items():
+                if rows.empty:
+                    continue
+                df_tbl = pd.DataFrame(rows)
+                styler = (
+                    df_tbl.style
+                    .format("{:.3f}", na_rep="", precision=3)
+                    .applymap(_gap_color, subset=["GapAhead"])
+                    .set_table_attributes(
+                        "border='1' cellspacing='0' cellpadding='3' "
+                        "style='text-align:center; font-family:Arial; font-size:13px'"
+                    )
+                    .set_table_styles([
+                        {"selector": "th", "props": [("background", "#F2F2F2"), ("font-weight", "bold")]},
+                        {"selector": "td", "props": [("border", "1px solid #E0E0E0")]},
+                    ])
+                )
+                f.write(f"<div class='driver-item'><h3>{drv}</h3>")
+                f.write(styler.to_html(index=False))
+                f.write("</div>")                           
+
+            
+            f.write("</div>")                               
+            f.write("<hr>")
+
+            # --- GRÁFICAS ----------------------------------------------------
+            first = True                                     # solo la 1ª incluye JS
+            for title, fig in figs.items():
+                f.write(f"<h2>{title}</h2>\n")
+                div = plot(
+                    fig,
+                    include_plotlyjs="cdn" if first else False,
+                    output_type="div",
+                )
+                f.write(div)
+                first = False
+
+            # --- cierre del documento ---------------------------------------
+            f.write("</body></html>")
 
 app = dash.Dash(__name__)
 
@@ -451,6 +532,17 @@ app.layout = html.Div(
         dcc.Download(id="download-report"),
         dcc.Store(id="fig-store"),
         dcc.Dropdown(id="team-filter", multi=True),
+        dcc.Dropdown(
+            id="driver-filter",
+            multi=True,
+            placeholder="Selecciona pilotos",   # se rellenará tras cargar la sesión
+        ),
+        dcc.Checklist(id="lap-filter-toggle",
+                  options=[{"label": "Ver todas las vueltas", "value": "ALL"}],
+                  value=[], style={"marginTop": "10px"}),
+        dcc.Checklist(id="sector-toggle",
+                  options=[{"label": "Mostrar sectores", "value": "SECT"}],
+                  value=[], style={"marginBottom": "10px"}),
         html.Hr(),
         html.Div(id="graphs-container"),
     ]
@@ -476,11 +568,17 @@ def on_browse(n_clicks):
     Output("fig-store", "data"),
     Output("team-filter", "options"),
     Output("team-filter", "value"),
+    Output("driver-filter", "options"),   
+    Output("driver-filter", "value"),     
     Input("load-btn", "n_clicks"),
     Input("team-filter", "value"),
     State("folder-input", "value"),
+    Input("lap-filter-toggle", "value"),
+    Input("sector-toggle", "value"),
+    Input("driver-filter", "value"),      
 )
-def on_load(n_clicks, teams, folder):
+
+def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, drivers):
     if not n_clicks or not folder or not os.path.isdir(folder):
         raise PreventUpdate
     df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
@@ -488,23 +586,44 @@ def on_load(n_clicks, teams, folder):
     raw_path = os.path.join(folder, "session_raw_data.xlsx")
     export_raw_session(folder, raw_path)
     logging.info(f"Raw data exported to {raw_path}")
-    team_names = sorted(df_analysis["team"].dropna().unique().tolist())
+    team_names   = sorted(df_analysis["team"].dropna().unique().tolist())
+    driver_names = sorted(df_analysis["driver"].dropna().unique().tolist())
     if not teams:
         teams = team_names
-    figs, table_df = build_figures(
-        df_analysis, df_class, weather_df, tracklimits_df, teams
+
+    if not drivers:                      
+        drivers = driver_names
+
+    df_analysis = df_analysis[df_analysis["driver"].isin(drivers)]
+    df_analysis = df_analysis[df_analysis["team"].isin(teams)]
+
+    filter_fast   = "ALL" not in (lap_toggle or [])
+    include_sects = "SECT" in (sec_toggle or [])   
+    figs, driver_tables = build_figures(
+        df_analysis, df_class, weather_df, tracklimits_df, teams,
+        filter_fast=filter_fast, include_sectors=include_sects 
     )
-    graphs = [
+
+    table_divs = [
+        make_gap_table(tbl, drv) for drv, tbl in driver_tables.items()
+    ]
+
+    graphs = [html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})]
+    graphs += [
         element
         for name, fig in figs.items()
         for element in (html.H3(name), dcc.Graph(figure=fig))
     ]
+
     serialized = {
         "figs": {name: fig.to_dict() for name, fig in figs.items()},
-        "table": table_df.to_dict(orient="records"),
+        "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
     }
     options = [{"label": t, "value": t} for t in team_names]
-    return html.Div(graphs), serialized, options, teams
+    team_opts   = [{"label": t, "value": t} for t in team_names]
+    driver_opts = [{"label": d, "value": d} for d in driver_names]
+
+    return html.Div(graphs), serialized, options, teams, driver_opts, team_opts
 
 @app.callback(
     Output("download-report", "data"),
@@ -516,24 +635,37 @@ def on_load(n_clicks, teams, folder):
 def on_export(n_clicks, data):
     if not data:
         raise PreventUpdate
+
+    # ----- reconstruir las figuras -------------------------------------------------
     figs_dict = data.get("figs", data)
-    table_data = data.get("table")
     figs = {
         name: go.Figure(fig) if isinstance(fig, dict) else fig
         for name, fig in figs_dict.items()
     }
-    table_df = pd.DataFrame(table_data) if table_data else None
+
+    # ----- reconstruir driver_tables (dict {driver: DataFrame}) --------------------
+    table_data = data.get("tables")          # llega como JSON-serializable
+    driver_tables = (
+        {drv: pd.DataFrame(rows) for drv, rows in table_data.items()}
+        if table_data else None
+    )
+
+    # ----- exportar el informe -----------------------------------------------------
     path = "session_report.html"
-    export_report(figs, path, table_df)
+    export_report(figs, path, driver_tables)
+
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     os.remove(path)
+
     return dict(content=content, filename="session_report.html")
 
+
 def run_app():
-    # Open dashboard in the default browser. Update URL if the port changes.
+    """Launch the Dash application and open it in the browser."""
     webbrowser.open_new("http://127.0.0.1:8050/")
     app.run(debug=False, threaded=False, use_reloader=False)
+
 
 if __name__ == "__main__":
     run_app()

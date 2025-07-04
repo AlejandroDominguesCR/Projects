@@ -8,6 +8,7 @@ import plotly.express as px
 import pandas as pd
 import os
 import webbrowser
+from dash import dash_table  
 import plotly.graph_objects as go
 import random
 from data_process import load_session_data, unify_timestamps, convert_time_column
@@ -15,7 +16,7 @@ from KPI_builder import (
     compute_top_speeds, track_limit_rate, team_ranking,
     ideal_lap_gap, best_sector_times, lap_time_history,
     slipstream_stats, pit_stop_summary, lap_time_consistency,
-    driver_lap_table,
+    build_driver_tables,
 )
 
 from main_analysis import export_report
@@ -89,10 +90,7 @@ class MainWindow(QMainWindow):
         df_analysis = df_analysis.copy()
         df_analysis['driver'] = df_analysis[driver_col]
         df_analysis = convert_time_column(df_analysis, 'lap_time')
-        lap_table = driver_lap_table(
-            df_analysis,
-            include_sectors=self.sector_toggle.isChecked()
-        )
+        driver_tables = build_driver_tables(df_analysis)
         # --- 1) Generar un mapa de colores por piloto ---
         ts = compute_top_speeds(df_analysis)
         team_colors = {}
@@ -383,7 +381,7 @@ class MainWindow(QMainWindow):
         export_report(
             figs,
             os.path.join(folder, 'session_report.html'),
-            table_df=lap_table,
+            driver_tables=driver_tables,
         )
         webbrowser.open(f"file://{os.path.join(folder, 'session_report.html')}")
         self.stack.setCurrentWidget(self.graphs_page)
