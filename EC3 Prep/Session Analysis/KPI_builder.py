@@ -881,6 +881,16 @@ def driver_lap_table(
             gap_cols.append(new)
         base_cols.extend(gap_cols)
 
+    gap_cols: list[str] = []
+    if include_sectors and include_sector_gaps and {"T1", "T2", "T3"}.issubset(df.columns):
+        tmp = df[["T1", "T2", "T3"]].apply(pd.to_datetime, format="%H:%M:%S.%f", errors="coerce")
+        for tcol, new in zip(["T1", "T2", "T3"], ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]):
+            s = tmp.sort_values(tcol).reset_index()
+            dt = s[tcol].diff().dt.total_seconds().abs()
+            df.loc[s["index"], new] = dt.values
+            gap_cols.append(new)
+        base_cols.extend(gap_cols)
+
     tbl = df[base_cols].copy()
     rename_map = {
         "lap_number": "Vuelta",
@@ -941,7 +951,7 @@ def build_driver_tables(
         "sector3": "Sector3", "s3": "Sector3",
     }
     sec_cols: list[str] = []
-
+    
     if include_sectors:
         for raw, std in sector_map.items():
             if raw in df.columns:

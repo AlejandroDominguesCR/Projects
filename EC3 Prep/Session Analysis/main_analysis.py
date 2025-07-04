@@ -85,7 +85,6 @@ def make_gap_table(df_tbl, driver, include_sector_gaps=False):
         style={"flex": "1 0 30%", "padding": "5px"},
     )
 
-
 def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load and preprocess session CSV files."""
     data = load_session_data(folder)
