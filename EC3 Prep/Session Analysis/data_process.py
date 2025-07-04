@@ -26,7 +26,6 @@ def _read_csv(path: str) -> pd.DataFrame:
     df.columns = [re.sub(r"\s+", "_", c.strip()).lower() for c in df.columns]
     return df
 
-
 def load_session_data(folder_path: str) -> Dict[str, pd.DataFrame]:
     """Load all CSV files contained in ``folder_path``.
 
@@ -51,7 +50,6 @@ def load_session_data(folder_path: str) -> Dict[str, pd.DataFrame]:
         data[key] = _read_csv(path)
     return data
 
-
 def export_raw_session(folder_path: str, output_path: str) -> None:
     """Combine all session CSVs into a single Excel workbook."""
 
@@ -59,7 +57,6 @@ def export_raw_session(folder_path: str, output_path: str) -> None:
     with pd.ExcelWriter(output_path) as writer:
         for name, df in data.items():
             df.to_excel(writer, sheet_name=name[:31], index=False)
-
 
 def parse_time_to_seconds(value: str | float | int) -> float:
     """Parse a ``mm:ss.xxx`` or ``hh:mm:ss.xxx`` time string to seconds."""
@@ -86,7 +83,6 @@ def parse_time_to_seconds(value: str | float | int) -> float:
     except ValueError:
         return float("nan")
 
-
 def convert_time_column(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
     """Convert ``time_col`` of ``df`` to seconds if present."""
 
@@ -100,7 +96,6 @@ def convert_time_column(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
     df = df.sort_values(time_col).reset_index(drop=True)
     return df
 
-
 def unify_timestamps(df: pd.DataFrame, time_col: str = "time") -> pd.DataFrame:
     """Convert ``time_col`` to ``datetime`` if it exists and sort by it."""
 
@@ -113,7 +108,6 @@ def unify_timestamps(df: pd.DataFrame, time_col: str = "time") -> pd.DataFrame:
         df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
     df = df.sort_values(time_col).reset_index(drop=True)
     return df
-
 
 def build_driver_matrix(
     df_analysis: pd.DataFrame,
@@ -154,3 +148,12 @@ def build_driver_matrix(
                 driver_matrix[team][driver] = df_driver
 
     return driver_matrix
+
+def seconds_to_mmss(t: float | int | str) -> str:
+    """Convierte segundos (float) → 'm:ss.mmm'.  NaN → ''."""
+    try:
+        t = float(t)
+    except (TypeError, ValueError):
+        return ""
+    m, s = divmod(t, 60)
+    return f"{int(m):d}:{s:06.3f}"

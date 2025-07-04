@@ -21,6 +21,7 @@ from data_process import (
     export_raw_session,
     unify_timestamps,
     convert_time_column,
+    seconds_to_mmss
 )
 from KPI_builder import (
     compute_top_speeds,
