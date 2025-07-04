@@ -348,20 +348,15 @@ def build_detailed_tab():
     )
 
 
-app.layout = html.Div(
-    [
-        dcc.Location(id="url", refresh=False),
-        dcc.Tabs(
-            id="main-tabs",
-            value="standard",
-            children=[
-                dcc.Tab(label="Standard Analysis", value="standard"),
-                dcc.Tab(label="Detailed Analysis", value="detailed"),
-            ],
-        ),
-        html.Div(id="tab-content"),
-    ]
-)
+app.layout = html.Div([
+    dcc.Location(id="url", refresh=False),
+    dcc.Tabs(id="main-tabs", value="standard", children=[
+        dcc.Tab(label="Standard Analysis", value="standard",
+                children=[html.Div(id="standard-tab-content")]),
+        dcc.Tab(label="Detailed Analysis", value="detailed",
+                children=[html.Div(id="detailed-tab-content")]),
+    ])
+])
 
 @app.callback(
     Output('file-list', 'children'),
@@ -1301,13 +1296,16 @@ def generar_overlay(n_clicks, seleccionados, plots_data):
 
 
 @app.callback(
-    Output('tab-content', 'children'),
+    Output('standard-tab-content', 'children'),
+    Output('detailed-tab-content', 'children'),
     Input('main-tabs', 'value')
 )
 def render_tabs(tab):
-    if tab == 'detailed':
-        return build_detailed_tab()
-    return build_standard_tab()
+    if tab == 'standard':
+        return build_standard_tab(), dash.no_update
+    elif tab == 'detailed':
+        return dash.no_update, build_detailed_tab()
+    return dash.no_update, dash.no_update
 
 
 @app.callback(

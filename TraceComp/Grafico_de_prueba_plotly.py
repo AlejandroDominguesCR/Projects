@@ -1106,44 +1106,58 @@ def main_comparacion_plotly(archivos_json_wintax, archivos_json_canopy, variable
     return fig
 
 def matrix_detailed_analysis_plotly(archivos_json, variable_y):
-    """Return a 3x3 matrix of subplots summarising Entry/Mid/Exit across speeds."""
-    titles = [
-        "Entry HS", "Mid HS", "Exit HS",
-        "Entry MS", "Mid MS", "Exit MS",
-        "Entry LS", "Mid LS", "Exit LS",
-    ]
-    fig = make_subplots(rows=3, cols=3, subplot_titles=titles)
+    """Return a 3×3 matrix plot comparing setups without straight-line points."""
 
-    mapping = {
-        'early_hs': (1, 1), 'mid_hs': (1, 2), 'exit_hs': (1, 3),
-        'early_ms': (2, 1), 'mid_ms': (2, 2), 'exit_ms': (2, 3),
-        'early_ls': (3, 1), 'mid_ls': (3, 2), 'exit_ls': (3, 3),
+    filas = ['High speed', 'Medium speed', 'Low speed']
+    columnas = ['Entry', 'Mid', 'Exit']
+    label_map = {
+        (0, 0): 'early_hs', (0, 1): 'mid_hs', (0, 2): 'exit_hs',
+        (1, 0): 'early_ms', (1, 1): 'mid_ms', (1, 2): 'exit_ms',
+        (2, 0): 'early_ls', (2, 1): 'mid_ls', (2, 2): 'exit_ls',
     }
+
+    fig = make_subplots(
+        rows=3,
+        cols=3,
+        shared_xaxes=False,
+        shared_yaxes=True,
+        horizontal_spacing=0.04,
+        vertical_spacing=0.07,
+        subplot_titles=[f"{r} – {c}" for r in filas for c in columnas],
+    )
 
     for idx, archivo in enumerate(archivos_json):
         data = cargar_datos_json(archivo)
-        color = pick_color(None, idx)
+        nombre = os.path.basename(archivo).replace('_procesado.json', '')
+        color = pick_color(nombre, idx)
         stats = extraer_stats_12pts(data, variable_y)
-        name = os.path.basename(archivo)
-        for label, (mean, std) in stats.items():
-            if label not in mapping or mean is None:
+
+        for (r, c), lbl in label_map.items():
+            mean, std = stats.get(lbl, (None, None))
+            if mean is None:
                 continue
-            r, c = mapping[label]
             fig.add_trace(
                 go.Scatter(
-                    x=[name],
+                    x=[idx],
                     y=[mean],
-                    mode='markers',
-                    marker=dict(color=color, size=10),
                     error_y=dict(type='data', array=[std], visible=True),
-                    name=name,
-                    showlegend=(r == 1 and c == 1),
+                    mode='markers',
+                    marker=dict(color=color, size=14, line=dict(width=1)),
+                    name=nombre if r == 0 and c == 0 else None,
+                    showlegend=(r == 0 and c == 0),
                 ),
-                row=r,
-                col=c,
+                row=r + 1,
+                col=c + 1,
             )
 
-    fig.update_layout(height=800, width=900, title=f"{variable_y} Detailed Analysis")
+    fig.update_xaxes(showticklabels=False)
+    fig.update_layout(
+        title=f"Detailed Analysis – {variable_y}",
+        height=900,
+        width=1400,
+        hovermode='closest',
+        legend_title="Setup / Archivo",
+    )
     return fig
 
 def plot_dual_axis(wintax_jsons, canopy_jsons, y1, y2=None, y1_canopy=None, y2_canopy=None):
