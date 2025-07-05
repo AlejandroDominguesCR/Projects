@@ -740,90 +740,6 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     return stats
 
-def driver_lap_table(
-    df: pd.DataFrame,
-    teams: list[str] | None = None,
-    *,
-    include_sectors: bool = True,
-    include_sector_gaps: bool = False,
-) -> pd.DataFrame:
-    """Return per-lap data for selected drivers.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Analysis dataframe with at least ``team``, ``driver``, ``lap_number``,
-        ``lap_time``, ``hour`` and ``top_speed`` columns.
-    teams : list[str] | None, optional
-        Teams to include in the table.  ``None`` includes all teams.
-    include_sectors : bool, default ``True``
-        When ``True`` sector columns are included if present.
-    include_sector_gaps : bool, default ``False``
-        When ``True`` and sector times ``T1``-``T3`` exist, additional gap
-        columns ``GapAhead_S1``-``GapAhead_S3`` are added.
-
-    Returns
-    -------
-    pd.DataFrame
-        Table ordered by timestamp with gaps ahead/behind and top speed.
-    """
-
-    df = df.copy()
-    if teams is not None:
-        df = df[df.get("team").isin(teams)]
-        if df.empty:
-            return pd.DataFrame()
-    if not pd.api.types.is_numeric_dtype(df["lap_time"]):
-        df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
-
-    df["timestamp"] = pd.to_datetime(df["hour"], format="%H:%M:%S.%f", errors="coerce")
-    df = df.sort_values("timestamp").reset_index(drop=True)
-
-    df["gap_ahead"] = df["timestamp"].diff().dt.total_seconds().abs()
-    df["gap_behind"] = df["timestamp"].shift(-1).sub(df["timestamp"]).dt.total_seconds().abs()
-
-    base_cols = [
-        "team",
-        "driver",
-        "lap_number",
-        "lap_time",
-        "gap_ahead",
-        "gap_behind",
-        "top_speed",
-    ]
-
-    if include_sectors:
-        sec_cols = [c for c in df.columns if re.match(r"(?i)^sector[123]$", c)]
-        if not sec_cols:
-            sec_cols = [c for c in df.columns if re.match(r"(?i)^s[123]$", c)]
-        for col in sec_cols:
-            if not pd.api.types.is_numeric_dtype(df[col]):
-                df[col] = df[col].apply(parse_time_to_seconds)
-        base_cols = base_cols[:3] + sec_cols + base_cols[3:]
-
-    tbl = df[base_cols].copy()
-    rename_map = {
-        "lap_number": "Vuelta",
-        "lap_time": "LapTime",
-        "gap_ahead": "Gap_Ahead",
-        "gap_behind": "Gap_Behind",
-        "top_speed": "TopSpeed",
-    }
-    if include_sector_gaps:
-        rename_map.update(
-            {
-                "gap_ahead_s1": "GapAhead_S1",
-                "gap_ahead_s2": "GapAhead_S2",
-                "gap_ahead_s3": "GapAhead_S3",
-            }
-        )
-    for c in tbl.columns:
-        if c.lower().startswith("sector"):
-            rename_map[c] = c.capitalize()
-
-    tbl = tbl.rename(columns=rename_map)
-    return tbl
-
 def build_driver_tables(
     df: pd.DataFrame,
     teams: list[str] | None = None,
@@ -834,13 +750,9 @@ def build_driver_tables(
 ) -> "OrderedDict[str, pd.DataFrame]":
     """
     Devuelve OrderedDict {driver: DataFrame} con vueltas rápidas y “pegadas”.
-
-    Filtros aplicados por piloto:
-      • LapTime ≤ 120 % de su mejor vuelta
-      • GapAhead ≤ 5 s   (descarta aire limpio)
-
-    Columnas finales:
-        Vuelta | LapTime | Sector1 | Sector2 | Sector3 | GapAhead | TopSpeed
+    Ahora `GapStart` aparece SIEMPRE y se calcula así:
+      • si hay sectores   → GapAhead_S3 de la vuelta anterior
+      • si no hay sectores → GapAhead  de la vuelta anterior
     """
     # 1) limita equipos
     df = df.copy()
@@ -849,33 +761,32 @@ def build_driver_tables(
     if df.empty:
         return OrderedDict()
 
-    # 2) tiempos-a-segundos
+    # 2) lap_time → segundos
     if not pd.api.types.is_numeric_dtype(df["lap_time"]):
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
-    # ─────────────── 3) timestamp, GapAhead y sellos por sector ────────────────
+    # 3) timestamp global + GapAhead (fin de vuelta)
     df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
     df = df.sort_values("timestamp").reset_index(drop=True)
     df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
 
-    # ───────────  sellos de sector y gaps ─────────────────────────────────
-    gap_cols: list[str] = []     # declara una sola vez
-
-    # 3-A) mapeo flexible de nombres de columna de sector
+    # 3-A) localizar columnas de sector (por si existen)
     sector_aliases = {
         "sector1": ["sector1", "s1", "sector1_seconds", "s1_seconds"],
         "sector2": ["sector2", "s2", "sector2_seconds", "s2_seconds"],
         "sector3": ["sector3", "s3", "sector3_seconds", "s3_seconds"],
     }
-
     sector_cols = {
         std: next((c for c in aliases if c in df.columns), None)
         for std, aliases in sector_aliases.items()
     }
 
-    if include_sector_gaps and all(sector_cols.values()):
-        # convierte sectores a segundos si hiciera falta
-        for std, col in sector_cols.items():
+    gap_cols: list[str] = []
+
+    # 3-B) si tenemos los tres sectores, calculamos siempre los gaps sectoriales
+    if all(sector_cols.values()):
+        # convierte sectores a segundos si hace falta
+        for col in sector_cols.values():
             if not pd.api.types.is_numeric_dtype(df[col]):
                 df[col] = df[col].apply(parse_time_to_seconds)
 
@@ -883,29 +794,31 @@ def build_driver_tables(
         df["T2"] = df["T3"] - pd.to_timedelta(df[sector_cols["sector3"]], unit="s")
         df["T1"] = df["T2"] - pd.to_timedelta(df[sector_cols["sector2"]], unit="s")
 
-        # Δt con coche precedente en cada sector
         for lab, tcol in zip(("S1", "S2", "S3"), ("T1", "T2", "T3")):
             df[f"GapAhead_{lab}"] = df[tcol].diff().dt.total_seconds().abs()
-            gap_cols.append(f"GapAhead_{lab}")
+            if include_sector_gaps:              # solo los añadimos a la tabla si el flag lo pide
+                gap_cols.append(f"GapAhead_{lab}")
 
-    elif include_sector_gaps:
-        # no hay sectores → intenta reutilizar GapAhead_Sx si ya existen
-        gap_cols = [c for c in ("GapAhead_S1", "GapAhead_S2", "GapAhead_S3") if c in df.columns]
+        # GapStart = último GapAhead_S3 del mismo piloto
+        df["GapStart"] = df.groupby("driver")["GapAhead_S3"].shift(1)
 
-    # 4) filtra: lap rápida + gap pequeño
+    else:
+        # sin sectores → GapStart = GapAhead (fin de vuelta) de la vuelta anterior
+        df["GapStart"] = df.groupby("driver")["GapAhead"].shift(1)
+
+    # 4) filtro: vuelta rápida + aire sucio
     if filter_fast:
         best = df.groupby("driver")["lap_time"].transform("min")
         mask = (df["lap_time"] <= 1.20 * best) & (df["GapAhead"] <= 5)
         df = df[mask]
 
-    # 5) sectores (si existen)
+    # 5) sectores (solo para mostrar, si se solicita)
     sector_map = {
         "sector1": "Sector1", "s1": "Sector1",
         "sector2": "Sector2", "s2": "Sector2",
         "sector3": "Sector3", "s3": "Sector3",
     }
     sec_cols: list[str] = []
-    
     if include_sectors:
         for raw, std in sector_map.items():
             if raw in df.columns:
@@ -915,24 +828,22 @@ def build_driver_tables(
                     df[std] = df[raw]
                 sec_cols.append(std)
 
-
-    base_cols = ["lap_number", "lap_time", *sec_cols, "GapAhead", *gap_cols, "top_speed"]
-    rename = {"lap_number": "Vuelta", "lap_time": "LapTime", "top_speed": "TopSpeed"}
-    if include_sector_gaps:
-        rename.update(
-            {
-                "gap_ahead_s1": "GapAhead_S1",
-                "gap_ahead_s2": "GapAhead_S2",
-                "gap_ahead_s3": "GapAhead_S3",
-            }
-        )
+    # 6) columnas finales
+    base_cols = [
+        "lap_number", "lap_time",
+        *sec_cols,
+        "GapStart", *gap_cols,
+        "top_speed",
+    ]
+    rename = {
+        "lap_number": "Vuelta",
+        "lap_time": "LapTime",
+        "GapStart":  "GapStart",
+        "top_speed": "TopSpeed",
+    }
 
     tables = OrderedDict()
     for drv, g in df.groupby("driver"):
         tbl = g[base_cols].rename(columns=rename)
-        tables[drv] = (
-            tbl.sort_values("LapTime", ascending=True)   
-            .reset_index(drop=True)
-        )
+        tables[drv] = tbl.sort_values("LapTime").reset_index(drop=True)
     return tables
-

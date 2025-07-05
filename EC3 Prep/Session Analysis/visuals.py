@@ -7,6 +7,7 @@ from PyQt6.QtCore import Qt
 import plotly.express as px
 import pandas as pd
 import os
+from plotly.subplots import make_subplots 
 import webbrowser
 from dash import dash_table  
 import plotly.graph_objects as go

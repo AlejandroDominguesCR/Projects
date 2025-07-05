@@ -12,7 +12,14 @@ from tkinter import filedialog
 import webbrowser
 import logging
 import random 
+from plotly.subplots import make_subplots 
 from collections import OrderedDict
+import numpy as np
+try:
+    import statsmodels.api as sm  # noqa:F401
+    HAS_STATSMODELS = True
+except Exception:  # statsmodels not available
+    HAS_STATSMODELS = False
 
 logging.basicConfig(level=logging.INFO)
 
@@ -47,7 +54,7 @@ def make_gap_table(df_tbl, driver, include_sector_gaps=False):
     for col in time_cols:
         df_tbl[col] = df_tbl[col].apply(seconds_to_mmss)
 
-    gap_cols = ["GapAhead"]
+    gap_cols = ["GapStart"]
     if include_sector_gaps:
         gap_cols += ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]
 
@@ -68,6 +75,26 @@ def make_gap_table(df_tbl, driver, include_sector_gaps=False):
                 "backgroundColor": "rgb(102, 178, 255)",
             },
         ])
+
+        # ② gradiente de TopSpeed  (azul claro → azul oscuro)  – versión sensible
+        if "TopSpeed" in df_tbl.columns and pd.api.types.is_numeric_dtype(df_tbl["TopSpeed"]):
+            vmin, vmax = df_tbl["TopSpeed"].min(), df_tbl["TopSpeed"].max()
+            vrange = vmax - vmin if vmax > vmin else 1
+
+            p      = 0.4      # ← cuanto menor (<1), más contraste
+            base   = 0.15     # opacidad mínima
+            span   = 0.85     # base + span ≤ 1
+
+            for i, v in enumerate(df_tbl["TopSpeed"]):
+                pct    = (v - vmin) / vrange      # 0 … 1 lineal
+                pct_t  = pct ** p                 # ↗️ realza valores medios-altos
+                alpha  = base + span * pct_t      # 0.15 → 1.0 (no lineal)
+
+                style_cond.append({
+                    "if": {"row_index": i, "column_id": "TopSpeed"},
+                    "backgroundColor": f"rgba(0, 123, 255, {alpha:.2f})",
+                    "color": "white" if pct_t > 0.5 else "black",
+                })
 
     return html.Div(
         children=[
@@ -492,46 +519,192 @@ def build_figures(
         )
         figs['Lap Time Consistency'] = fig_cons
 
-    # --- Wind Direction vs Lap Time -----------------------------------------
-    if (
-        not weather_df.empty
-        and 'wind_direction' in weather_df.columns
-        and 'hour' in df_analysis.columns
-    ):
+    # --- Wind + Track-Temp plots ----------------------------------------------
+    ts_cols = {"time_utc", "time_local", "time", "time_utc_str"}   # posibles timestamps
+    if (not weather_df.empty
+            and "wind_direction" in weather_df.columns
+            and len(weather_df.columns.intersection(ts_cols)) > 0):
+
+        # ① Limpieza rápida -----------------------------------------------------
         wdf = weather_df.copy()
-        wdf['wind_direction'] = (
-            wdf['wind_direction'].astype(str)
-            .str.replace(',', '.')
-            .astype(float)
-        )
-        wdf['timestamp'] = pd.to_datetime(
-            wdf.get('time_utc_str'), dayfirst=True, errors='coerce'
+        wdf["wind_direction"] = (
+            wdf["wind_direction"].astype(str)
+                .str.replace(r"[^0-9,.-]", "", regex=True)
+                .str.replace(",", ".")
+                .astype(float)
         )
 
-        ldf = df_analysis[['lap_number', 'lap_time', 'hour']].copy()
-        ldf['timestamp'] = pd.to_datetime(ldf['hour'], format='%H:%M:%S.%f', errors='coerce')
-
-        if not wdf['timestamp'].isna().all() and not ldf['timestamp'].isna().all():
-            delta = ldf['timestamp'].iloc[0] - wdf['timestamp'].iloc[0]
-            wdf['timestamp'] += delta
-
-            merged = pd.merge_asof(
-                ldf.sort_values('timestamp'),
-                wdf.sort_values('timestamp'),
-                on='timestamp',
-                direction='nearest'
+        speed_col = next(
+            (c for c in ["wind_speed_kph", "wind_speed_kmh",
+                        "wind_speed", "wind_velocity", "wind_speed_ms"]
+            if c in wdf.columns), None
+        )
+        if speed_col:
+            wdf[speed_col] = (
+                wdf[speed_col].astype(str)
+                    .str.replace(r"[^0-9,.-]", "", regex=True)
+                    .str.replace(",", ".")
+                    .astype(float)
             )
-            merged = merged.dropna(subset=['wind_direction', 'lap_time'])
 
-            if not merged.empty:
-                fig_wind = px.scatter(
-                    merged,
-                    x='wind_direction',
-                    y='lap_time',
-                    trendline='ols',
-                    title='Wind Direction vs Lap Time'
+        temp_col = next(
+            (c for c in ["track_temp", "track_temperature",
+                        "track_temp_c", "track_temperature_c"]
+            if c in wdf.columns), None
+        )
+        if temp_col:
+            wdf[temp_col] = (
+                wdf[temp_col].astype(str)
+                    .str.replace(r"[^0-9,.-]", "", regex=True)
+                    .str.replace(",", ".")
+                    .astype(float)
+            )
+
+        # ② Timestamp uniforme --------------------------------------------------
+        time_col = next((c for c in ts_cols if c in wdf.columns), None)
+        wdf["timestamp"] = pd.to_datetime(wdf[time_col], errors="coerce")
+
+        # ③ Alineamos meteo con vueltas -----------------------------------------
+        ldf = df_analysis[["lap_number", "lap_time", "hour"]].copy()
+        session_day = wdf["timestamp"].dropna().iloc[0].normalize()
+        ldf["timestamp"] = (
+            pd.to_datetime(session_day.strftime("%Y-%m-%d ") + ldf["hour"],
+                        format="%Y-%m-%d %H:%M:%S.%f", errors="coerce")
+            - pd.Timedelta(hours=2)                 # ajusta si ≠ UTC-2
+        )
+
+        merged = (
+            pd.merge_asof(ldf.sort_values("timestamp"),
+                        wdf.sort_values("timestamp"),
+                        on="timestamp",
+                        direction="nearest",
+                        tolerance=pd.Timedelta("5min"))
+            .dropna(subset=["wind_direction", "lap_time"])
+        )
+
+        if not merged.empty and temp_col:
+            # ───── Gráfico 1: Track-Temp vs Time ───────────────────────────────
+            fig_temp_time = px.line(
+                wdf, x="timestamp", y=temp_col,
+                title="Track Temperature vs Time",
+                labels={temp_col: "Temp (°C)", "timestamp": "Hora"},
+            )
+            fig_temp_time.update_traces(showlegend=False)
+
+            # ───── Gráfico 2: Wind evolution (dir + speed) ────────────────────
+            fig_wind_evo = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_wind_evo.add_trace(
+                go.Scatter(x=wdf["timestamp"], y=wdf["wind_direction"],
+                        mode="lines", name="Dirección (°)"),
+                secondary_y=False,
+            )
+            if speed_col:
+                fig_wind_evo.add_trace(
+                    go.Scatter(x=wdf["timestamp"], y=wdf[speed_col],
+                            mode="lines", name="Velocidad (km/h)"),
+                    secondary_y=True,
                 )
-                figs['Wind Direction vs Lap Time'] = fig_wind
+            fig_wind_evo.update_layout(
+                title="Wind Direction & Speed vs Time",
+                xaxis_title="Hora", yaxis_title="Dirección (°)",
+            )
+            if speed_col:
+                fig_wind_evo.update_yaxes(title_text="Velocidad", secondary_y=True)
+
+            # ───── Gráfico 3: Lap-Time vs Wind-Dir (eje invertido) ─────────────
+            #     ← reemplaza al antiguo Track-Temp independiente
+            color_kw = (
+                dict(color=speed_col, color_continuous_scale="Viridis")
+                if speed_col else {}
+            )
+            fig_scatter_rot = px.scatter(
+                merged, x="lap_time", y="wind_direction",
+                title="Lap Time vs Wind Direction",
+                **color_kw,
+                trendline="ols" if HAS_STATSMODELS else None,
+            )
+            fig_scatter_rot.update_layout(
+                xaxis_title="Lap Time (s)", yaxis_title="Dirección (°)"
+            )
+
+            # ───── Combina Track-Temp + Wind evolution en 1×2 ─────────────────
+            combo = make_subplots(
+                rows=1, cols=2,
+                subplot_titles=("Track Temp vs Time",
+                                "Wind Direction & Speed vs Time"),
+                specs=[
+                    [{"type": "xy"}, {"type": "xy", "secondary_y": True}]
+                ],
+                column_widths=[0.45, 0.55],
+            )
+
+            # Col-1: temperatura
+            for tr in fig_temp_time.data:
+                combo.add_trace(tr, row=1, col=1)
+
+            # Col-2: viento (dir + vel)
+            for tr in fig_wind_evo.data:
+                combo.add_trace(
+                    tr, row=1, col=2,
+                    secondary_y=("Velocidad" in tr.name),
+                )
+
+            combo.update_layout(
+                height=550,
+                title_text="Track Temperature & Wind Evolution",
+                legend=dict(x=0.78, y=1.00, yanchor="top", xanchor="left"),
+            )
+            # ───── Gráfico 3-A: Track-Temp vs Lap-Time ─────────────────────────
+            fig_temp_vs_lt = px.scatter(
+                merged, x="lap_time", y=temp_col,
+                title="Track Temp vs Lap Time",
+                labels={"lap_time": "Lap Time (s)", temp_col: "Temp (°C)"}
+            )
+            fig_temp_vs_lt.update_traces(marker=dict(color="#FF8800"), showlegend=False)
+
+            # ───── Gráfico 3-B: Wind-Dir vs Lap-Time (ya creado arriba) ───────
+            # (fig_scatter_rot)
+
+            # ───── Figura apilada (2 filas, 1 columna) ────────────────────────
+            stack = make_subplots(
+                rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.07,
+                subplot_titles=("Track Temp vs LapTime",
+                                "Wind Direction vs LapTime")
+            )
+
+            # Row-1 → Track Temp
+            for tr in fig_temp_vs_lt.data:
+                stack.add_trace(tr, row=1, col=1)
+
+            # Row-2 → Wind Direction
+            for tr in fig_scatter_rot.data:
+                # mantiene la barra de color (si existe) fuera del área de trazas
+                stack.add_trace(tr, row=2, col=1)
+
+            # Etiquetas
+            stack.update_yaxes(title_text="Temp (°C)",          row=1, col=1)
+            stack.update_yaxes(title_text="Dirección (°)",      row=2, col=1)
+            stack.update_xaxes(title_text="Lap Time (s)",       row=2, col=1)
+            # (solo la fila inferior muestra el eje-X)
+
+            # Ajuste opcional de la barra de color si hay velocidad
+            if speed_col:
+                stack.update_layout(coloraxis_colorbar=dict(
+                    title="Velocidad (km/h)",
+                    y=0.15,           # posición vertical (ajusta si hace falta)
+                    len=0.35
+                ))
+
+            stack.update_layout(
+                height=650,
+                title_text="Lap Time vs Track Temp & Wind Direction",
+                showlegend=False
+            )
+
+
+            # ───── Registrar figuras en el diccionario ────────────────────────
+            figs["Track & Wind Evolution"]   = combo          # nuevo subplot 1×2
+            figs["LapTime vs TrackTemp & WindDir"] = stack 
 
     return figs, driver_tables
 
