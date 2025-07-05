@@ -720,12 +720,10 @@ def on_export(n_clicks, data):
 
     return dict(content=content, filename="session_report.html")
 
-
 def run_app():
     """Launch the Dash application and open it in the browser."""
     webbrowser.open_new("http://127.0.0.1:8050/")
     app.run(debug=False, threaded=False, use_reloader=False)
-
 
 if __name__ == "__main__":
     run_app()

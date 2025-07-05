@@ -464,7 +464,7 @@ def lap_time_consistency(df: pd.DataFrame) -> pd.DataFrame:
     )
     return result
 
-from KPI_builder import best_sector_times  # para recuperar los mejores sectores
+from KPI_builder import best_sector_times  
 
 def extract_session_summary(df_analysis: pd.DataFrame,
                             tracklimits_df: pd.DataFrame,
@@ -801,16 +801,6 @@ def driver_lap_table(
                 df[col] = df[col].apply(parse_time_to_seconds)
         base_cols = base_cols[:3] + sec_cols + base_cols[3:]
 
-    gap_cols: list[str] = []
-    if include_sector_gaps and {"T1", "T2", "T3"}.issubset(df.columns):
-        tmp = df[["T1", "T2", "T3"]].apply(pd.to_datetime, format="%H:%M:%S.%f", errors="coerce")
-        for tcol, new in zip(["T1", "T2", "T3"], ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]):
-            s = tmp.sort_values(tcol).reset_index()
-            dt = s[tcol].diff().dt.total_seconds().abs()
-            df.loc[s["index"], new] = dt.values
-            gap_cols.append(new)
-        base_cols.extend(gap_cols)
-
     tbl = df[base_cols].copy()
     rename_map = {
         "lap_number": "Vuelta",
@@ -864,35 +854,43 @@ def build_driver_tables(
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
     # ─────────────── 3) timestamp, GapAhead y sellos por sector ────────────────
-    df["timestamp"] = pd.to_datetime(df["hour"], format="%H:%M:%S.%f", errors="coerce")
+    df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
     df = df.sort_values("timestamp").reset_index(drop=True)
     df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
 
-    # -------- construir T1/T2/T3 + GapAhead_Sx si hay sectores -----------------
-    gap_cols: list[str] = []           # ① declaras antes de usar
+    # ───────────  sellos de sector y gaps ─────────────────────────────────
+    gap_cols: list[str] = []     # declara una sola vez
 
-    if include_sector_gaps and {"sector1", "sector2", "sector3"}.issubset(df.columns):
-        # ② asegura sector1-3 en segundos
-        for sc in ("sector1", "sector2", "sector3"):
-            if not pd.api.types.is_numeric_dtype(df[sc]):
-                df[sc] = df[sc].apply(parse_time_to_seconds)
+    # 3-A) mapeo flexible de nombres de columna de sector
+    sector_aliases = {
+        "sector1": ["sector1", "s1", "sector1_seconds", "s1_seconds"],
+        "sector2": ["sector2", "s2", "sector2_seconds", "s2_seconds"],
+        "sector3": ["sector3", "s3", "sector3_seconds", "s3_seconds"],
+    }
 
-        # sellos de paso por meta y sectores
+    sector_cols = {
+        std: next((c for c in aliases if c in df.columns), None)
+        for std, aliases in sector_aliases.items()
+    }
+
+    if include_sector_gaps and all(sector_cols.values()):
+        # convierte sectores a segundos si hiciera falta
+        for std, col in sector_cols.items():
+            if not pd.api.types.is_numeric_dtype(df[col]):
+                df[col] = df[col].apply(parse_time_to_seconds)
+
         df["T3"] = df["timestamp"]
-        df["T2"] = df["T3"] - pd.to_timedelta(df["sector3"], unit="s")
-        df["T1"] = df["T2"] - pd.to_timedelta(df["sector2"], unit="s")
+        df["T2"] = df["T3"] - pd.to_timedelta(df[sector_cols["sector3"]], unit="s")
+        df["T1"] = df["T2"] - pd.to_timedelta(df[sector_cols["sector2"]], unit="s")
 
-        # Δt al coche precedente en cada sector
+        # Δt con coche precedente en cada sector
         for lab, tcol in zip(("S1", "S2", "S3"), ("T1", "T2", "T3")):
             df[f"GapAhead_{lab}"] = df[tcol].diff().dt.total_seconds().abs()
             gap_cols.append(f"GapAhead_{lab}")
 
     elif include_sector_gaps:
-        # ③ si no hay sectores, sólo añade las columnas si ya existen
-        gap_cols = [
-            c for c in ("GapAhead_S1", "GapAhead_S2", "GapAhead_S3")
-            if c in df.columns
-        ]
+        # no hay sectores → intenta reutilizar GapAhead_Sx si ya existen
+        gap_cols = [c for c in ("GapAhead_S1", "GapAhead_S2", "GapAhead_S3") if c in df.columns]
 
     # 4) filtra: lap rápida + gap pequeño
     if filter_fast:
