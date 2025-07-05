@@ -798,7 +798,8 @@ app.layout = html.Div(
         html.Button("Load Session", id="load-btn"),
         html.Button("Export Report", id="export-btn"),
         dcc.Download(id="download-report"),
-        dcc.Store(id="fig-store"),
+        dcc.Store(id="data-store"),
+        dcc.Store(id="session-data"),
         dcc.Dropdown(id="team-filter", multi=True),
         dcc.Dropdown(
             id="driver-filter",
@@ -815,9 +816,18 @@ app.layout = html.Div(
                   options=[{"label": "Mostrar gap sectores", "value": "GAP"}],
                   value=[], style={"marginBottom": "10px"}),
         html.Hr(),
-        html.Div(id="graphs-container"),
+        dcc.Tabs(
+            id="result-tabs",
+            value="tab-tables",
+            children=[
+                dcc.Tab(label="Tables", value="tab-tables"),
+                dcc.Tab(label="Figures", value="tab-figs"),
+            ],
+        ),
+        html.Div(id="tab-content"),
     ]
 )
+
 
 @app.callback(
     Output("folder-input", "value"),
@@ -835,12 +845,12 @@ def on_browse(n_clicks):
     return folder
 
 @app.callback(
-    Output("graphs-container", "children"),
-    Output("fig-store", "data"),
+    Output("data-store", "data"),
     Output("team-filter", "options"),
     Output("team-filter", "value"),
-    Output("driver-filter", "options"),   
-    Output("driver-filter", "value"),     
+    Output("session-data", "data"),
+    Output("driver-filter", "options"),
+    Output("driver-filter", "value"),  
     Input("load-btn", "n_clicks"),
     Input("team-filter", "value"),
     State("folder-input", "value"),
@@ -879,36 +889,92 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
         include_sector_gaps=include_gap,
     )
 
-    table_divs = [
-        make_gap_table(tbl, drv, include_gap) for drv, tbl in driver_tables.items()
-    ]
+    grid_order = list(driver_tables.keys())
+    if not df_class.empty and "position" in df_class.columns:
+        grid_order = (
+            df_class.sort_values("position")["driver"].tolist()
+        )
 
-    graphs = [html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})]
-    graphs += [
-        element
-        for name, fig in figs.items()
-        for element in (html.H3(name), dcc.Graph(figure=fig))
-    ]
+    grid_order = [d for d in grid_order if d in drivers]
+    for drv in drivers:
+        if drv not in grid_order:
+            grid_order.append(drv)
 
     serialized = {
         "figs": {name: fig.to_dict() for name, fig in figs.items()},
         "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
+        "include_gap": include_gap,
     }
     team_opts   = [{"label": t, "value": t} for t in team_names]
     driver_opts = [{"label": d, "value": d} for d in driver_names]
 
-    return html.Div(graphs), serialized, team_opts, teams, driver_opts, drivers
+    return serialized, team_opts, teams, driver_opts, drivers
+
+@app.callback(
+    Output("tab-content", "children"),
+    Input("data-store", "data"),
+    Input("result-tabs", "value"),
+)
+def update_tab_content(data, tab):
+    if not data:
+        raise PreventUpdate
+
+    figs_dict = data.get("figs", {})
+    figs = {
+        name: go.Figure(fig) if isinstance(fig, dict) else fig
+        for name, fig in figs_dict.items()
+    }
+
+    tables_dict = data.get("tables", {})
+    driver_tables = {drv: pd.DataFrame(rows) for drv, rows in tables_dict.items()}
+    include_gap = data.get("include_gap", False)
+
+    if tab == "tab-tables":
+        table_divs = [
+            make_gap_table(tbl, drv, include_gap) for drv, tbl in driver_tables.items()
+        ]
+        return html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
+
+    graphs = [html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})]
+
+    sector_keys = ["SECTOR1 Diff", "SECTOR2 Diff", "SECTOR3 Diff"]
+    gap_key = "Gap a Vuelta Ideal"
+
+    sector_figs = [
+        dcc.Graph(figure=figs[k], style={"flex": 1})
+        for k in sector_keys if k in figs
+    ]
+    if sector_figs:
+        graphs.append(html.Div(sector_figs, style={"display": "flex", "gap": "10px"}))
+
+    if gap_key in figs:
+        graphs.append(dcc.Graph(figure=figs[gap_key], style={"width": "100%"}))
+
+    remaining = [k for k in figs if k not in sector_keys + [gap_key]]
+    if remaining:
+        grid_items = [dcc.Graph(figure=figs[k]) for k in remaining]
+        graphs.append(
+            html.Div(
+                grid_items,
+                style={"display": "grid", "gridTemplateColumns": "repeat(2, 1fr)", "gap": "10px"}
+            )
+        )
+
+    return html.Div(graphs)
 
 @app.callback(
     Output("download-report", "data"),
+    Output("fig-store", "data"),
     Input("export-btn", "n_clicks"),
-    State("fig-store", "data"),
+    State("session-data", "data"),
     prevent_initial_call=True,
 )
 
-def on_export(n_clicks, data):
+def on_export(n_clicks, session_data):
+    data = session_data
     if not data:
         raise PreventUpdate
+
 
     # ----- reconstruir las figuras -------------------------------------------------
     figs_dict = data.get("figs", data)
