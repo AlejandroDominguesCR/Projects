@@ -414,80 +414,6 @@ def lap_time_history(df: pd.DataFrame) -> pd.DataFrame:
     ordered_cols = ["lap", "driver"] + (["team"] if "team" in df_hist.columns else []) + ["lap_time"]
     return df_hist[ordered_cols]
 
-def driver_lap_table(
-    df: pd.DataFrame,
-    teams: list[str] | None = None,
-    include_sectors: bool = True,
-) -> pd.DataFrame:
-    """Return a pivoted lap table by driver.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Session analysis dataframe containing at least ``driver``,
-        ``lap``/``lap_number`` and ``lap_time`` columns.
-    teams : list[str] | None
-        Optional list of team names to filter before building the table.
-    include_sectors : bool, default ``True``
-        Whether to include sector times if present.
-
-    Returns
-    -------
-    pd.DataFrame
-        Table with one row per lap and columns per driver.  If
-        ``include_sectors`` is ``True`` and sector columns exist, they are also
-        pivoted using the ``<driver>_<metric>`` naming scheme.
-    """
-
-    df_use = df.copy()
-    if teams:
-        df_use = df_use[df_use.get("team").isin(teams)]
-
-    lap_col = "lap" if "lap" in df_use.columns else (
-        "lap_number" if "lap_number" in df_use.columns else None
-    )
-    if lap_col is None or "driver" not in df_use.columns or "lap_time" not in df_use.columns:
-        return pd.DataFrame()
-
-    cols = [lap_col, "driver", "lap_time"]
-    sector_cols = [
-        c
-        for c in ["sector1", "sector2", "sector3"]
-        if include_sectors and c in df_use.columns
-    ]
-
-    gap_cols: list[str] = []
-    if include_sectors and {"T1", "T2", "T3"}.issubset(df_use.columns):
-        tmp = df_use[["T1", "T2", "T3"]].apply(
-            pd.to_datetime, format="%H:%M:%S.%f", errors="coerce"
-        )
-        for tcol, new in zip(["T1", "T2", "T3"], ["gap_ahead_s1", "gap_ahead_s2", "gap_ahead_s3"]):
-            s = tmp.sort_values(tcol).reset_index()
-            dt = s[tcol].diff().dt.total_seconds().abs()
-            df_use.loc[s["index"], new] = dt.values
-            gap_cols.append(new)
-
-    cols.extend(sector_cols + gap_cols)
-    data = df_use[cols].copy()
-
-    if lap_col != "lap":
-        data.rename(columns={lap_col: "lap"}, inplace=True)
-
-    data["lap"] = data["lap"].astype(int)
-    if not pd.api.types.is_numeric_dtype(data["lap_time"]):
-        data["lap_time"] = data["lap_time"].apply(parse_time_to_seconds)
-    for col in sector_cols:
-        if not pd.api.types.is_numeric_dtype(data[col]):
-            data[col] = data[col].apply(parse_time_to_seconds)
-
-    for col in gap_cols:
-        data[col] = data[col].astype(float)
-
-    pivot = data.pivot(index="lap", columns="driver")
-    pivot.columns = [f"{drv}_{metric}" for metric, drv in pivot.columns]
-    pivot = pivot.sort_index().reset_index()
-    return pivot
-
 def pit_stop_summary(df: pd.DataFrame) -> pd.DataFrame:
     """Best and mean pit stop time per driver.
 
@@ -689,7 +615,6 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     return stats
 
-
 def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     """Slipstream KPIs per driver by sector.
 
@@ -816,7 +741,7 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
 def driver_lap_table(
     df: pd.DataFrame,
-    teams: list[str] = ("Griffin Core", "Campos Racing"),
+    teams: list[str] | None = None,
     *,
     include_sectors: bool = True,
     include_sector_gaps: bool = False,
@@ -828,10 +753,13 @@ def driver_lap_table(
     df : pd.DataFrame
         Analysis dataframe with at least ``team``, ``driver``, ``lap_number``,
         ``lap_time``, ``hour`` and ``top_speed`` columns.
-    teams : list[str], default ("Griffin Core", "Campos Racing")
-        Teams to include in the table.
+    teams : list[str] | None, optional
+        Teams to include in the table.  ``None`` includes all teams.
     include_sectors : bool, default ``True``
         When ``True`` sector columns are included if present.
+    include_sector_gaps : bool, default ``False``
+        When ``True`` and sector times ``T1``-``T3`` exist, additional gap
+        columns ``GapAhead_S1``-``GapAhead_S3`` are added.
 
     Returns
     -------
@@ -839,10 +767,11 @@ def driver_lap_table(
         Table ordered by timestamp with gaps ahead/behind and top speed.
     """
 
-    df = df[df.get("team").isin(teams)].copy()
-    if df.empty:
-        return pd.DataFrame()
-
+    df = df.copy()
+    if teams is not None:
+        df = df[df.get("team").isin(teams)]
+        if df.empty:
+            return pd.DataFrame()
     if not pd.api.types.is_numeric_dtype(df["lap_time"]):
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
@@ -881,16 +810,6 @@ def driver_lap_table(
             gap_cols.append(new)
         base_cols.extend(gap_cols)
 
-    gap_cols: list[str] = []
-    if include_sectors and include_sector_gaps and {"T1", "T2", "T3"}.issubset(df.columns):
-        tmp = df[["T1", "T2", "T3"]].apply(pd.to_datetime, format="%H:%M:%S.%f", errors="coerce")
-        for tcol, new in zip(["T1", "T2", "T3"], ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]):
-            s = tmp.sort_values(tcol).reset_index()
-            dt = s[tcol].diff().dt.total_seconds().abs()
-            df.loc[s["index"], new] = dt.values
-            gap_cols.append(new)
-        base_cols.extend(gap_cols)
-
     tbl = df[base_cols].copy()
     rename_map = {
         "lap_number": "Vuelta",
@@ -899,6 +818,14 @@ def driver_lap_table(
         "gap_behind": "Gap_Behind",
         "top_speed": "TopSpeed",
     }
+    if include_sector_gaps:
+        rename_map.update(
+            {
+                "gap_ahead_s1": "GapAhead_S1",
+                "gap_ahead_s2": "GapAhead_S2",
+                "gap_ahead_s3": "GapAhead_S3",
+            }
+        )
     for c in tbl.columns:
         if c.lower().startswith("sector"):
             rename_map[c] = c.capitalize()
@@ -908,7 +835,7 @@ def driver_lap_table(
 
 def build_driver_tables(
     df: pd.DataFrame,
-    teams: None,
+    teams: list[str] | None = None,
     *,
     filter_fast: bool = True,
     include_sectors: bool = True,
@@ -925,7 +852,9 @@ def build_driver_tables(
         Vuelta | LapTime | Sector1 | Sector2 | Sector3 | GapAhead | TopSpeed
     """
     # 1) limita equipos
-    df = df[df["team"].isin(teams)].copy()
+    df = df.copy()
+    if teams is not None:
+        df = df[df["team"].isin(teams)]
     if df.empty:
         return OrderedDict()
 
@@ -964,7 +893,7 @@ def build_driver_tables(
     gap_cols: list[str] = []
     if include_sectors and include_sector_gaps and {"T1", "T2", "T3"}.issubset(df.columns):
         tmp = df[["T1", "T2", "T3"]].apply(pd.to_datetime, format="%H:%M:%S.%f", errors="coerce")
-        for tcol, new in zip(["T1", "T2", "T3"], ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]):
+        for tcol, new in zip(["T1", "T2", "T3"], ["gap_ahead_s1", "gap_ahead_s2", "gap_ahead_s3"]):
             s = tmp.sort_values(tcol).reset_index()
             dt = s[tcol].diff().dt.total_seconds().abs()
             df.loc[s["index"], new] = dt.values
@@ -972,12 +901,20 @@ def build_driver_tables(
 
     base_cols = ["lap_number", "lap_time", *sec_cols, "GapAhead", *gap_cols, "top_speed"]
     rename = {"lap_number": "Vuelta", "lap_time": "LapTime", "top_speed": "TopSpeed"}
+    if include_sector_gaps:
+        rename.update(
+            {
+                "gap_ahead_s1": "GapAhead_S1",
+                "gap_ahead_s2": "GapAhead_S2",
+                "gap_ahead_s3": "GapAhead_S3",
+            }
+        )
 
     tables = OrderedDict()
     for drv, g in df.groupby("driver"):
+        tbl = g[base_cols].rename(columns=rename)
         tables[drv] = (
-            g[base_cols].rename(columns=rename)
-            .sort_values("LapTime", ascending=True)   # ← más rápida → más lenta
+            tbl.sort_values("LapTime", ascending=True)   
             .reset_index(drop=True)
         )
     return tables

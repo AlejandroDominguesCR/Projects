@@ -39,7 +39,6 @@ from KPI_builder import (
 )
 
 
-# --- añade debajo de los imports ---
 def make_gap_table(df_tbl, driver, include_sector_gaps=False):
     """Devuelve un Div con título + DataTable coloreado según GapAhead."""
     df_tbl = df_tbl.copy()
@@ -50,7 +49,7 @@ def make_gap_table(df_tbl, driver, include_sector_gaps=False):
 
     gap_cols = ["GapAhead"]
     if include_sector_gaps:
-        gap_cols += [c for c in ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"] if c in df_tbl.columns]
+        gap_cols += ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]
 
     style_cond = []
     for col in gap_cols:
