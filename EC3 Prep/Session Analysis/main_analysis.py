@@ -46,6 +46,23 @@ from KPI_builder import (
 )
 
 
+def get_team_colors() -> dict[str, str]:
+    return {
+        "Campos Racing": "#FF5733",
+        "Griffin Core": "#33C1FF",
+        "MP Motorsport": "#FFBB00",
+        "Palou Motorsport": "#8844DD",
+        "KCL MP Motorsport": "#99CC00",
+        "Allay Racing": "#228B22",
+        "Saintéloc Racing": "#C71585",
+        "Drivex": "#FF33AA",
+        "DXR": "#00AACC",
+        "Sparco Palou MS": "#666666",
+    }
+
+TEAM_COLOR = get_team_colors()
+
+
 def make_gap_table(df_tbl, driver, include_sector_gaps=False):
     """Devuelve un Div con título + DataTable coloreado según GapAhead."""
     df_tbl = df_tbl.copy()
@@ -53,6 +70,18 @@ def make_gap_table(df_tbl, driver, include_sector_gaps=False):
     time_cols = [c for c in df_tbl.columns if c.startswith("Sector") or c == "LapTime"]
     for col in time_cols:
         df_tbl[col] = df_tbl[col].apply(seconds_to_mmss)
+
+    # formateo numérico antes de construir la DataTable
+    round_specs = {
+        "GapStart": 1,
+        "GapAhead_S1": 1,
+        "GapAhead_S2": 1,
+        "GapAhead_S3": 1,
+        "TopSpeed": 0,
+    }
+    for col, decimals in round_specs.items():
+        if col in df_tbl.columns and pd.api.types.is_numeric_dtype(df_tbl[col]):
+            df_tbl[col] = df_tbl[col].round(decimals)
 
     gap_cols = ["GapStart"]
     if include_sector_gaps:
@@ -190,14 +219,11 @@ def build_figures(
     # Top Speeds for each driver & generar colores por piloto
     ts = compute_top_speeds(df_analysis)
     # Mapa de colores por equipo (igual que Team Ranking)
-    team_colors = {}
+    ts = compute_top_speeds(df_analysis)
+    # Mapa de colores por equipo (igual que Team Ranking)
+    team_colors = get_team_colors()
     for team in ts['team'].unique():
-        if team == 'Campos Racing':
-            team_colors[team] = '#FF5733'
-        elif team == 'Griffin Core':
-            team_colors[team] = '#33C1FF'
-        else:
-            team_colors[team] = f'#{random.randint(0, 0xFFFFFF):06x}'
+        team_colors.setdefault(team, f'#{random.randint(0, 0xFFFFFF):06x}')
 
     ss = slipstream_stats(df_analysis)
     ss_sector = sector_slipstream_stats(df_analysis)
@@ -904,11 +930,15 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
         "figs": {name: fig.to_dict() for name, fig in figs.items()},
         "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
         "include_gap": include_gap,
+        "grid_order": grid_order,
     }
+
     team_opts   = [{"label": t, "value": t} for t in team_names]
     driver_opts = [{"label": d, "value": d} for d in driver_names]
 
-    return serialized, team_opts, teams, driver_opts, drivers
+    return (
+        serialized, team_opts, teams, serialized, driver_opts, drivers,
+    )
 
 @app.callback(
     Output("tab-content", "children"),
@@ -929,13 +959,17 @@ def update_tab_content(data, tab):
     driver_tables = {drv: pd.DataFrame(rows) for drv, rows in tables_dict.items()}
     include_gap = data.get("include_gap", False)
 
+    grid_order = data.get("grid_order", list(driver_tables.keys()))
+    table_divs = [
+        make_gap_table(driver_tables[drv], drv, include_gap)
+        for drv in grid_order
+        if drv in driver_tables
+    ]
+
     if tab == "tab-tables":
-        table_divs = [
-            make_gap_table(tbl, drv, include_gap) for drv, tbl in driver_tables.items()
-        ]
         return html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
 
-    graphs = [html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})]
+    graphs = []
 
     sector_keys = ["SECTOR1 Diff", "SECTOR2 Diff", "SECTOR3 Diff"]
     gap_key = "Gap a Vuelta Ideal"
@@ -964,7 +998,6 @@ def update_tab_content(data, tab):
 
 @app.callback(
     Output("download-report", "data"),
-    Output("fig-store", "data"),
     Input("export-btn", "n_clicks"),
     State("session-data", "data"),
     prevent_initial_call=True,

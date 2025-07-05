@@ -21,7 +21,7 @@ from KPI_builder import (
     build_driver_tables,
 )
 
-from main_analysis import export_report
+from main_analysis import export_report, get_team_colors
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -95,14 +95,9 @@ class MainWindow(QMainWindow):
         driver_tables = build_driver_tables(df_analysis)
         # --- 1) Generar un mapa de colores por piloto ---
         ts = compute_top_speeds(df_analysis)
-        team_colors = {}
+        team_colors = get_team_colors()
         for team in ts['team'].unique():
-            if team == 'Campos Racing':
-                team_colors[team] = '#FF5733'
-            elif team == 'Griffin Core':
-                team_colors[team] = '#33C1FF'
-            else:
-                team_colors[team] = f'#{random.randint(0,0xFFFFFF):06x}'
+            team_colors.setdefault(team, f'#{random.randint(0,0xFFFFFF):06x}')
 
         # Diccionario de figuras para el reporte
         figs: dict[str, go.Figure] = {}
