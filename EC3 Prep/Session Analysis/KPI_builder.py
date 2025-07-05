@@ -601,7 +601,8 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
             # conteo
             "slip_laps":               g["slipstream"].sum(),
             "total_laps":              len(g),
-        }))
+            
+        }),include_groups=False)
         .reset_index()
     )
     stats["slip_pct"] = stats["slip_laps"] / stats["total_laps"] * 100
@@ -801,7 +802,7 @@ def driver_lap_table(
         base_cols = base_cols[:3] + sec_cols + base_cols[3:]
 
     gap_cols: list[str] = []
-    if include_sectors and include_sector_gaps and {"T1", "T2", "T3"}.issubset(df.columns):
+    if include_sector_gaps and {"T1", "T2", "T3"}.issubset(df.columns):
         tmp = df[["T1", "T2", "T3"]].apply(pd.to_datetime, format="%H:%M:%S.%f", errors="coerce")
         for tcol, new in zip(["T1", "T2", "T3"], ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]):
             s = tmp.sort_values(tcol).reset_index()
@@ -862,10 +863,36 @@ def build_driver_tables(
     if not pd.api.types.is_numeric_dtype(df["lap_time"]):
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
-    # 3) timestamp y GapAhead
+    # ─────────────── 3) timestamp, GapAhead y sellos por sector ────────────────
     df["timestamp"] = pd.to_datetime(df["hour"], format="%H:%M:%S.%f", errors="coerce")
     df = df.sort_values("timestamp").reset_index(drop=True)
     df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
+
+    # -------- construir T1/T2/T3 + GapAhead_Sx si hay sectores -----------------
+    gap_cols: list[str] = []           # ① declaras antes de usar
+
+    if include_sector_gaps and {"sector1", "sector2", "sector3"}.issubset(df.columns):
+        # ② asegura sector1-3 en segundos
+        for sc in ("sector1", "sector2", "sector3"):
+            if not pd.api.types.is_numeric_dtype(df[sc]):
+                df[sc] = df[sc].apply(parse_time_to_seconds)
+
+        # sellos de paso por meta y sectores
+        df["T3"] = df["timestamp"]
+        df["T2"] = df["T3"] - pd.to_timedelta(df["sector3"], unit="s")
+        df["T1"] = df["T2"] - pd.to_timedelta(df["sector2"], unit="s")
+
+        # Δt al coche precedente en cada sector
+        for lab, tcol in zip(("S1", "S2", "S3"), ("T1", "T2", "T3")):
+            df[f"GapAhead_{lab}"] = df[tcol].diff().dt.total_seconds().abs()
+            gap_cols.append(f"GapAhead_{lab}")
+
+    elif include_sector_gaps:
+        # ③ si no hay sectores, sólo añade las columnas si ya existen
+        gap_cols = [
+            c for c in ("GapAhead_S1", "GapAhead_S2", "GapAhead_S3")
+            if c in df.columns
+        ]
 
     # 4) filtra: lap rápida + gap pequeño
     if filter_fast:
@@ -890,14 +917,6 @@ def build_driver_tables(
                     df[std] = df[raw]
                 sec_cols.append(std)
 
-    gap_cols: list[str] = []
-    if include_sectors and include_sector_gaps and {"T1", "T2", "T3"}.issubset(df.columns):
-        tmp = df[["T1", "T2", "T3"]].apply(pd.to_datetime, format="%H:%M:%S.%f", errors="coerce")
-        for tcol, new in zip(["T1", "T2", "T3"], ["gap_ahead_s1", "gap_ahead_s2", "gap_ahead_s3"]):
-            s = tmp.sort_values(tcol).reset_index()
-            dt = s[tcol].diff().dt.total_seconds().abs()
-            df.loc[s["index"], new] = dt.values
-            gap_cols.append(new)
 
     base_cols = ["lap_number", "lap_time", *sec_cols, "GapAhead", *gap_cols, "top_speed"]
     rename = {"lap_number": "Vuelta", "lap_time": "LapTime", "top_speed": "TopSpeed"}

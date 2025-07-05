@@ -657,16 +657,16 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
 
     filter_fast   = "ALL" not in (lap_toggle or [])
     include_sects = "SECT" in (sec_toggle or [])
-    show_gap      = "GAP" in (gap_toggle or [])
+    include_gap   = "GAP" in (gap_toggle or [])
     figs, driver_tables = build_figures(
         df_analysis, df_class, weather_df, tracklimits_df, teams,
         filter_fast=filter_fast,
         include_sectors=include_sects,
-        include_sector_gaps=show_gap,
+        include_sector_gaps=include_gap,
     )
 
     table_divs = [
-        make_gap_table(tbl, drv, include_sector_gaps=show_gap) for drv, tbl in driver_tables.items()
+        make_gap_table(tbl, drv, include_gap) for drv, tbl in driver_tables.items()
     ]
 
     graphs = [html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})]
