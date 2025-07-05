@@ -830,12 +830,14 @@ def build_driver_tables(
 
     # 6) columnas finales
     base_cols = [
+        "team",
         "lap_number", "lap_time",
         *sec_cols,
         "GapStart", *gap_cols,
         "top_speed",
     ]
     rename = {
+        "team" : "Team",
         "lap_number": "Vuelta",
         "lap_time": "LapTime",
         "GapStart":  "GapStart",
@@ -847,3 +849,67 @@ def build_driver_tables(
         tbl = g[base_cols].rename(columns=rename)
         tables[drv] = tbl.sort_values("LapTime").reset_index(drop=True)
     return tables
+
+def build_fastest_lap_table(
+    df: pd.DataFrame,
+    df_class: pd.DataFrame | None = None,
+    *,
+    include_sectors: bool = True,
+    include_sector_gaps: bool = False,
+) -> pd.DataFrame:
+    """
+    Devuelve la vuelta más rápida de cada piloto (una fila por piloto), opcionalmente con
+    los tiempos de sector y los gap-sectores.
+
+    Columnas mínimas: driver, lap_time, top_speed, GapStart [, Sector1-3] [, GapAhead_S1-3]
+    Se ordena por lap_time ascendente o por df_class.position si se pasa.
+    """
+    if df.empty or "driver" not in df.columns or "lap_time" not in df.columns:
+        return pd.DataFrame()
+
+    # Asegúrate de que lap_time es numérico
+    if not pd.api.types.is_numeric_dtype(df["lap_time"]):
+        df = df.copy()
+        df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
+
+    # índice de la vuelta más rápida de cada piloto
+    idx = df.groupby("driver")["lap_time"].idxmin()
+    base = df.loc[idx].copy()
+
+    # ─── Selección dinámica de columnas ─────────────────────────────
+    keep = ["driver", "team", "lap_time", "GapStart", "top_speed"]
+
+    if include_sectors:
+        keep += [c for c in base.columns if c.startswith("Sector")]
+
+    if include_sector_gaps and "GapAhead_S3" in df.columns:
+        # GapStart = GapAhead_S3 de la vuelta anterior del mismo piloto
+        df = df.sort_values(["driver", "lap_number"])
+        df["GapStart"] = (
+            df.groupby("driver")["GapAhead_S3"].shift(1)
+        )
+
+    if include_sectors:
+        keep += [c for c in ("sector1", "sector2", "sector3") if c in df.columns]
+
+    if include_sector_gaps:
+        keep += [c for c in ("GapStart", "GapAhead_S1", "GapAhead_S2", "GapAhead_S3")
+                if c in df.columns]
+        
+    base = base[keep]
+    base = base.rename(columns={"lap_time": "BestLap"})
+
+    # orden de parrilla (df_class) o por lap_time
+    if df_class is not None and "position" in df_class.columns:
+        order = (
+            df_class.sort_values("position")["driver"]
+            .dropna()
+            .tolist()
+        )
+        base["order"] = base["driver"].apply(lambda d: order.index(d) if d in order else 999)
+        base = base.sort_values("order").drop(columns="order")
+    else:
+        base = base.sort_values("lap_time")
+
+
+    return base.reset_index(drop=True)

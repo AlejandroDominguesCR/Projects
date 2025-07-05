@@ -39,12 +39,12 @@ from KPI_builder import (
     best_sector_times,
     ideal_lap_gap,
     lap_time_history,
-    pit_stop_summary,
     lap_time_consistency,
     extract_session_summary,
     slipstream_stats,
     sector_slipstream_stats,
     build_driver_tables,
+    build_fastest_lap_table,
 )
 
 
@@ -91,7 +91,12 @@ def get_grid_order(df_analysis: pd.DataFrame, df_class: pd.DataFrame) -> list[st
 
 
 
-def make_gap_table(df_tbl, driver, include_sector_gaps=False):
+def make_gap_table(
+    df_tbl: pd.DataFrame,
+    driver: str,
+    include_sector_gaps: bool = False,
+    include_sectors: bool = True,
+) -> html.Div:
     """Devuelve un Div con título + DataTable coloreado según GapAhead."""
     df_tbl = df_tbl.copy()
 
@@ -132,7 +137,6 @@ def make_gap_table(df_tbl, driver, include_sector_gaps=False):
                 "backgroundColor": "rgb(102, 178, 255)",
             },
         ])
-
         # ② gradiente de TopSpeed  (azul claro → azul oscuro)  – versión sensible
         if "TopSpeed" in df_tbl.columns and pd.api.types.is_numeric_dtype(df_tbl["TopSpeed"]):
             vmin, vmax = df_tbl["TopSpeed"].min(), df_tbl["TopSpeed"].max()
@@ -152,6 +156,9 @@ def make_gap_table(df_tbl, driver, include_sector_gaps=False):
                     "backgroundColor": f"rgba(0, 123, 255, {alpha:.2f})",
                     "color": "white" if pct_t > 0.5 else "black",
                 })
+    if not include_sectors:
+        df_tbl.drop(columns=[c for c in df_tbl.columns if c.startswith("Sector")],
+                    inplace=True, errors="ignore")
 
     return html.Div(
         children=[
@@ -161,7 +168,12 @@ def make_gap_table(df_tbl, driver, include_sector_gaps=False):
                 columns=[{"name": c, "id": c} for c in df_tbl.columns],
                 sort_action="native",
                 style_data_conditional=style_cond,
-                style_cell={"textAlign": "center"},
+                style_cell = {
+                    "textAlign": "center",
+                    "padding": "4px",
+                    "fontSize": "12px",
+                    "height": "22px",
+                },
                 style_header={"fontWeight": "bold"},
             ),
         ],
@@ -230,9 +242,9 @@ def build_figures(
 
     Returns
     -------
-    tuple[dict, OrderedDict, list[str]]
-        The figures dictionary, a mapping of driver names to tables, and the
-        preferred driver order.
+    tuple[dict, OrderedDict, pd.DataFrame, list[str]]
+        The figures dictionary, a mapping of driver names to tables, the summary
+        table of fastest laps, and the preferred driver order.
     """
 
     if teams:
@@ -246,6 +258,12 @@ def build_figures(
         teams=teams,
         filter_fast=filter_fast,
         include_sectors=include_sectors,
+        include_sector_gaps=include_sector_gaps,
+    )
+    fastest_table = build_fastest_lap_table(
+        df_analysis,
+        df_class,
+        include_sectors=include_sectors,       # ← usa los dos flags que ya calculas
         include_sector_gaps=include_sector_gaps,
     )
     grid_order = list(driver_tables.keys())
@@ -557,25 +575,6 @@ def build_figures(
             # 6) Añadimos la figura al diccionario
             figs[f"{sec.upper()} Diff"] = fig
 
-    pit_df = pit_stop_summary(df_analysis)
-    if not pit_df.empty:
-        pit_df = pit_df.sort_values('best_pit_time', ascending=True)
-        drivers = pit_df['driver'].tolist()
-        if 'team' in pit_df.columns:
-            colors = [team_colors.get(t, '#333333') for t in pit_df['team']]
-        else:
-            colors = ['#333333'] * len(pit_df)
-        fig_pit = go.Figure()
-        fig_pit.add_trace(go.Bar(x=drivers, y=pit_df['best_pit_time'], marker_color=colors, name='Mejor Parada'))
-        fig_pit.add_trace(go.Bar(x=drivers, y=pit_df['mean_pit_time'], marker_color=colors, opacity=0.6, name='Media Paradas'))
-        fig_pit.update_layout(
-            barmode='group',
-            title='Pit Stop Summary',
-            xaxis={'categoryorder':'array','categoryarray':drivers},
-            yaxis_title='Tiempo (s)'
-        )
-        figs['Pit Stop Summary'] = fig_pit
-
     cons_df = lap_time_consistency(df_analysis)
     if "team" in df_analysis.columns:
         cons_df = cons_df.merge(
@@ -652,7 +651,7 @@ def build_figures(
         ldf["timestamp"] = (
             pd.to_datetime(session_day.strftime("%Y-%m-%d ") + ldf["hour"],
                         format="%Y-%m-%d %H:%M:%S.%f", errors="coerce")
-            - pd.Timedelta(hours=0)                 # ajusta si ≠ UTC-2
+            - pd.Timedelta(hours=2)                 # ajusta si ≠ UTC-2
         )
 
         merged = (
@@ -790,7 +789,7 @@ def build_figures(
             figs["Track & Wind Evolution"]   = combo          # nuevo subplot 1×2
             figs["LapTime vs TrackTemp & WindDir"] = stack 
 
-    return figs, driver_tables, grid_order
+    return figs, driver_tables, fastest_table, grid_order
 
 def _gap_color(val: float) -> str:
     """Color de fondo según el gap en segundos."""
@@ -806,6 +805,7 @@ def export_report(
     figs: dict,
     path: str,
     driver_tables: "OrderedDict[str, pd.DataFrame] | None" = None,
+    fast_table: pd.DataFrame | None = None,
 ):
     """
     Escribe un HTML con una tabla (opcional) al principio y luego las figuras.
@@ -814,6 +814,27 @@ def export_report(
         f.write("<html><head>\n<meta charset='utf-8'>\n")
         f.write("<script src='https://cdn.plot.ly/plotly-latest.min.js'></script>\n")
         f.write("<title>Session Report</title></head><body>\n")
+
+        if fast_table is not None and not fast_table.empty:
+            ft = fast_table.copy()
+            if "BestLap" in ft.columns:
+                ft["BestLap"] = ft["BestLap"].apply(seconds_to_mmss)
+            f.write("<h2>Fastest Laps</h2>\n")
+            def _team_style(row):
+                col = TEAM_COLOR.get(row['team'], '#FFFFFF')
+                txt = 'black' if col.lower() in ('#ffff00', '#fe9900') else 'white'
+                return [f'background-color: {col}; color: {txt}'] * len(row)
+
+            styler = (
+                ft.style
+                .apply(_team_style, axis=1)
+                .format({'BestLap': seconds_to_mmss})
+                .set_table_attributes("border='1' cellspacing='0' cellpadding='3' "
+                                    "style='text-align:center; font-family:Arial; font-size:13px'")
+)
+
+            f.write(styler.to_html(index=False))
+            f.write("<hr>")
 
         if driver_tables:
             # --- encabezado + CSS de rejilla 3xN -----------------------------
@@ -966,7 +987,7 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     filter_fast   = "ALL" not in (lap_toggle or [])
     include_sects = "SECT" in (sec_toggle or [])
     include_gap   = "GAP" in (gap_toggle or [])
-    figs, driver_tables, grid_order = build_figures(
+    figs, driver_tables, fast_table, grid_order = build_figures(
         df_analysis, df_class, weather_df, tracklimits_df, teams,
         filter_fast=filter_fast,
         include_sectors=include_sects,
@@ -987,6 +1008,7 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     serialized = {
         "figs": {name: fig.to_dict() for name, fig in figs.items()},
         "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
+        "fast_table": fast_table.to_dict(orient="records"),
         "include_gap": include_gap,
         "grid_order": grid_order,
     }
@@ -1015,6 +1037,8 @@ def update_tab_content(data, tab):
 
     tables_dict = data.get("tables", {})
     driver_tables = {drv: pd.DataFrame(rows) for drv, rows in tables_dict.items()}
+    fast_rows = data.get("fast_table", [])
+    fast_df = pd.DataFrame(fast_rows)
     include_gap = data.get("include_gap", False)
 
     grid_order = data.get("grid_order", [])
@@ -1023,6 +1047,28 @@ def update_tab_content(data, tab):
         for drv in grid_order
         if drv in driver_tables
     ]
+
+    if not fast_df.empty:
+        if "BestLap" in fast_df.columns:
+            fast_df["BestLap"] = fast_df["BestLap"].apply(seconds_to_mmss)
+        team_styles = [
+            {
+                "if": {"filter_query": f'{{team}} = "{team}"'}, 
+                "backgroundColor": color,
+                "color": "black" if color.lower() in ("#ffff00", "#fe9900") else "white",
+            }
+            for team, color in TEAM_COLOR.items()
+        ]
+
+        summary = dash_table.DataTable(
+            data=fast_df.to_dict("records"),
+            columns=[{"name": c, "id": c} for c in fast_df.columns],
+            sort_action="native",
+            style_cell={"textAlign": "center"},
+            style_header={"fontWeight": "bold"},
+            style_data_conditional=team_styles,          
+        )
+        table_divs.insert(0, html.Div(summary, style={"flex": "1 0 100%", "padding": "5px"}))
 
     if tab == "tab-tables":
         return html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
@@ -1075,15 +1121,17 @@ def on_export(n_clicks, session_data):
     }
 
     # ----- reconstruir driver_tables (dict {driver: DataFrame}) --------------------
-    table_data = data.get("tables")          # llega como JSON-serializable
+    table_data = data.get("tables") 
     driver_tables = (
         {drv: pd.DataFrame(rows) for drv, rows in table_data.items()}
         if table_data else None
     )
+    fast_table_data = data.get("fast_table")
+    fast_table = pd.DataFrame(fast_table_data) if fast_table_data else None
 
     # ----- exportar el informe -----------------------------------------------------
     path = "session_report.html"
-    export_report(figs, path, driver_tables)
+    export_report(figs, path, driver_tables, fast_table)
 
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()

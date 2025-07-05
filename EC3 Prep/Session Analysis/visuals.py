@@ -19,6 +19,7 @@ from KPI_builder import (
     slipstream_stats, sector_slipstream_stats,
     pit_stop_summary, lap_time_consistency,
     build_driver_tables,
+    build_fastest_lap_table,
 )
 
 from main_analysis import export_report, get_team_colors
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
         df_analysis['driver'] = df_analysis[driver_col]
         df_analysis = convert_time_column(df_analysis, 'lap_time')
         driver_tables = build_driver_tables(df_analysis)
+        fast_table = build_fastest_lap_table(df_analysis, df_class)
         # --- 1) Generar un mapa de colores por piloto ---
         ts = compute_top_speeds(df_analysis)
         team_colors = get_team_colors()
@@ -418,6 +420,7 @@ class MainWindow(QMainWindow):
             figs,
             os.path.join(folder, 'session_report.html'),
             driver_tables=driver_tables,
+            fast_table=fast_table,
         )
         webbrowser.open(f"file://{os.path.join(folder, 'session_report.html')}")
         self.stack.setCurrentWidget(self.graphs_page)
