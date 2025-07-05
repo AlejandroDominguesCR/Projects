@@ -28,8 +28,10 @@ from data_process import (
     export_raw_session,
     unify_timestamps,
     convert_time_column,
-    seconds_to_mmss
+    seconds_to_mmss,
+    parse_time_to_seconds,
 )
+
 from KPI_builder import (
     compute_top_speeds,
     track_limit_rate,
@@ -61,6 +63,32 @@ def get_team_colors() -> dict[str, str]:
     }
 
 TEAM_COLOR = get_team_colors()
+
+
+def get_grid_order(df_analysis: pd.DataFrame, df_class: pd.DataFrame) -> list[str]:
+    if not df_class.empty and "position" in df_class.columns:
+        drv_col = next(
+            (c for c in [
+                "driver",
+                "driver_name",
+                "driver_shortname",
+                "driver_number",
+            ] if c in df_class.columns),
+            "driver",
+        )
+        return df_class.sort_values("position")[drv_col].dropna().tolist()
+
+    df = df_analysis.copy()
+    if not pd.api.types.is_numeric_dtype(df["lap_time"]):
+        df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
+    return (
+        df.groupby("driver")["lap_time"]
+        .min()
+        .sort_values()
+        .index
+        .tolist()
+    )
+
 
 
 def make_gap_table(df_tbl, driver, include_sector_gaps=False):
@@ -202,10 +230,14 @@ def build_figures(
 
     Returns
     -------
-    tuple[dict, OrderedDict]
-        The figures dictionary and a mapping of driver names to tables.
+    tuple[dict, OrderedDict, list[str]]
+        The figures dictionary, a mapping of driver names to tables, and the
+        preferred driver order.
     """
 
+    if teams:
+        df_analysis = df_analysis[df_analysis["team"].isin(teams)]
+    figs = {}
     if teams:
         df_analysis = df_analysis[df_analysis["team"].isin(teams)]
     figs = {}
@@ -216,10 +248,29 @@ def build_figures(
         include_sectors=include_sectors,
         include_sector_gaps=include_sector_gaps,
     )
+    grid_order = list(driver_tables.keys())
+    if not df_class.empty and "position" in df_class.columns:
+        grid_order = (
+            df_class.sort_values("position")["driver"].tolist()
+        )
+    grid_order = [d for d in grid_order if d in driver_tables]
+    for drv in driver_tables:
+        if drv not in grid_order:
+            grid_order.append(drv)
+    grid_order = get_grid_order(df_analysis, df_class)
+
+    ordered = OrderedDict()
+    for drv in grid_order:
+        if drv in driver_tables:
+            ordered[drv] = driver_tables[drv]
+    for drv, tbl in driver_tables.items():
+        if drv not in ordered:
+            ordered[drv] = tbl
+    driver_tables = ordered
     # Top Speeds for each driver & generar colores por piloto
     ts = compute_top_speeds(df_analysis)
     # Mapa de colores por equipo (igual que Team Ranking)
-    ts = compute_top_speeds(df_analysis)
+    team_colors = get_team_colors()
     # Mapa de colores por equipo (igual que Team Ranking)
     team_colors = get_team_colors()
     for team in ts['team'].unique():
@@ -526,14 +577,19 @@ def build_figures(
         figs['Pit Stop Summary'] = fig_pit
 
     cons_df = lap_time_consistency(df_analysis)
+    if "team" in df_analysis.columns:
+        cons_df = cons_df.merge(
+            df_analysis[["driver", "team"]].drop_duplicates(),
+            on="driver",
+            how="left",
+        )
     if not cons_df.empty:
         cons_df = cons_df.sort_values('lap_time_std', ascending=True)
         fig_cons = px.bar(
             cons_df,
-            x='driver', y='lap_time_std',
-            color='team' if 'team' in cons_df.columns else None,
-            color_discrete_map=team_colors,
-            title='Lap Time Consistency'
+            x="driver", y="lap_time_std",
+            color="team", color_discrete_map=TEAM_COLOR,
+            title="Lap Time Consistency",
         )
         ymin, ymax = cons_df['lap_time_std'].min(), cons_df['lap_time_std'].max()
         delta = ymax - ymin
@@ -591,12 +647,12 @@ def build_figures(
         wdf["timestamp"] = pd.to_datetime(wdf[time_col], errors="coerce")
 
         # ③ Alineamos meteo con vueltas -----------------------------------------
-        ldf = df_analysis[["lap_number", "lap_time", "hour"]].copy()
+        ldf = df_analysis[["lap_number", "lap_time", "hour", "driver", "team"]].copy()
         session_day = wdf["timestamp"].dropna().iloc[0].normalize()
         ldf["timestamp"] = (
             pd.to_datetime(session_day.strftime("%Y-%m-%d ") + ldf["hour"],
                         format="%Y-%m-%d %H:%M:%S.%f", errors="coerce")
-            - pd.Timedelta(hours=2)                 # ajusta si ≠ UTC-2
+            - pd.Timedelta(hours=0)                 # ajusta si ≠ UTC-2
         )
 
         merged = (
@@ -607,6 +663,7 @@ def build_figures(
                         tolerance=pd.Timedelta("5min"))
             .dropna(subset=["wind_direction", "lap_time"])
         )
+        merged["color"] = merged["team"].map(TEAM_COLOR).fillna("#888")
 
         if not merged.empty and temp_col:
             # ───── Gráfico 1: Track-Temp vs Time ───────────────────────────────
@@ -652,6 +709,7 @@ def build_figures(
             fig_scatter_rot.update_layout(
                 xaxis_title="Lap Time (s)", yaxis_title="Dirección (°)"
             )
+            fig_scatter_rot.update_traces(marker_color=merged["color"])
 
             # ───── Combina Track-Temp + Wind evolution en 1×2 ─────────────────
             combo = make_subplots(
@@ -686,7 +744,7 @@ def build_figures(
                 title="Track Temp vs Lap Time",
                 labels={"lap_time": "Lap Time (s)", temp_col: "Temp (°C)"}
             )
-            fig_temp_vs_lt.update_traces(marker=dict(color="#FF8800"), showlegend=False)
+            fig_temp_vs_lt.update_traces(marker_color=merged["color"], showlegend=False)
 
             # ───── Gráfico 3-B: Wind-Dir vs Lap-Time (ya creado arriba) ───────
             # (fig_scatter_rot)
@@ -732,7 +790,7 @@ def build_figures(
             figs["Track & Wind Evolution"]   = combo          # nuevo subplot 1×2
             figs["LapTime vs TrackTemp & WindDir"] = stack 
 
-    return figs, driver_tables
+    return figs, driver_tables, grid_order
 
 def _gap_color(val: float) -> str:
     """Color de fondo según el gap en segundos."""
@@ -908,7 +966,7 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     filter_fast   = "ALL" not in (lap_toggle or [])
     include_sects = "SECT" in (sec_toggle or [])
     include_gap   = "GAP" in (gap_toggle or [])
-    figs, driver_tables = build_figures(
+    figs, driver_tables, grid_order = build_figures(
         df_analysis, df_class, weather_df, tracklimits_df, teams,
         filter_fast=filter_fast,
         include_sectors=include_sects,
@@ -959,7 +1017,7 @@ def update_tab_content(data, tab):
     driver_tables = {drv: pd.DataFrame(rows) for drv, rows in tables_dict.items()}
     include_gap = data.get("include_gap", False)
 
-    grid_order = data.get("grid_order", list(driver_tables.keys()))
+    grid_order = data.get("grid_order", [])
     table_divs = [
         make_gap_table(driver_tables[drv], drv, include_gap)
         for drv in grid_order
