@@ -492,6 +492,47 @@ def build_figures(
         )
         figs['Lap Time Consistency'] = fig_cons
 
+    # --- Wind Direction vs Lap Time -----------------------------------------
+    if (
+        not weather_df.empty
+        and 'wind_direction' in weather_df.columns
+        and 'hour' in df_analysis.columns
+    ):
+        wdf = weather_df.copy()
+        wdf['wind_direction'] = (
+            wdf['wind_direction'].astype(str)
+            .str.replace(',', '.')
+            .astype(float)
+        )
+        wdf['timestamp'] = pd.to_datetime(
+            wdf.get('time_utc_str'), dayfirst=True, errors='coerce'
+        )
+
+        ldf = df_analysis[['lap_number', 'lap_time', 'hour']].copy()
+        ldf['timestamp'] = pd.to_datetime(ldf['hour'], format='%H:%M:%S.%f', errors='coerce')
+
+        if not wdf['timestamp'].isna().all() and not ldf['timestamp'].isna().all():
+            delta = ldf['timestamp'].iloc[0] - wdf['timestamp'].iloc[0]
+            wdf['timestamp'] += delta
+
+            merged = pd.merge_asof(
+                ldf.sort_values('timestamp'),
+                wdf.sort_values('timestamp'),
+                on='timestamp',
+                direction='nearest'
+            )
+            merged = merged.dropna(subset=['wind_direction', 'lap_time'])
+
+            if not merged.empty:
+                fig_wind = px.scatter(
+                    merged,
+                    x='wind_direction',
+                    y='lap_time',
+                    trendline='ols',
+                    title='Wind Direction vs Lap Time'
+                )
+                figs['Wind Direction vs Lap Time'] = fig_wind
+
     return figs, driver_tables
 
 def _gap_color(val: float) -> str:
