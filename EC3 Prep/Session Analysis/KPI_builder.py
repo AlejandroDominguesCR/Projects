@@ -857,24 +857,55 @@ def build_fastest_lap_table(
     include_sectors: bool = True,
     include_sector_gaps: bool = False,
 ) -> pd.DataFrame:
-    """
-    Devuelve la vuelta más rápida de cada piloto (una fila por piloto), opcionalmente con
-    los tiempos de sector y los gap-sectores.
+    """Return one fastest lap per driver with optional sector information."""
 
-    Columnas mínimas: driver, lap_time, top_speed, GapStart [, Sector1-3] [, GapAhead_S1-3]
-    Se ordena por lap_time ascendente o por df_class.position si se pasa.
-    """
     if df.empty or "driver" not in df.columns or "lap_time" not in df.columns:
         return pd.DataFrame()
 
-    # Asegura que modificaremos una copia
     df = df.copy()
 
-    # Asegúrate de que lap_time es numérico
     if not pd.api.types.is_numeric_dtype(df["lap_time"]):
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
-    # GapStart puede no existir en los datos de entrada → calcularlo si es posible
+    # ─── Opcional: calcular sectores y gaps si se solicitan ───────────────
+    if include_sectors or include_sector_gaps:
+        # timestamp + GapAhead general
+        if "timestamp" not in df.columns and "hour" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
+        if "GapAhead" not in df.columns and "timestamp" in df.columns:
+            df = df.sort_values("timestamp").reset_index(drop=True)
+            df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
+
+        # localizar y convertir columnas de sector
+        sector_aliases = {
+            "sector1": ["sector1", "s1", "sector1_seconds", "s1_seconds"],
+            "sector2": ["sector2", "s2", "sector2_seconds", "s2_seconds"],
+            "sector3": ["sector3", "s3", "sector3_seconds", "s3_seconds"],
+        }
+        sector_cols = {
+            std: next((c for c in aliases if c in df.columns), None)
+            for std, aliases in sector_aliases.items()
+        }
+
+        if all(sector_cols.values()):
+            for col in sector_cols.values():
+                if not pd.api.types.is_numeric_dtype(df[col]):
+                    df[col] = df[col].apply(parse_time_to_seconds)
+
+            df["T3"] = df["timestamp"]
+            df["T2"] = df["T3"] - pd.to_timedelta(df[sector_cols["sector3"]], unit="s")
+            df["T1"] = df["T2"] - pd.to_timedelta(df[sector_cols["sector2"]], unit="s")
+
+            df["GapAhead_S1"] = df["T1"].diff().dt.total_seconds().abs()
+            df["GapAhead_S2"] = df["T2"].diff().dt.total_seconds().abs()
+            df["GapAhead_S3"] = df["T3"].diff().dt.total_seconds().abs()
+
+            if include_sectors:
+                df["Sector1"] = df[sector_cols["sector1"]]
+                df["Sector2"] = df[sector_cols["sector2"]]
+                df["Sector3"] = df[sector_cols["sector3"]]
+
+    # GapStart si no existe
     if "GapStart" not in df.columns:
         sort_cols = ["driver"]
         if "lap_number" in df.columns:
@@ -893,29 +924,18 @@ def build_fastest_lap_table(
     keep = [c for c in ["driver", "team", "lap_time", "GapStart", "top_speed"] if c in base.columns]
 
     if include_sectors:
-        keep += [c for c in base.columns if c.startswith("Sector")]
-
-    if include_sectors:
-        keep += [c for c in ("sector1", "sector2", "sector3") if c in df.columns]
+        keep += [c for c in ("Sector1", "Sector2", "Sector3") if c in base.columns]
 
     if include_sector_gaps:
-        keep += [c for c in ("GapStart", "GapAhead_S1", "GapAhead_S2", "GapAhead_S3") if c in df.columns]
+        keep += [c for c in ("GapStart", "GapAhead_S1", "GapAhead_S2", "GapAhead_S3") if c in base.columns]
 
     base = base[keep]
     base = base.rename(columns={"lap_time": "BestLap"})
 
-
-    # orden de parrilla (df_class) o por lap_time
     if df_class is not None and "position" in df_class.columns:
         order = (
             df_class.sort_values("position")["driver"]
             .dropna()
             .tolist()
         )
-        base["order"] = base["driver"].apply(lambda d: order.index(d) if d in order else 999)
-        base = base.sort_values("order").drop(columns="order")
-    else:
-        base = base.sort_values("BestLap")
 
-
-    return base.reset_index(drop=True)
