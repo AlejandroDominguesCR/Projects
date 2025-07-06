@@ -45,36 +45,53 @@ from KPI_builder import (
     sector_slipstream_stats,
     build_driver_tables,
     build_fastest_lap_table,
+    slipstream_gap_gain,
+    slipstream_sector_gap_gain,
 )
 
-
 def get_team_colors() -> dict[str, str]:
+    """Devuelve el color principal (hex) para cada equipo."""
     return {
-        "Campos Racing": "#FF5733",
-        "Griffin Core": "#33C1FF",
-        "MP Motorsport": "#FFBB00",
-        "Palou Motorsport": "#8844DD",
-        "KCL MP Motorsport": "#99CC00",
-        "Allay Racing": "#228B22",
-        "Saintéloc Racing": "#C71585",
-        "Drivex": "#FF33AA",
-        "DXR": "#00AACC",
-        "Sparco Palou MS": "#666666",
+        # Amarillo
+        "GriffinCore": "#FFFF00",
+        "Griffin Core": "#FFFF00",
+        "Campos Racing": "#FFFF00",
+
+        # Amarillo
+        "Campos Racing": "#FFFF00",
+        # Rojo
+        "Drivex": "#FF0000",
+        # Verde
+        "GRS Team": "#008000",
+        # Gris claro
+        "Allay Racing": "#00FA2A",
+        # Naranja
+        "MP Motorsport": "#FE9900",
+        "KCL MP Motorsport": "#FE9900",
+       # Azul-violeta
+        "Palou Motorsport": "#2E2B9B",
+        "Sparco Palou MS": "#2E2B9B",
+        # Azul muy oscuro
+        "Sainteloc Racing": "#FF02DD",
+        "Sainteloc Racing":   "#FF02DD",
+        "Saintéloc Racing": "#FF02DD",
+        "Sainteloc Raccing": "#FF02DD",
+        "Saintéloc Raccing": "#FF02DD",
     }
 
-TEAM_COLOR = get_team_colors()
 
+TEAM_COLOR = get_team_colors()
 
 def get_grid_order(df_analysis: pd.DataFrame, df_class: pd.DataFrame) -> list[str]:
     if not df_class.empty and "position" in df_class.columns:
         drv_col = next(
             (c for c in [
-                "driver",
+                "number",
                 "driver_name",
                 "driver_shortname",
                 "driver_number",
             ] if c in df_class.columns),
-            "driver",
+            "number",
         )
         return df_class.sort_values("position")[drv_col].dropna().tolist()
 
@@ -82,18 +99,16 @@ def get_grid_order(df_analysis: pd.DataFrame, df_class: pd.DataFrame) -> list[st
     if not pd.api.types.is_numeric_dtype(df["lap_time"]):
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
     return (
-        df.groupby("driver")["lap_time"]
+        df.groupby("number")["lap_time"]
         .min()
         .sort_values()
         .index
         .tolist()
     )
 
-
-
 def make_gap_table(
     df_tbl: pd.DataFrame,
-    driver: str,
+    number: str,
     include_sector_gaps: bool = False,
     include_sectors: bool = True,
 ) -> html.Div:
@@ -162,7 +177,7 @@ def make_gap_table(
 
     return html.Div(
         children=[
-            html.H4(driver),
+            html.H4(number),
             dash_table.DataTable(
                 data=df_tbl.to_dict("records"),
                 columns=[{"name": c, "id": c} for c in df_tbl.columns],
@@ -197,23 +212,48 @@ def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
     tracklimits_df = data.get(tracklimits_key, pd.DataFrame())
 
     driver_col = next(
-        (c for c in ["driver_name", "driver_shortname", "driver_number"] if c in df_analysis.columns),
-        None,
+        c for c in ["driver_shortname", "driver_name", "driver_number"]
+        if c in df_analysis.columns
     )
-    if not driver_col:
-        raise KeyError("No se encontró columna de piloto en Analysis")
-    df_analysis = df_analysis.copy()
+
+    # (1) identificador único: apellido + #dorsal
+    if "number" in df_analysis.columns:
+        df_analysis["number"] = (
+            df_analysis[driver_col].astype(str).str.strip()
+            + " #" + df_analysis["number"].astype(str)
+        )
+    else:
+        df_analysis["number"] = df_analysis[driver_col]
+
+    # (2) columna legible para mostrar
     df_analysis["driver"] = df_analysis[driver_col]
     df_analysis = convert_time_column(df_analysis, "lap_time")
 
     if not df_class.empty:
         class_driver = next(
-            (c for c in ["driver_name", "driver_shortname", "driver_number"] if c in df_class.columns),
+            (c for c in ["driver_name", "driver_shortname", "driver_number"]
+            if c in df_class.columns),
             None,
         )
         if class_driver:
             df_class = df_class.copy()
-            df_class["driver"] = df_class[class_driver]
+
+            # 1) localizar columna con el dorsal ──> número único
+            dorsal_col = next(
+                (c for c in ["number", "dorsal", "no", "car_number", "driver_number"]
+                if c in df_class.columns),
+                None,
+            )
+
+            if dorsal_col:
+                # "Smith #45", "García #21", …
+                df_class["number"] = (
+                    df_class[class_driver].astype(str).str.strip()
+                    + " #" + df_class[dorsal_col].astype(str)
+                )
+            else:
+                # no hay dorsal → al menos usa el nombre corto
+                df_class["number"] = df_class[class_driver].astype(str).str.strip()
 
     return df_analysis, df_class, weather_df, tracklimits_df
 
@@ -243,8 +283,8 @@ def build_figures(
     Returns
     -------
     tuple[dict, OrderedDict, pd.DataFrame, list[str]]
-        The figures dictionary, a mapping of driver names to tables, the summary
-        table of fastest laps, and the preferred driver order.
+        The figures dictionary, a mapping of number names to tables, the summary
+        table of fastest laps, and the preferred number order.
     """
 
     if teams:
@@ -269,7 +309,7 @@ def build_figures(
     grid_order = list(driver_tables.keys())
     if not df_class.empty and "position" in df_class.columns:
         grid_order = (
-            df_class.sort_values("position")["driver"].tolist()
+            df_class.sort_values("position")["number"].tolist()
         )
     grid_order = [d for d in grid_order if d in driver_tables]
     for drv in driver_tables:
@@ -285,7 +325,7 @@ def build_figures(
         if drv not in ordered:
             ordered[drv] = tbl
     driver_tables = ordered
-    # Top Speeds for each driver & generar colores por piloto
+    # Top Speeds for each number & generar colores por piloto
     ts = compute_top_speeds(df_analysis)
     # Mapa de colores por equipo (igual que Team Ranking)
     team_colors = get_team_colors()
@@ -300,9 +340,9 @@ def build_figures(
     if not ss.empty:
         # 1) Lap-time mínimo (orden asc.)
         ss_lap   = ss.sort_values("min_lap_time_with_slip")
-        orderLap = ss_lap["driver"].tolist()
+        orderLap = ss_lap["number"].tolist()
         fig_slip_lap = px.bar(
-            ss_lap, x="driver",
+            ss_lap, x="number",
             y=["min_lap_time_no_slip", "min_lap_time_with_slip"],
             barmode="group", title="Lap-time mínimo – Con vs Sin rebufo",
         )
@@ -317,9 +357,9 @@ def build_figures(
 
         # 2) Top-speed máximo (orden desc.)
         ss_spd   = ss.sort_values("max_top_speed_with_slip", ascending=False)
-        orderSpd = ss_spd["driver"].tolist()
+        orderSpd = ss_spd["number"].tolist()
         fig_slip_speed = px.bar(
-            ss_spd, x="driver",
+            ss_spd, x="number",
             y=["max_top_speed_no_slip", "max_top_speed_with_slip"],
             barmode="group", title="Top Speed máxima – Con vs Sin rebufo",
         )
@@ -338,10 +378,10 @@ def build_figures(
 
     if not ss_sector.empty:
         s1 = ss_sector.sort_values("min_s1_with_slip")
-        order_s1 = s1["driver"].tolist()
+        order_s1 = s1["number"].tolist()
         fig_s1 = px.bar(
             s1,
-            x="driver",
+            x="number",
             y=["min_s1_no_slip", "min_s1_with_slip"],
             barmode="group",
             title="Slipstream Lap-time S1",
@@ -354,10 +394,10 @@ def build_figures(
         )
 
         s2 = ss_sector.sort_values("min_s2_with_slip")
-        order_s2 = s2["driver"].tolist()
+        order_s2 = s2["number"].tolist()
         fig_s2 = px.bar(
             s2,
-            x="driver",
+            x="number",
             y=["min_s2_no_slip", "min_s2_with_slip"],
             barmode="group",
             title="Slipstream Lap-time S2",
@@ -375,10 +415,102 @@ def build_figures(
     if not ss.empty or not ss_sector.empty:
         df_tmp = df_analysis.copy()
         df_tmp['slipstream'] = False
+
+
+    if "GapAhead" not in df_analysis.columns:
+        if "timestamp" not in df_analysis.columns:
+            df_analysis["timestamp"] = pd.to_datetime(df_analysis["hour"], errors="coerce")
+        df_analysis = df_analysis.sort_values("timestamp").reset_index(drop=True)
+        df_analysis["GapAhead"] = df_analysis["timestamp"].diff().dt.total_seconds().abs()
+    
+    
+    need_sec_gaps = {"GapAhead_S1", "GapAhead_S2", "GapAhead_S3"}
+    if need_sec_gaps - set(df_analysis.columns):
+        # ① localizar columnas de sector en segundos
+        s2 = next((c for c in df_analysis.columns
+                if c.lower() in {"s2_seconds","s2","sector2"}), None)
+        s3 = next((c for c in df_analysis.columns
+                if c.lower() in {"s3_seconds","s3","sector3"}), None)
+        if s2 and s3:
+            # ② asegurar que S2/S3 están en segundos
+            for col in (s2, s3):
+                if not pd.api.types.is_numeric_dtype(df_analysis[col]):
+                    df_analysis[col] = df_analysis[col].apply(parse_time_to_seconds)
+            # ③ timestamps por vuelta
+            if "timestamp" not in df_analysis.columns:
+                df_analysis["timestamp"] = pd.to_datetime(df_analysis["hour"],
+                                                        errors="coerce")
+            df_analysis["T3"] = df_analysis["timestamp"]
+            df_analysis["T2"] = df_analysis["T3"] - pd.to_timedelta(df_analysis[s3], unit="s")
+            df_analysis["T1"] = df_analysis["T2"] - pd.to_timedelta(df_analysis[s2], unit="s")
+            # ④ gaps ordenando por cada split
+            df_analysis["GapAhead_S1"] = (
+                df_analysis.loc[df_analysis["T1"].sort_values().index, "T1"]
+                            .diff().dt.total_seconds().abs()
+                            .reindex(df_analysis.index)
+            )
+            df_analysis["GapAhead_S2"] = (
+                df_analysis.loc[df_analysis["T2"].sort_values().index, "T2"]
+                            .diff().dt.total_seconds().abs()
+                            .reindex(df_analysis.index)
+            )
+            df_analysis["GapAhead_S3"] = (
+                df_analysis.loc[df_analysis["T3"].sort_values().index, "T3"]
+                            .diff().dt.total_seconds().abs()
+                            .reindex(df_analysis.index)
+            )
+
+    gain_df = slipstream_gap_gain(
+        df_analysis,
+        gap_col="GapAhead",
+        fast_threshold=0.03,   # ← solo vueltas ≤ 107 % de la best-lap
+    )
+    if not gain_df.empty:
+        fig_gain = px.scatter(
+            gain_df, x="gap_range", y="mean_gain",
+            error_y="std_gain", size="laps",
+            title="Ganancia media de lap-time vs Gap",
+            labels={"mean_gain": "Δt medio (s)", "gap_range": "Gap en meta (s)"},
+        )
+        figs["Slipstream gain vs gap"] = fig_gain
+    
+    for raw, std in [(s2, "Sector2"), (s3, "Sector3")]:
+        if not pd.api.types.is_numeric_dtype(df_analysis[raw]):
+            df_analysis[raw] = df_analysis[raw].apply(parse_time_to_seconds)
+        df_analysis[std] = df_analysis[raw]            
+
+    #     necesitamos también S1
+    s1 = next((c for c in df_analysis.columns
+            if c.lower() in {"s1_seconds","s1","sector1"}), None)
+    if s1:
+        if not pd.api.types.is_numeric_dtype(df_analysis[s1]):
+            df_analysis[s1] = df_analysis[s1].apply(parse_time_to_seconds)
+        df_analysis["Sector1"] = df_analysis[s1]  
+
+    sector_gain = slipstream_sector_gap_gain(df_analysis)
+    if not sector_gain.empty:
+        fig_sector = px.line(
+            sector_gain, x="gap_range", y="mean_gain",
+            color="sector",  markers=True, error_y="std_gain",
+            labels={
+                "gap_range": "Gap (s)",
+                "mean_gain": "Δsector-time (s)",
+                "sector": "Sector",
+            },
+            title="Ganancia por sector vs Gap",
+        )
+        fig_sector.update_layout(
+            xaxis=dict(
+                categoryorder="array",
+                categoryarray=[
+                    "[0.0, 0.5)", "[0.5, 1.0)", "[1.0, 1.5)", "[1.5, 2.0)",
+                    "[2.0, 2.5)", "[2.5, 3.5)", "[3.5, 5.0)", "[5.0, inf)"
+                ]
+            )
+        )
+        figs["Slipstream gain by sector"] = fig_sector
                
             
-
-
     # --- función auxiliar rápida para marcar las vueltas --------------------
     def _flag_slip(df):
         df = df.sort_values("hour")
@@ -398,14 +530,14 @@ def build_figures(
         # Propaga al lap siguiente
         df["slipstream"] = (
             df["slip_flag"]
-            | df.groupby("driver")["slip_flag"].shift(fill_value=False)
+            | df.groupby("number")["slip_flag"].shift(fill_value=False)
         )
         return df
 
     # ① agrupa y saca la punta máxima con y sin rebufo
     ts_split = (
         df_tmp
-        .groupby(["driver", "slipstream"])["top_speed"]
+        .groupby(["number", "slipstream"])["top_speed"]
         .max()
         .reset_index()
     )
@@ -417,12 +549,12 @@ def build_figures(
     # Gráfico Top Speeds con colores por piloto
     fig_ts = px.bar(
         ts,
-        x="driver", y="max_top_speed",
+        x="number", y="max_top_speed",
         color="team", color_discrete_map=team_colors,
         title="Top Speeds (ordenado desc)"
     )
     fig_ts.update_layout(
-        xaxis={'categoryorder':'array','categoryarray':ts['driver'].tolist()}
+        xaxis={'categoryorder':'array','categoryarray':ts['number'].tolist()}
     )
     # Límite dinámico Y
     ymin, ymax = ts['max_top_speed'].min(), ts['max_top_speed'].max()
@@ -441,7 +573,7 @@ def build_figures(
         rate_df = track_limit_rate(tracklimits_df, df_analysis)
         figs["Track Limits per Lap"] = px.bar(
             rate_df,
-            x="driver",
+            x="number",
             y="rate",
             title="Track Limits per Lap",
         )
@@ -469,7 +601,7 @@ def build_figures(
     ig = ideal_lap_gap(df_analysis)
     if not ig.empty:
         ig_sorted = ig.sort_values('best_lap', ascending=True).reset_index(drop=True)
-        drivers = ig_sorted['driver'].tolist()
+        drivers = ig_sorted['number'].tolist()
         cols = [team_colors[t] for t in ig_sorted['team']]
 
         fig_gap = go.Figure()
@@ -511,9 +643,9 @@ def build_figures(
     if not hist_df.empty:
         lap_col = 'lap_number' if 'lap_number' in hist_df.columns else 'lap'
         fig_hist = px.line(
-            hist_df.sort_values([lap_col, 'driver']),
+            hist_df.sort_values([lap_col, 'number']),
             x=lap_col, y='lap_time',
-            color='team', line_group='driver',
+            color='team', line_group='number',
             color_discrete_map=team_colors,
             title="Histórico de tiempos por vuelta",
         )
@@ -535,8 +667,8 @@ def build_figures(
     bst = best_sector_times(df_analysis)
     if not bst.empty:
         for sec in ['sector1', 'sector2', 'sector3']:
-            # 1) DataFrame con driver, team y mejor tiempo de sector
-            df_sec = bst[['driver', 'team', sec]].copy()
+            # 1) DataFrame con number, team y mejor tiempo de sector
+            df_sec = bst[['number', 'team', sec]].copy()
 
             # 2) Calculamos la diferencia vs el tiempo mínimo (0.0 para el más rápido)
             best_time = df_sec[sec].min()
@@ -548,7 +680,7 @@ def build_figures(
             # 4) Gráfico de barras coloreado por equipo
             fig = px.bar(
                 df_sec,
-                x='driver',
+                x='number',
                 y='diff',
                 color='team',
                 color_discrete_map=team_colors,
@@ -558,7 +690,7 @@ def build_figures(
             fig.update_layout(
                 xaxis={
                     'categoryorder': 'array',
-                    'categoryarray': df_sec['driver'].tolist()
+                    'categoryarray': df_sec['number'].tolist()
                 }
             )
 
@@ -575,18 +707,19 @@ def build_figures(
             # 6) Añadimos la figura al diccionario
             figs[f"{sec.upper()} Diff"] = fig
 
+    
     cons_df = lap_time_consistency(df_analysis)
     if "team" in df_analysis.columns:
         cons_df = cons_df.merge(
-            df_analysis[["driver", "team"]].drop_duplicates(),
-            on="driver",
+            df_analysis[["number", "team"]].drop_duplicates(),
+            on="number",
             how="left",
         )
     if not cons_df.empty:
         cons_df = cons_df.sort_values('lap_time_std', ascending=True)
         fig_cons = px.bar(
             cons_df,
-            x="driver", y="lap_time_std",
+            x="number", y="lap_time_std",
             color="team", color_discrete_map=TEAM_COLOR,
             title="Lap Time Consistency",
         )
@@ -646,7 +779,7 @@ def build_figures(
         wdf["timestamp"] = pd.to_datetime(wdf[time_col], errors="coerce")
 
         # ③ Alineamos meteo con vueltas -----------------------------------------
-        ldf = df_analysis[["lap_number", "lap_time", "hour", "driver", "team"]].copy()
+        ldf = df_analysis[["lap_number", "lap_time", "hour", "number", "team"]].copy()
         session_day = wdf["timestamp"].dropna().iloc[0].normalize()
         ldf["timestamp"] = (
             pd.to_datetime(session_day.strftime("%Y-%m-%d ") + ldf["hour"],
@@ -841,12 +974,12 @@ def export_report(
             f.write("""
             <h2>Vueltas – Griffin Core & Campos Racing</h2>
             <style>
-            .driver-grid  { display:flex; flex-wrap:wrap; gap:12px; }
-            .driver-item  { flex:1 1 calc(33.333% - 12px); box-sizing:border-box; }
-            .driver-item h3 { text-align:center; margin:4px 0; }
-            .driver-item table { width:100%; border-collapse:collapse; }
+            .number-grid  { display:flex; flex-wrap:wrap; gap:12px; }
+            .number-item  { flex:1 1 calc(33.333% - 12px); box-sizing:border-box; }
+            .number-item h3 { text-align:center; margin:4px 0; }
+            .number-item table { width:100%; border-collapse:collapse; }
             </style>
-            <div class="driver-grid">
+            <div class="number-grid">
             """)
 
             # --- tablas ------------------------------------------------------
@@ -870,7 +1003,7 @@ def export_report(
                         {"selector": "td", "props": [("border", "1px solid #E0E0E0")]},
                     ])
                 )
-                f.write(f"<div class='driver-item'><h3>{drv}</h3>")
+                f.write(f"<div class='number-item'><h3>{drv}</h3>")
                 f.write(styler.to_html(index=False))
                 f.write("</div>")                           
 
@@ -907,7 +1040,7 @@ app.layout = html.Div(
         dcc.Store(id="session-data"),
         dcc.Dropdown(id="team-filter", multi=True),
         dcc.Dropdown(
-            id="driver-filter",
+            id="number-filter",
             multi=True,
             placeholder="Selecciona pilotos",   # se rellenará tras cargar la sesión
         ),
@@ -933,7 +1066,6 @@ app.layout = html.Div(
     ]
 )
 
-
 @app.callback(
     Output("folder-input", "value"),
     Input("browse-btn", "n_clicks"),
@@ -954,15 +1086,15 @@ def on_browse(n_clicks):
     Output("team-filter", "options"),
     Output("team-filter", "value"),
     Output("session-data", "data"),
-    Output("driver-filter", "options"),
-    Output("driver-filter", "value"),  
+    Output("number-filter", "options"),
+    Output("number-filter", "value"),  
     Input("load-btn", "n_clicks"),
     Input("team-filter", "value"),
     State("folder-input", "value"),
     Input("lap-filter-toggle", "value"),
     Input("sector-toggle", "value"),
     Input("gap-toggle", "value"),
-    Input("driver-filter", "value"),
+    Input("number-filter", "value"),
 )
 
 def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers):
@@ -974,14 +1106,14 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     export_raw_session(folder, raw_path)
     logging.info(f"Raw data exported to {raw_path}")
     team_names   = sorted(df_analysis["team"].dropna().unique().tolist())
-    driver_names = sorted(df_analysis["driver"].dropna().unique().tolist())
+    driver_names = sorted(df_analysis["number"].dropna().unique().tolist())
     if not teams:
         teams = team_names
 
     if not drivers:                      
         drivers = driver_names
 
-    df_analysis = df_analysis[df_analysis["driver"].isin(drivers)]
+    df_analysis = df_analysis[df_analysis["number"].isin(drivers)]
     df_analysis = df_analysis[df_analysis["team"].isin(teams)]
 
     filter_fast   = "ALL" not in (lap_toggle or [])
@@ -997,7 +1129,7 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     grid_order = list(driver_tables.keys())
     if not df_class.empty and "position" in df_class.columns:
         grid_order = (
-            df_class.sort_values("position")["driver"].tolist()
+            df_class.sort_values("position")["number"].tolist()
         )
 
     grid_order = [d for d in grid_order if d in drivers]
@@ -1005,10 +1137,16 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
         if drv not in grid_order:
             grid_order.append(drv)
 
+    if fast_table is None:
+        logging.warning("fast_table is None – returning empty list")
+        fast_rows = []
+    else:
+        fast_rows = fast_table.to_dict(orient="records")
+
     serialized = {
         "figs": {name: fig.to_dict() for name, fig in figs.items()},
         "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
-        "fast_table": fast_table.to_dict(orient="records"),
+        "fast_table": fast_rows,
         "include_gap": include_gap,
         "grid_order": grid_order,
     }
@@ -1025,6 +1163,7 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     Input("data-store", "data"),
     Input("result-tabs", "value"),
 )
+
 def update_tab_content(data, tab):
     if not data:
         raise PreventUpdate
@@ -1053,12 +1192,42 @@ def update_tab_content(data, tab):
             fast_df["BestLap"] = fast_df["BestLap"].apply(seconds_to_mmss)
         team_styles = [
             {
-                "if": {"filter_query": f'{{team}} = "{team}"'}, 
+                "if": {
+                    "filter_query": f'{{team}} = "{team}"',
+                    "column_id": ["number"]             
+                },
                 "backgroundColor": color,
                 "color": "black" if color.lower() in ("#ffff00", "#fe9900") else "white",
             }
             for team, color in TEAM_COLOR.items()
         ]
+
+        gap_cols = ["GapStart"]
+        if include_gap:                                   # mismo flag que en las tablas individuales
+            gap_cols += ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]
+
+        gap_styles = []
+        for col in gap_cols:
+            gap_styles.extend([
+                {   # rojo  ≤ 1 s
+                    "if": {"filter_query": f"{{{col}}} <= 1", "column_id": col},
+                    "backgroundColor": "rgb(255,102,102)",
+                    "color": "white",
+                },
+                {   # naranja 1–3 s
+                    "if": {"filter_query": f"{{{col}}} > 1 && {{{col}}} < 3", "column_id": col},
+                    "backgroundColor": "rgb(255,178,102)",
+                },
+                {   # azul claro 3–5 s
+                    "if": {"filter_query": f"{{{col}}} >= 3 && {{{col}}} <= 5", "column_id": col},
+                    "backgroundColor": "rgb(102,178,255)",
+                },
+                {   # azul oscuro  > 5 s   
+                    "if": {"filter_query": f"{{{col}}} > 5", "column_id": col},
+                    "backgroundColor": "rgb(0,102,204)",
+                    "color": "white",
+                },
+            ])
 
         summary = dash_table.DataTable(
             data=fast_df.to_dict("records"),
@@ -1066,9 +1235,9 @@ def update_tab_content(data, tab):
             sort_action="native",
             style_cell={"textAlign": "center"},
             style_header={"fontWeight": "bold"},
-            style_data_conditional=team_styles,          
+            style_data_conditional=team_styles  + gap_styles    
         )
-        table_divs.insert(0, html.Div(summary, style={"flex": "1 0 100%", "padding": "5px"}))
+        table_divs.insert(0, html.Div(summary, style={"flex": "1 0 50%", "padding": "5px"}))
 
     if tab == "tab-tables":
         return html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
@@ -1120,7 +1289,7 @@ def on_export(n_clicks, session_data):
         for name, fig in figs_dict.items()
     }
 
-    # ----- reconstruir driver_tables (dict {driver: DataFrame}) --------------------
+    # ----- reconstruir driver_tables (dict {number: DataFrame}) --------------------
     table_data = data.get("tables") 
     driver_tables = (
         {drv: pd.DataFrame(rows) for drv, rows in table_data.items()}

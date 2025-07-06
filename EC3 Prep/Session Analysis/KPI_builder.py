@@ -6,13 +6,20 @@ from data_process import parse_time_to_seconds
 import warnings
 import re
 from collections import OrderedDict
+from scipy.stats import median_abs_deviation
 
+_INV_0_6745 = 1.4826              # 1 / 0.6745  → escala MAD → σ
+
+def _mad(series: pd.Series) -> float:
+    """Median Absolute Deviation escalada a σ (robusta)."""
+    med = np.median(series)
+    return np.median(np.abs(series - med)) * _INV_0_6745
 
 def detect_stints(laps: pd.DataFrame, session: str) -> pd.DataFrame:
     """Detect stints based on lap time behaviour.
 
     The lap time column is converted to seconds before evaluating each lap.
-    For race sessions the reference per driver is the mean lap time while for
+    For race sessions the reference per number is the mean lap time while for
     the rest of sessions the best lap is used.  Laps slower than ``1.5`` times
     the mean (race) are tagged as ``"SC"`` (Safety Car) whereas the rest receive
     ``"R"``.  In non race sessions laps slower than ``1.3`` times the best lap
@@ -20,12 +27,12 @@ def detect_stints(laps: pd.DataFrame, session: str) -> pd.DataFrame:
 
     Stint boundaries are detected whenever the label changes or when the column
     ``CROSSING_FINISH_LINE_IN_PIT`` is not empty.  A new ``stint_id`` is
-    generated incrementally for each driver.
+    generated incrementally for each number.
 
     Parameters
     ----------
     laps : pd.DataFrame
-        DataFrame with at least ``driver`` and ``lap_time`` columns.
+        DataFrame with at least ``number`` and ``lap_time`` columns.
     session : str
         Name of the session.  If it contains ``"race"`` the race rules are
         applied.
@@ -36,7 +43,7 @@ def detect_stints(laps: pd.DataFrame, session: str) -> pd.DataFrame:
         ``laps`` with two extra columns: ``stint_label`` and ``stint_id``.
     """
 
-    if "driver" not in laps.columns or "lap_time" not in laps.columns:
+    if "number" not in laps.columns or "lap_time" not in laps.columns:
         return laps
 
     df = laps.copy()
@@ -54,12 +61,12 @@ def detect_stints(laps: pd.DataFrame, session: str) -> pd.DataFrame:
     is_race = "race" in session.lower()
 
     if is_race:
-        ref = df.groupby("driver")["_lap_time_sec"].transform("mean")
+        ref = df.groupby("number")["_lap_time_sec"].transform("mean")
         df["stint_label"] = np.where(
             df["_lap_time_sec"] >= 1.5 * ref, "SC", "R"
         )
     else:
-        ref = df.groupby("driver")["_lap_time_sec"].transform("min")
+        ref = df.groupby("number")["_lap_time_sec"].transform("min")
         df["stint_label"] = np.where(
             df["_lap_time_sec"] >= 1.3 * ref, "OUT", "PUSH"
         )
@@ -67,7 +74,7 @@ def detect_stints(laps: pd.DataFrame, session: str) -> pd.DataFrame:
     lap_col = "lap" if "lap" in df.columns else (
         "lap_number" if "lap_number" in df.columns else None
     )
-    sort_cols = ["driver"] + ([lap_col] if lap_col else [])
+    sort_cols = ["number"] + ([lap_col] if lap_col else [])
     df = df.sort_values(sort_cols).reset_index(drop=True)
 
     in_pit = (
@@ -75,61 +82,59 @@ def detect_stints(laps: pd.DataFrame, session: str) -> pd.DataFrame:
         if pit_col is not None else pd.Series(False, index=df.index)
     )
 
-    prev_label = df.groupby("driver")["stint_label"].shift(1)
+    prev_label = df.groupby("number")["stint_label"].shift(1)
     new_stint = in_pit | (df["stint_label"] != prev_label) | (
-        df["driver"] != df["driver"].shift(1)
+        df["number"] != df["number"].shift(1)
     )
 
-    df["stint_id"] = df.groupby("driver")[new_stint].cumsum().astype(int)
+    df["stint_id"] = df.groupby("number")[new_stint].cumsum().astype(int)
     df["stint_id"] += 1
 
     df = df.drop(columns=["_lap_time_sec"])
     return df
 
+def _detect_driver_col(df: pd.DataFrame) -> str:
+    """Devuelve la mejor columna disponible para identificar UNÍVOCAMENTE al piloto."""
+    for c in ["number", "driver_shortname", "driver_name", "driver_number"]:
+        if c in df.columns:
+            return c
+    raise KeyError("No se encontró columna de piloto")
+
 def compute_top_speeds(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calcula la velocidad máxima ('top_speed') por piloto.
-    Además incorpora el equipo (si existe) y devuelve ordenado.
-    Busca columnas 'driver_name', 'driver_shortname' o 'driver_number'.
-    Y columnas de equipo: 'team', 'constructor' o 'team_name'.
-    """
-    # Detectar columna de piloto
-    if 'driver_name' in df.columns:
-        driver_col = 'driver_name'
-    elif 'driver_shortname' in df.columns:
-        driver_col = 'driver_shortname'
-    elif 'driver_number' in df.columns:
-        driver_col = 'driver_number'
-    else:
-        raise KeyError('No se encontró columna de piloto')
-    # Detectar columna de equipo
-    team_col = None
-    for col in ['team', 'constructor', 'team_name']:
-        if col in df.columns:
-            team_col = col; break
-    # Verificar columna de velocidad
-    if 'top_speed' not in df.columns:
-        raise KeyError('No se encontró columna top_speed')
-    # Agrupar y calcular máxima velocidad y equipo asociado
+    # 1) Columna única de piloto
+    driver_col = _detect_driver_col(df)
+
+    # 2) Columna de equipo (igual que antes)
+    team_col = next((c for c in ["team", "constructor", "team_name"] if c in df.columns), None)
+
+    if "top_speed" not in df.columns:
+        raise KeyError("No se encontró columna top_speed")
+
     if team_col:
         grouped = (
-            df.groupby([driver_col, team_col])['top_speed']
-            .max()
-            .reset_index()
-        )
-        result = grouped.rename(
-            columns={driver_col: 'driver', team_col: 'team', 'top_speed': 'max_top_speed'}
+            df.groupby([driver_col, team_col])["top_speed"]
+              .max()
+              .reset_index()
+              .rename(columns={
+                  driver_col: "number",
+                  team_col:   "team",
+                  "top_speed": "max_top_speed",
+              })
         )
     else:
-        grouped = df.groupby(driver_col)['top_speed'].max().reset_index()
-        result = grouped.rename(
-            columns={driver_col: 'driver', 'top_speed': 'max_top_speed'}
+        grouped = (
+            df.groupby(driver_col)["top_speed"]
+              .max()
+              .reset_index()
+              .rename(columns={
+                  driver_col: "number",
+                  "top_speed": "max_top_speed",
+              })
         )
-        result['team'] = None
-        result = result[['driver', 'team', 'max_top_speed']]
+        grouped["team"] = None
+        grouped = grouped[["number", "team", "max_top_speed"]]
 
-    result.sort_values('max_top_speed', ascending=False, inplace=True)
-    return result
+    return grouped.sort_values("max_top_speed", ascending=False)
 
 def track_limit_rate(track_df: pd.DataFrame, laps_df: pd.DataFrame) -> pd.DataFrame:
     """Calcula la tasa de infracciones de track limits por vuelta.
@@ -146,18 +151,18 @@ def track_limit_rate(track_df: pd.DataFrame, laps_df: pd.DataFrame) -> pd.DataFr
     Returns
     -------
     pd.DataFrame
-        DataFrame con ``driver``, ``incidents``, ``laps`` y ``rate``.
+        DataFrame con ``number``, ``incidents``, ``laps`` y ``rate``.
     """
 
     track_driver = next(
-        (c for c in ['driver', 'driver_name', 'driver_shortname', 'driver_number'] if c in track_df.columns),
+        (c for c in ['number', 'driver_name', 'driver_shortname', 'driver_number'] if c in track_df.columns),
         None,
     )
     if track_driver is None:
         raise KeyError('No se encontró columna de piloto en track_df')
 
     lap_driver = next(
-        (c for c in ['driver', 'driver_name', 'driver_shortname', 'driver_number'] if c in laps_df.columns),
+        (c for c in ['number', 'driver_name', 'driver_shortname', 'driver_number'] if c in laps_df.columns),
         None,
     )
     if lap_driver is None:
@@ -182,10 +187,10 @@ def track_limit_rate(track_df: pd.DataFrame, laps_df: pd.DataFrame) -> pd.DataFr
     )
 
     result = (
-        pd.DataFrame({'driver': incidents.index, 'incidents': incidents.values})
+        pd.DataFrame({'number': incidents.index, 'incidents': incidents.values})
         .merge(
-            pd.DataFrame({'driver': laps.index, 'laps': laps.values}),
-            on='driver',
+            pd.DataFrame({'number': laps.index, 'laps': laps.values}),
+            on='number',
             how='outer'
         )
         .fillna(0)
@@ -215,18 +220,18 @@ def ideal_lap_gap(df: pd.DataFrame) -> pd.DataFrame:
       - ideal_time = suma de sus mejores tiempos de sector
       - best_lap   = mejor tiempo de vuelta real (lap_time)
       - ideal_gap  = best_lap - ideal_time
-    Devuelve driver, team (si existe), ideal_time, best_lap, ideal_gap.
+    Devuelve number, team (si existe), ideal_time, best_lap, ideal_gap.
     """
-    if 'driver' not in df.columns or 'lap_time' not in df.columns:
-        raise KeyError("Faltan columnas 'driver' o 'lap_time'")
+    if 'number' not in df.columns or 'lap_time' not in df.columns:
+        raise KeyError("Faltan columnas 'number' o 'lap_time'")
     
     # Convertir lap_time a segundos si hace falta
-    df_num = df[['driver'] + (['team'] if 'team' in df.columns else []) + ['lap_time']].copy()
+    df_num = df[['number'] + (['team'] if 'team' in df.columns else []) + ['lap_time']].copy()
     if not np.issubdtype(df_num['lap_time'].dtype, np.number):
         df_num['lap_time'] = df_num['lap_time'].apply(parse_time_to_seconds)
 
     # Mejor vuelta real
-    best = df_num.groupby(['driver'] + (['team'] if 'team' in df_num.columns else []))['lap_time']\
+    best = df_num.groupby(['number'] + (['team'] if 'team' in df_num.columns else []))['lap_time']\
                  .min().reset_index(name='best_lap')
     
     # Mejor sector por piloto
@@ -237,16 +242,16 @@ def ideal_lap_gap(df: pd.DataFrame) -> pd.DataFrame:
     bst['ideal_time'] = bst[['sector1','sector2','sector3']].sum(axis=1)
 
     # Unir best_lap e ideal_time
-    merged = pd.merge(best, bst, on=['driver'] + (['team'] if 'team' in bst.columns else []))
+    merged = pd.merge(best, bst, on=['number'] + (['team'] if 'team' in bst.columns else []))
     merged['ideal_gap'] = merged['best_lap'] - merged['ideal_time']
-    return merged[['driver'] + (['team'] if 'team' in merged.columns else [])
+    return merged[['number'] + (['team'] if 'team' in merged.columns else [])
                   + ['ideal_time','best_lap','ideal_gap']]
 
 def sector_comparison(df: pd.DataFrame) -> pd.DataFrame:
     """
     Calcula la media de cada sector (sector1, sector2, sector3) por piloto.
     Sólo toma las columnas *_seconds si existen, para evitar duplicados.
-    Devuelve un DataFrame con columnas: driver, [team], sector1, sector2, sector3.
+    Devuelve un DataFrame con columnas: number, [team], sector1, sector2, sector3.
     """
     # 1) Buscamos primero las columnas *_seconds
     secs_pattern = re.compile(r'(?i)^(?:s|sector)([123])_seconds$')
@@ -270,8 +275,8 @@ def sector_comparison(df: pd.DataFrame) -> pd.DataFrame:
         if m:
             rename_map[col] = f"sector{m.group(1)}"
     
-    # Columnas que vamos a usar: driver, [team], y sólo las de rename_map
-    base = ['driver'] + (['team'] if 'team' in df.columns else [])
+    # Columnas que vamos a usar: number, [team], y sólo las de rename_map
+    base = ['number'] + (['team'] if 'team' in df.columns else [])
     use_cols = base + list(rename_map.keys())
     df_sec = df[use_cols].copy()
     
@@ -294,16 +299,16 @@ def sector_comparison(df: pd.DataFrame) -> pd.DataFrame:
     return result
 
 def best_sector_ranking(df: pd.DataFrame) -> pd.DataFrame:
-    """Best sector times per driver with rankings.
+    """Best sector times per number with rankings.
 
     The function detects columns named either ``sectorN`` or ``sN`` (case
-    insensitive). For each sector it computes the minimum time by driver and
+    insensitive). For each sector it computes the minimum time by number and
     adds a ranking column ``<sector>_rank`` where ``1`` represents the fastest
-    driver.
+    number.
     """
 
-    if "driver" not in df.columns:
-        raise KeyError("'driver' column not found")
+    if "number" not in df.columns:
+        raise KeyError("'number' column not found")
 
     sector_cols = []
     for col in df.columns:
@@ -315,12 +320,12 @@ def best_sector_ranking(df: pd.DataFrame) -> pd.DataFrame:
     if not sector_cols:
         return pd.DataFrame()
 
-    df_num = df[["driver", *sector_cols]].copy()
+    df_num = df[["number", *sector_cols]].copy()
     for col in sector_cols:
         if not np.issubdtype(df_num[col].dtypes, np.number):
             df_num[col] = df_num[col].apply(parse_time_to_seconds)
 
-    best = df_num.groupby("driver")[sector_cols].min().reset_index()
+    best = df_num.groupby("number")[sector_cols].min().reset_index()
 
     for col in sector_cols:
         best[f"{col}_rank"] = best[col].rank(method="min", ascending=True).astype(int)
@@ -332,7 +337,7 @@ def best_sector_times(df: pd.DataFrame) -> pd.DataFrame:
     Para cada piloto devuelve su mejor (mínimo) tiempo en cada sector.
     Solo toma las columnas *_seconds si existen; 
     en caso contrario, busca columnas s1, s2, s3.
-    Columnas resultantes: driver, [team], sector1, sector2, sector3.
+    Columnas resultantes: number, [team], sector1, sector2, sector3.
     """
     # 1) Detección de columnas con sufijo *_seconds
     secs_pattern = re.compile(r'(?i)^(?:s|sector)([123])_seconds$')
@@ -355,7 +360,7 @@ def best_sector_times(df: pd.DataFrame) -> pd.DataFrame:
     }
     
     # 4) Selección de columnas
-    base = ['driver'] + (['team'] if 'team' in df.columns else [])
+    base = ['number'] + (['team'] if 'team' in df.columns else [])
     use_cols = base + sector_cols
     df_sec = df[use_cols].copy()
     
@@ -378,10 +383,10 @@ def best_sector_times(df: pd.DataFrame) -> pd.DataFrame:
     return best
 
 def lap_time_history(df: pd.DataFrame) -> pd.DataFrame:
-    """Return lap, driver, team and lap_time history.
+    """Return lap, number, team and lap_time history.
 
     The function attempts to extract the lap column (either ``lap`` or
-    ``lap_number``) together with ``driver`` and ``lap_time``.  If ``team``
+    ``lap_number``) together with ``number`` and ``lap_time``.  If ``team``
     exists, it is included as well.  The returned DataFrame always contains
     the column ``lap`` (``lap_number`` is renamed accordingly).
     """
@@ -392,10 +397,10 @@ def lap_time_history(df: pd.DataFrame) -> pd.DataFrame:
             lap_col = col
             break
 
-    if lap_col is None or "driver" not in df.columns or "lap_time" not in df.columns:
+    if lap_col is None or "number" not in df.columns or "lap_time" not in df.columns:
         return pd.DataFrame()
 
-    cols = [lap_col, "driver"]
+    cols = [lap_col, "number"]
     if "team" in df.columns:
         cols.append("team")
     cols.append("lap_time")
@@ -411,34 +416,34 @@ def lap_time_history(df: pd.DataFrame) -> pd.DataFrame:
 
     df_hist["lap"] = df_hist["lap"].astype(int)
     df_hist["lap_time"] = df_hist["lap_time"].astype(float)
-    ordered_cols = ["lap", "driver"] + (["team"] if "team" in df_hist.columns else []) + ["lap_time"]
+    ordered_cols = ["lap", "number"] + (["team"] if "team" in df_hist.columns else []) + ["lap_time"]
     return df_hist[ordered_cols]
 
 def pit_stop_summary(df: pd.DataFrame) -> pd.DataFrame:
-    """Best and mean pit stop time per driver.
+    """Best and mean pit stop time per number.
 
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame with columns ``driver`` and ``pit_time``.  If ``team`` exists
+        DataFrame with columns ``number`` and ``pit_time``.  If ``team`` exists
         it is also included in the result.
 
     Returns
     -------
     pd.DataFrame
-        Columns ``driver`` [, ``team``] ``best_pit_time`` and ``mean_pit_time``.
+        Columns ``number`` [, ``team``] ``best_pit_time`` and ``mean_pit_time``.
     """
 
-    if "driver" not in df.columns or "pit_time" not in df.columns:
-        raise KeyError("Faltan columnas 'driver' o 'pit_time'")
+    if "number" not in df.columns or "pit_time" not in df.columns:
+        raise KeyError("Faltan columnas 'number' o 'pit_time'")
 
-    cols = ["driver", "pit_time"] + (["team"] if "team" in df.columns else [])
+    cols = ["number", "pit_time"] + (["team"] if "team" in df.columns else [])
     data = df[cols].copy()
 
     if not pd.api.types.is_numeric_dtype(data["pit_time"]):
         data["pit_time"] = data["pit_time"].apply(parse_time_to_seconds)
 
-    group_cols = ["driver"] + (["team"] if "team" in data.columns else [])
+    group_cols = ["number"] + (["team"] if "team" in data.columns else [])
     result = (
         data.groupby(group_cols)["pit_time"]
         .agg(["min", "mean"])
@@ -447,20 +452,46 @@ def pit_stop_summary(df: pd.DataFrame) -> pd.DataFrame:
     )
     return result
 
-def lap_time_consistency(df: pd.DataFrame) -> pd.DataFrame:
-    """Lap time standard deviation per driver."""
+def lap_time_consistency(
+    df: pd.DataFrame,
+    *,
+    threshold: float = 0.08,   # 10 % sobre la mejor vuelta
+    trim: float = 0.10,        # 10 % a cada lado
+    min_laps: int = 3,
+) -> pd.DataFrame:
+    """
+    Consistencia por piloto usando desviación estándar recortada.
 
-    if "driver" not in df.columns or "lap_time" not in df.columns:
-        raise KeyError("Faltan columnas 'driver' o 'lap_time'")
+    1. Filtra vueltas > (1+threshold)×best_lap del piloto.
+    2. Elimina trim·100 % superior e inferior.
+    3. Calcula σ poblacional.  Devuelve NaN si quedan < min_laps.
+    """
 
-    data = df[["driver", "lap_time"]].copy()
+    req = {"number", "lap_time"}
+    if req - set(df.columns):
+        raise KeyError(f"Faltan columnas {req}")
+
+    data = df[["number", "lap_time"]].copy()
     if not pd.api.types.is_numeric_dtype(data["lap_time"]):
         data["lap_time"] = data["lap_time"].apply(parse_time_to_seconds)
 
+    # Mejor vuelta y filtro 10 %
+    best = data.groupby("number")["lap_time"].transform("min")
+    data = data[data["lap_time"] <= best * (1 + threshold)]
+
+    def _trimmed_std(series: pd.Series) -> float:
+        n = len(series)
+        if n < min_laps:
+            return np.nan
+        k = int(np.floor(n * trim))
+        trimmed = series.sort_values().iloc[k:n - k] if k else series
+        return trimmed.std(ddof=0)          # σ poblacional
+
     result = (
-        data.groupby("driver")["lap_time"]
-        .std()
-        .reset_index(name="lap_time_std")
+        data.groupby("number")["lap_time"]
+            .apply(_trimmed_std)
+            .rename("lap_time_std")          # nombre que espera build_figures
+            .reset_index()
     )
     return result
 
@@ -475,19 +506,19 @@ def extract_session_summary(df_analysis: pd.DataFrame,
     Parámetros
     ----------
     df_analysis : DataFrame
-        DataFrame de la sesión con columnas 'driver', 'lap_time', etc.
+        DataFrame de la sesión con columnas 'number', 'lap_time', etc.
     tracklimits_df : DataFrame
-        DataFrame con las infracciones de track limits (columna 'driver' y 'incident').
+        DataFrame con las infracciones de track limits (columna 'number' y 'incident').
     output_path : str
         Ruta de salida. Según la extensión genera CSV (.csv) o Excel (.xlsx).
     """
-    drivers = df_analysis['driver'].unique()
+    drivers = df_analysis['number'].unique()
     rows = {}
     # Pre-cálculo de mejores sectores
-    bst = best_sector_times(df_analysis).set_index('driver')
+    bst = best_sector_times(df_analysis).set_index('number')
 
     for drv in drivers:
-        dfa = df_analysis[df_analysis['driver'] == drv]
+        dfa = df_analysis[df_analysis['number'] == drv]
         total_time      = dfa['lap_time'].sum()
         num_laps        = int(dfa['lap_time'].count())
         mean_lap        = dfa['lap_time'].mean()
@@ -500,7 +531,7 @@ def extract_session_summary(df_analysis: pd.DataFrame,
         else:
             sec1 = sec2 = sec3 = float('nan')
         # Track limits
-        tl = tracklimits_df[tracklimits_df['driver'] == drv]
+        tl = tracklimits_df[tracklimits_df['number'] == drv]
         incidents = int(tl['incident'].sum()) if 'incident' in tl.columns else 0
         rate      = incidents / num_laps if num_laps>0 else float('nan')
 
@@ -531,7 +562,7 @@ def extract_session_summary(df_analysis: pd.DataFrame,
 
 def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     """
-    KPIs de rebufo por piloto (driver).
+    KPIs de rebufo por piloto (number).
 
     Una vuelta cuenta como 'con rebufo' si:
       ▸ En su propio paso de meta el coche llega ≤ 2.5 s detrás de otro coche
@@ -540,10 +571,10 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
         → propagamos el efecto de rebufo al inicio de la vuelta actual.
 
     Requiere columnas:
-        number, driver, lap_number, lap_time, top_speed, hour [, team]
+        number, number, lap_number, lap_time, top_speed, hour [, team]
     """
     required = {
-        "number", "driver", "lap_number",
+        "number", "number", "lap_number",
         "lap_time", "top_speed", "hour"
     }
     if not required.issubset(df.columns):
@@ -562,31 +593,31 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     data = data.sort_values("timestamp").reset_index(drop=True)
 
     # ─── Bandera de vuelta rápida / Δt con el coche anterior ───────────────
-    best_lap = data.groupby("driver")["lap_time"].transform("min")
-    data["fast"] = data["lap_time"] <= 1.10 * best_lap        # ≤ 110 %
+    best_lap = data.groupby("number")["lap_time"].transform("min")
+    data["fast"] = data["lap_time"] <= 1.05 * best_lap        # ≤ 110 %
 
     median_speed = data["top_speed"].median()
 
-    prev_drv  = data["driver"].shift()
+    prev_num  = data["number"].shift()
     prev_fast = data["fast"].shift()
     delta_t   = (data["timestamp"] - data["timestamp"].shift()).dt.total_seconds()
 
     data["slip_flag"] = (
         data["fast"] & prev_fast
-        & (prev_drv != data["driver"])
-        & delta_t.between(0.4, 2.5)
+        & (prev_num != data["number"])
+        & delta_t.between(0.2, 2.5)
         & (data["top_speed"] >= median_speed + 6)
     )
 
     # ─── Propaga rebufo a la vuelta siguiente del mismo piloto ─────────────
-    data = data.sort_values(["driver", "lap_number"]).reset_index(drop=True)
-    data["slip_prev"] = data.groupby("driver")["slip_flag"].shift(fill_value=False)
+    data = data.sort_values(["number", "lap_number"]).reset_index(drop=True)
+    data["slip_prev"] = data.groupby("number")["slip_flag"].shift(fill_value=False)
     data["slipstream"] = data["slip_flag"] | data["slip_prev"]
 
     # ─── KPIs agregados ────────────────────────────────────────────────────
     stats = (
         data
-        .groupby("driver")
+        .groupby("number")
         .apply(lambda g: pd.Series({
             # promedios
             "avg_lap_time_with_slip":   g.loc[g["slipstream"], "lap_time"].mean(),
@@ -610,14 +641,14 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     # añade team si existe
     if "team" in data.columns:
         stats = stats.merge(
-            data[["driver", "team"]].drop_duplicates("driver"),
-            on="driver", how="left"
+            data[["number", "team"]].drop_duplicates("number"),
+            on="number", how="left"
         )
 
     return stats
 
 def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Slipstream KPIs per driver by sector.
+    """Slipstream KPIs per number by sector.
 
     Parameters
     ----------
@@ -635,7 +666,7 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     req_base = {
         "number",
-        "driver",
+        "number",
         "lap_number",
         "lap_time",
         "top_speed",
@@ -669,24 +700,24 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     data = data.sort_values("T3").reset_index(drop=True)
 
-    best_lap = data.groupby("driver")["lap_time"].transform("min")
+    best_lap = data.groupby("number")["lap_time"].transform("min")
     data["fast"] = data["lap_time"] <= 1.10 * best_lap
     median_speed = data["top_speed"].median()
 
     # ─── Sector 1 detection ────────────────────────────────────────────────
     s1 = data.sort_values("T1").reset_index()
     dt1 = (s1["T1"] - s1["T1"].shift()).dt.total_seconds()
-    prev_drv = s1["driver"].shift()
+    prev_drv = s1["number"].shift()
     prev_fast = s1["fast"].shift()
     s1["slip_flag_s1"] = (
         s1["fast"]
         & prev_fast
-        & (prev_drv != s1["driver"])
+        & (prev_drv != s1["number"])
         & dt1.between(0.4, 2.5)
         & (s1["top_speed"] >= median_speed + 6)
     )
-    s1 = s1.sort_values(["driver", "lap_number"]).reset_index(drop=True)
-    s1["slip_prev_s1"] = s1.groupby("driver")["slip_flag_s1"].shift(fill_value=False)
+    s1 = s1.sort_values(["number", "lap_number"]).reset_index(drop=True)
+    s1["slip_prev_s1"] = s1.groupby("number")["slip_flag_s1"].shift(fill_value=False)
     s1["slipstream_s1"] = s1["slip_flag_s1"] | s1["slip_prev_s1"]
     s1 = s1.sort_values("index")
     data["slipstream_s1"] = s1["slipstream_s1"].values
@@ -694,22 +725,22 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     # ─── Sector 2 detection ────────────────────────────────────────────────
     s2 = data.sort_values("T2").reset_index()
     dt2 = (s2["T2"] - s2["T2"].shift()).dt.total_seconds()
-    prev_drv2 = s2["driver"].shift()
+    prev_drv2 = s2["number"].shift()
     prev_fast2 = s2["fast"].shift()
     s2["slip_flag_s2"] = (
         s2["fast"]
         & prev_fast2
-        & (prev_drv2 != s2["driver"])
+        & (prev_drv2 != s2["number"])
         & dt2.between(0.4, 2.5)
         & (s2["top_speed"] >= median_speed + 6)
     )
-    s2 = s2.sort_values(["driver", "lap_number"]).reset_index(drop=True)
-    s2["slip_prev_s2"] = s2.groupby("driver")["slip_flag_s2"].shift(fill_value=False)
+    s2 = s2.sort_values(["number", "lap_number"]).reset_index(drop=True)
+    s2["slip_prev_s2"] = s2.groupby("number")["slip_flag_s2"].shift(fill_value=False)
     s2["slipstream_s2"] = s2["slip_flag_s2"] | s2["slip_prev_s2"]
     s2 = s2.sort_values("index")
     data["slipstream_s2"] = s2["slipstream_s2"].values
 
-    # ─── KPIs per driver ─────────────────────────────────────────────────--
+    # ─── KPIs per number ─────────────────────────────────────────────────--
     def _agg(g: pd.DataFrame) -> pd.Series:
         return pd.Series(
             {
@@ -727,18 +758,20 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
             }
         )
 
-    stats = data.groupby("driver").apply(_agg).reset_index()
+    stats = data.groupby("number").apply(_agg).reset_index()
     stats["slip_pct_s1"] = stats["slip_laps_s1"] / stats["total_laps"] * 100
     stats["slip_pct_s2"] = stats["slip_laps_s2"] / stats["total_laps"] * 100
 
     if "team" in data.columns:
         stats = stats.merge(
-            data[["driver", "team"]].drop_duplicates("driver"),
-            on="driver",
+            data[["number", "team"]].drop_duplicates("number"),
+            on="number",
             how="left",
         )
 
     return stats
+
+from collections import OrderedDict
 
 def build_driver_tables(
     df: pd.DataFrame,
@@ -749,28 +782,36 @@ def build_driver_tables(
     include_sector_gaps: bool = False,
 ) -> "OrderedDict[str, pd.DataFrame]":
     """
-    Devuelve OrderedDict {driver: DataFrame} con vueltas rápidas y “pegadas”.
-    Ahora `GapStart` aparece SIEMPRE y se calcula así:
-      • si hay sectores   → GapAhead_S3 de la vuelta anterior
-      • si no hay sectores → GapAhead  de la vuelta anterior
+    Devuelve OrderedDict {number: DataFrame} con todas las vueltas que
+    cumplen el filtro (≤ 120 % de la best-lap y GapAhead ≤ 5 s).
+    GapStart se basa SIEMPRE en la vuelta anterior del mismo piloto:
+      • con sectores → GapAhead_S3 de la vuelta anterior
+      • sin sectores → GapAhead  de la vuelta anterior
     """
-    # 1) limita equipos
+
+    # ── 1· limitar a equipos seleccionados ────────────────────────────
     df = df.copy()
     if teams is not None:
         df = df[df["team"].isin(teams)]
     if df.empty:
         return OrderedDict()
 
-    # 2) lap_time → segundos
+    # ── 2· normalizar tiempos ─────────────────────────────────────────
     if not pd.api.types.is_numeric_dtype(df["lap_time"]):
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
-    # 3) timestamp global + GapAhead (fin de vuelta)
+    # ── 3· timestamp global + GapAhead (meta) ─────────────────────────
     df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
     df = df.sort_values("timestamp").reset_index(drop=True)
     df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
 
-    # 3-A) localizar columnas de sector (por si existen)
+    # ── 3·5 FILTRO idéntico al de build_fastest_lap_table ─────────────
+    if filter_fast:
+        best = df.groupby("number")["lap_time"].transform("min")
+        mask = (df["lap_time"] <= 1.20 * best) & (df["GapAhead"] <= 5)
+        df = df[mask]
+
+    # ── 4· localizar columnas de sector (si existen) ──────────────────
     sector_aliases = {
         "sector1": ["sector1", "s1", "sector1_seconds", "s1_seconds"],
         "sector2": ["sector2", "s2", "sector2_seconds", "s2_seconds"],
@@ -783,9 +824,8 @@ def build_driver_tables(
 
     gap_cols: list[str] = []
 
-    # 3-B) si tenemos los tres sectores, calculamos siempre los gaps sectoriales
+    # ── 5· gaps por sector (si hay los 3 splits) ──────────────────────
     if all(sector_cols.values()):
-        # convierte sectores a segundos si hace falta
         for col in sector_cols.values():
             if not pd.api.types.is_numeric_dtype(df[col]):
                 df[col] = df[col].apply(parse_time_to_seconds)
@@ -795,24 +835,21 @@ def build_driver_tables(
         df["T1"] = df["T2"] - pd.to_timedelta(df[sector_cols["sector2"]], unit="s")
 
         for lab, tcol in zip(("S1", "S2", "S3"), ("T1", "T2", "T3")):
-            df[f"GapAhead_{lab}"] = df[tcol].diff().dt.total_seconds().abs()
-            if include_sector_gaps:              # solo los añadimos a la tabla si el flag lo pide
+            df[f"GapAhead_{lab}"] = (
+                df.loc[df[tcol].sort_values().index, tcol]
+                  .diff().dt.total_seconds().abs()
+                  .reindex(df.index)
+            )
+            if include_sector_gaps:
                 gap_cols.append(f"GapAhead_{lab}")
 
-        # GapStart = último GapAhead_S3 del mismo piloto
-        df["GapStart"] = df.groupby("driver")["GapAhead_S3"].shift(1)
-
+        # GapStart basado en GapAhead_S3 de la vuelta anterior
+        df["GapStart"] = df.groupby("number")["GapAhead_S3"].shift(1)
     else:
-        # sin sectores → GapStart = GapAhead (fin de vuelta) de la vuelta anterior
-        df["GapStart"] = df.groupby("driver")["GapAhead"].shift(1)
+        # sin sectores → GapStart = GapAhead de la vuelta anterior
+        df["GapStart"] = df.groupby("number")["GapAhead"].shift(1)
 
-    # 4) filtro: vuelta rápida + aire sucio
-    if filter_fast:
-        best = df.groupby("driver")["lap_time"].transform("min")
-        mask = (df["lap_time"] <= 1.20 * best) & (df["GapAhead"] <= 5)
-        df = df[mask]
-
-    # 5) sectores (solo para mostrar, si se solicita)
+    # ── 6· sectores a mostrar (si se piden) ───────────────────────────
     sector_map = {
         "sector1": "Sector1", "s1": "Sector1",
         "sector2": "Sector2", "s2": "Sector2",
@@ -828,7 +865,7 @@ def build_driver_tables(
                     df[std] = df[raw]
                 sec_cols.append(std)
 
-    # 6) columnas finales
+    # ── 7· columnas finales y tablas por piloto ───────────────────────
     base_cols = [
         "team",
         "lap_number", "lap_time",
@@ -837,17 +874,18 @@ def build_driver_tables(
         "top_speed",
     ]
     rename = {
-        "team" : "Team",
+        "team":       "Team",
         "lap_number": "Vuelta",
-        "lap_time": "LapTime",
-        "GapStart":  "GapStart",
-        "top_speed": "TopSpeed",
+        "lap_time":   "LapTime",
+        "GapStart":   "GapStart",
+        "top_speed":  "TopSpeed",
     }
 
     tables = OrderedDict()
-    for drv, g in df.groupby("driver"):
+    for drv, g in df.groupby("number"):
         tbl = g[base_cols].rename(columns=rename)
         tables[drv] = tbl.sort_values("LapTime").reset_index(drop=True)
+
     return tables
 
 def build_fastest_lap_table(
@@ -857,26 +895,37 @@ def build_fastest_lap_table(
     include_sectors: bool = True,
     include_sector_gaps: bool = False,
 ) -> pd.DataFrame:
-    """Return one fastest lap per driver with optional sector information."""
+    """
+    Return the fastest lap of every number with optional sector times and
+    gap information. Always returns a DataFrame (possibly vacío) – never None.
+    """
 
-    if df.empty or "driver" not in df.columns or "lap_time" not in df.columns:
+    # ── 1. Normalizar columna de piloto ──────────────────────────────────
+    if "number" not in df.columns:
+        rename_map = {
+            "driver_name": "number",
+            "driver_shortname": "number",
+            "driver_number": "number",
+        }
+        for src, dst in rename_map.items():
+            if src in df.columns:
+                df = df.rename(columns={src: dst})
+                break
+
+    # Si aún no tenemos piloto o tiempos, no podemos continuar
+    if df.empty or "number" not in df.columns or "lap_time" not in df.columns:
         return pd.DataFrame()
 
     df = df.copy()
 
+    # ── 2. Asegurar que lap_time es numérico (segundos) ──────────────────
     if not pd.api.types.is_numeric_dtype(df["lap_time"]):
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
-    # ─── Opcional: calcular sectores y gaps si se solicitan ───────────────
+    # ── 3. Opcional: calcular sectores y gaps ────────────────────────────
     if include_sectors or include_sector_gaps:
-        # timestamp + GapAhead general
-        if "timestamp" not in df.columns and "hour" in df.columns:
-            df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
-        if "GapAhead" not in df.columns and "timestamp" in df.columns:
-            df = df.sort_values("timestamp").reset_index(drop=True)
-            df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
 
-        # localizar y convertir columnas de sector
+        # 3-A) detectar columnas de sector ANTES de usarlas
         sector_aliases = {
             "sector1": ["sector1", "s1", "sector1_seconds", "s1_seconds"],
             "sector2": ["sector2", "s2", "sector2_seconds", "s2_seconds"],
@@ -887,7 +936,28 @@ def build_fastest_lap_table(
             for std, aliases in sector_aliases.items()
         }
 
+        # 3-B) timestamp global si no existe
+        if "timestamp" not in df.columns and "hour" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
+
+        # 3-C) GapAhead global (meta) si no existía
+        if "GapAhead" not in df.columns and "timestamp" in df.columns:
+            df = df.sort_values("timestamp").reset_index(drop=True)
+            df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
+
+        # 3-D) si tenemos los 3 sectores → T1/T2/T3 y gaps por sector
+        # ─── tras crear GapAhead ──────────────────────────────────────────
+        if "GapAhead_S3" not in df.columns:
+            # si no hay sectores/gaps por split, usa el gap en meta global
+            if "GapAhead" in df.columns:
+                df["GapAhead_S3"] = df["GapAhead"]
+            else:
+                # último recurso: inicializa a NaN para no romper el shift
+                df["GapAhead_S3"] = np.nan
+                
+        df["GapStart"] = df.groupby("number")["GapAhead_S3"].shift(1)
         if all(sector_cols.values()):
+            # convertir sectores a segundos
             for col in sector_cols.values():
                 if not pd.api.types.is_numeric_dtype(df[col]):
                     df[col] = df[col].apply(parse_time_to_seconds)
@@ -896,46 +966,211 @@ def build_fastest_lap_table(
             df["T2"] = df["T3"] - pd.to_timedelta(df[sector_cols["sector3"]], unit="s")
             df["T1"] = df["T2"] - pd.to_timedelta(df[sector_cols["sector2"]], unit="s")
 
-            df["GapAhead_S1"] = df["T1"].diff().dt.total_seconds().abs()
-            df["GapAhead_S2"] = df["T2"].diff().dt.total_seconds().abs()
-            df["GapAhead_S3"] = df["T3"].diff().dt.total_seconds().abs()
+            # Gaps: ordenar por su propio split y reindexar al orden original
+            df = df.assign(
+                GapAhead_S1=lambda d: (
+                    d.loc[d["T1"].sort_values().index, "T1"]
+                    .diff().dt.total_seconds().abs()
+                    .reindex(d.index)
+                ),
+                GapAhead_S2=lambda d: (
+                    d.loc[d["T2"].sort_values().index, "T2"]
+                    .diff().dt.total_seconds().abs()
+                    .reindex(d.index)
+                ),
+                GapAhead_S3=lambda d: (
+                    d.loc[d["T3"].sort_values().index, "T3"]
+                    .diff().dt.total_seconds().abs()
+                    .reindex(d.index)
+                ),
+            )
 
+            # sectores para mostrar
             if include_sectors:
                 df["Sector1"] = df[sector_cols["sector1"]]
                 df["Sector2"] = df[sector_cols["sector2"]]
                 df["Sector3"] = df[sector_cols["sector3"]]
 
-    # GapStart si no existe
+    # ── 4. Calcular GapStart si falta ────────────────────────────────────
     if "GapStart" not in df.columns:
-        sort_cols = ["driver"]
-        if "lap_number" in df.columns:
-            sort_cols.append("lap_number")
+        sort_cols = ["number"] + (["lap_number"] if "lap_number" in df.columns else [])
         df = df.sort_values(sort_cols)
         if "GapAhead_S3" in df.columns:
-            df["GapStart"] = df.groupby("driver")["GapAhead_S3"].shift(1)
+            df["GapStart"] = df.groupby("number")["GapAhead_S3"].shift(1)
         elif "GapAhead" in df.columns:
-            df["GapStart"] = df.groupby("driver")["GapAhead"].shift(1)
+            df["GapStart"] = df.groupby("number")["GapAhead"].shift(1)
 
-    # índice de la vuelta más rápida de cada piloto
-    idx = df.groupby("driver")["lap_time"].idxmin()
-    base = df.loc[idx].copy()
+    # ── 5. Índice de la vuelta más rápida de cada piloto ─────────────────
+    idx_fast = df.groupby("number")["lap_time"].idxmin()
+    base = df.loc[idx_fast].copy()
 
-    # ─── Selección dinámica de columnas ─────────────────────────────
-    keep = [c for c in ["driver", "team", "lap_time", "GapStart", "top_speed"] if c in base.columns]
+    # ── 6. Selección dinámica de columnas ────────────────────────────────
+    keep = [c for c in ["number", "team", "lap_time", "GapStart", "top_speed"]  # ← nombres REALES
+            if c in base.columns]
 
     if include_sectors:
         keep += [c for c in ("Sector1", "Sector2", "Sector3") if c in base.columns]
 
     if include_sector_gaps:
-        keep += [c for c in ("GapStart", "GapAhead_S1", "GapAhead_S2", "GapAhead_S3") if c in base.columns]
+        keep += [c for c in ("GapStart", "GapAhead_S1", "GapAhead_S2", "GapAhead_S3")
+                if c in base.columns]
 
-    base = base[keep]
-    base = base.rename(columns={"lap_time": "BestLap"})
+    keep = list(dict.fromkeys(keep))           # conserva orden
+    base = base[keep].rename(columns={"lap_time": "BestLap"})
 
-    if df_class is not None and "position" in df_class.columns:
+    # ── 7. Ordenar según clasificación, si se proporciona ────────────────
+    if df_class is not None and "position" in df_class.columns and "number" in df_class.columns:
         order = (
-            df_class.sort_values("position")["driver"]
-            .dropna()
-            .tolist()
+            df_class.dropna(subset=["number", "position"])
+                    .sort_values("position")["number"]
+                    .tolist()
+        )
+        base = (base.set_index("number")
+                     .reindex(order)
+                     .reset_index()
+                     .dropna(subset=["BestLap"], how="all"))
+    else:
+        base = base.sort_values("BestLap")
+
+    # ── 8. Resultado final ───────────────────────────────────────────────
+    return base.reset_index(drop=True)
+
+def slipstream_gap_gain(
+    df: pd.DataFrame,
+    *,
+    gap_col: str = "GapAhead",          # o "GapAhead_S3"
+    fast_threshold: float = 0.10,       # ← ⚠ % sobre la best-lap aceptado
+    bins: tuple[float, ...] = (0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.5, 5.0, float("inf")),
+    ref_gap: float = 5.0,
+    min_laps: int = 3,
+) -> pd.DataFrame:
+    """
+    Ganancia media de lap-time según el *gap* al coche precedente,
+    calculada **solo con vueltas rápidas**.
+
+    • Se consideran rápidas las vueltas con
+      lap_time ≤ (1+fast_threshold) × best_lap del mismo número.
+    • Para cada número se toma como referencia la mediana de sus
+      vueltas con gap ≥ ref_gap (≈ sin rebufo).
+    • Δt = ref_lap − lap_time  →  positivo = tiempo ganado.
+    """
+
+    # ── 0 · comprobaciones mínimas ───────────────────────────────────
+    if {"number", "lap_time", gap_col} - set(df.columns):
+        return pd.DataFrame()
+
+    data = df[["number", "lap_time", gap_col]].copy()
+
+    if not pd.api.types.is_numeric_dtype(data["lap_time"]):
+        data["lap_time"] = data["lap_time"].apply(parse_time_to_seconds)
+    if not pd.api.types.is_numeric_dtype(data[gap_col]):
+        data[gap_col] = pd.to_numeric(data[gap_col], errors="coerce")
+
+    data = data.dropna(subset=["lap_time", gap_col])
+
+    # ── 1 · filtrar sólo vueltas rápidas ─────────────────────────────
+    best = data.groupby("number")["lap_time"].transform("min")
+    data = data[data["lap_time"] <= best * (1 + fast_threshold)]
+
+    # ── 2 · referencia “sin rebufo” y Δt ─────────────────────────────
+    ref = (
+        data.loc[data[gap_col] >= ref_gap]
+            .groupby("number")["lap_time"]
+            .median()
+            .rename("ref_lap")
+    )
+    data = data.join(ref, on="number")
+    data = data.dropna(subset=["ref_lap"])     # coches sin vueltas “sin rebufo”
+
+    data["delta"] = data["lap_time"] - data["ref_lap"] 
+    data["gap_bin"] = pd.cut(data[gap_col], bins=bins, right=False)
+
+    # ── 3 · estadísticos por bin ─────────────────────────────────────
+    result = (
+        data.groupby("gap_bin")
+            .agg(
+                mean_gain=("delta", "mean"),
+                std_gain=("delta", "std"),
+                laps=("delta", "count"),
+            )
+            .query("laps >= @min_laps")
+            .reset_index()
+    )
+    result["gap_range"] = result["gap_bin"].astype(str)
+    return result[["gap_range", "laps", "mean_gain", "std_gain"]]
+
+def slipstream_sector_gap_gain(
+    df: pd.DataFrame,
+    *,
+    bins: tuple[float, ...] = (0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.5, 5.0, float("inf")),
+    ref_gap: float = 5.0,
+    fast_threshold: float = 0.10,   # ≤ 110 % de la best-lap
+    min_laps: int = 3,
+) -> pd.DataFrame:
+    """
+    Ganancia media de tiempo de sector vs gap del mismo sector.
+    Devuelve: sector • gap_range • laps • mean_gain • std_gain
+    """
+
+    req = {
+        "number", "lap_time",
+        "Sector1", "Sector2", "Sector3",
+        "GapAhead_S1", "GapAhead_S2", "GapAhead_S3",
+    }
+    if req - set(df.columns):
+        return pd.DataFrame()
+
+    data = df.copy()
+
+    # ── asegurar todos los tiempos en segundos ──────────────────
+    for col in ["lap_time", "Sector1", "Sector2", "Sector3"]:
+        if not pd.api.types.is_numeric_dtype(data[col]):
+            data[col] = data[col].apply(parse_time_to_seconds)
+
+    # ── sólo vueltas rápidas ────────────────────────────────────
+    best = data.groupby("number")["lap_time"].transform("min")
+    data = data[data["lap_time"] <= best * (1 + fast_threshold)]
+
+    # ── helper por sector ───────────────────────────────────────
+    def _sector_gain(sec: str, gap: str) -> pd.DataFrame:
+        # ── 1· referencia “sin rebufo” de cada piloto ───────────────────
+        ref = (
+            data.loc[data[gap] >= ref_gap]
+                .groupby("number")[sec]
+                .median()
+                .rename("ref")
         )
 
+        # ── 2· Δsector-time y bin de gap ────────────────────────────────
+        d = data.join(ref, on="number").dropna(subset=["ref"])          # elimina pilotos sin ref
+        d["delta"]   = d[sec] - d["ref"] 
+        d["gap_bin"] = pd.cut(d[gap], bins=bins, right=False)
+
+        # ── 3· estadísticos por bin ─────────────────────────────────────
+        out = (
+            d.groupby("gap_bin")["delta"]
+              .agg(mean_gain="mean", std_gain="std", laps="count")
+              .reset_index()
+        )
+        out = out[out["laps"] >= min_laps]                              # exige muestras mínimas
+
+        # ── 4· orden numérico de los intervalos ─────────────────────────
+        cat_order = [str(pd.Interval(bins[i], bins[i + 1], closed="left"))
+                     for i in range(len(bins) - 1)]
+        out["gap_range"] = pd.Categorical(
+            out["gap_bin"].astype(str),
+            categories=cat_order,
+            ordered=True,
+        )
+        out = out.sort_values("gap_range")
+
+        # ── 5· columnas finales ─────────────────────────────────────────
+        out["sector"] = sec
+        return out[["sector", "gap_range", "laps", "mean_gain", "std_gain"]]
+
+    # ── unir resultados de S1/S2/S3 ─────────────────────────────
+    return pd.concat([
+        _sector_gain("Sector1", "GapAhead_S1"),
+        _sector_gain("Sector2", "GapAhead_S2"),
+        _sector_gain("Sector3", "GapAhead_S3"),
+    ], ignore_index=True)
