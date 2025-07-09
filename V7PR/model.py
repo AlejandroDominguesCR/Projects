@@ -59,11 +59,6 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     z_topout_RR    = sign_z * params['z_topout_RR']
     z_bottomout_RR = sign_z * params['z_bottomout_RR']
 
-    x_bump_FL = params['x_bump_FL'] 
-    x_bump_FR = params['x_bump_FR']
-    x_bump_RL = params['x_bump_RL']
-    x_bump_RR = params['x_bump_RR']
-
     gap_FL = params['gap_bumpstop_FL']   
     gap_FR = params['gap_bumpstop_FR']
     gap_RL = params['gap_bumpstop_RL']
@@ -218,15 +213,15 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     # 3) lateral elástico (roll)  ––– usa θ integrado
     Kroll_f = (kFL + kFR + params['k_arb_f'] + params['ktf']*(tF/2)**2) / 4
     Kroll_r = (kRL + kRR + params['k_arb_r'] + params['ktr']*(tR/2)**2) / 4
-    theta   = Ms*ay*h_cg/(Kroll_f+Kroll_r)        # ¡usar theta, no phi!
+    theta_qs   = Ms*ay*h_cg/(Kroll_f+Kroll_r)        # ¡usar theta, no phi!
 
     dF_el_f = theta*Kroll_f/(tF/2)
     dF_el_r = theta*Kroll_r/(tR/2)
 
-    #F_FL += 0.5*dF_el_f
-    #F_FR -= 0.5*dF_el_f
-    #F_RL += 0.5*dF_el_r
-    #F_RR -= 0.5*dF_el_r        
+    F_FL += 0.5*dF_el_f
+    F_FR -= 0.5*dF_el_f
+    F_RL += 0.5*dF_el_r
+    F_RR -= 0.5*dF_el_r        
 
     # === Ecuaciones de dinámica ===
     h_ddot     = (F_FL + F_FR + F_RL + F_RR - Ms*g) / Ms
@@ -807,7 +802,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     ])[:, None]
 
     gap_wheel = (gap_bump)      # (4,1)
-    comp_bump = np.maximum(0.0, -x_spring_raw - gap_wheel)
+    comp_bump = np.maximum(0.0, x_spring_raw - gap_wheel)
 
     f_bump = np.zeros_like(x_spring)
     for i in range(n_corners):
@@ -842,7 +837,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         arb_torque_rear = arb_force_rear * (track_r / 2.0)
 
         # 4d) Fuerza neta en rueda (nunca negativa)␊
-    wheel_load = (static - (0.8*aero) + f_arb) / 9.81   # (4, N)
+    wheel_load = (static - aero + f_arb) / 9.81   # (4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]␊
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]␊
     f_wheel = (static - aero + f_arb)    # (4, N)

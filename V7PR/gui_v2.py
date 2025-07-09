@@ -45,8 +45,8 @@ def parse_json_setup(json_data):
     track_r = 2*json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1]
 
     # Extrae rigidez de barra estabilizadora (antiroll bar)
-    kARB_F = 2.2*json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"]
-    kARB_R = 1.7*json_data["config"]["suspension"]["rear"]["internal"]["antiRollBar"]["kAntiRollBar"]
+    kARB_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"]
+    kARB_R = json_data["config"]["suspension"]["rear"]["internal"]["antiRollBar"]["kAntiRollBar"]
     
     # Masas por esquina 
     ms_f = ((m_car * wbal_f)/ 2) - mHubF
