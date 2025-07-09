@@ -83,14 +83,14 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         x_clipped = np.clip(x_raw, z_top, z_bot)
 
         # 3) bumpstop (pistón → rueda)
-        x_piston = (x_raw - x_bump) / mr_dw         
-        comp_bump = np.maximum(0.0, x_piston)
+        x_piston = (x_clipped - x_bump) / mr_dw         
+        comp_bump = np.maximum(0.0,x_piston)
         f_bump_p  = bump(comp_bump)                    # fuerza en el pistón
         f_bump    = f_bump_p / mr_dw                                  
 
         # 4) resortes en serie + preload
         k_total = 1.0/(1.0/k_spring + 1.0/k_inst)
-        f_spring = k_total * x_piston - spring_preload
+        f_spring = k_total * x_clipped - spring_preload
 
         # 5) amortiguador (ya escala internamente con MR)
         rel_vel  = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
@@ -165,10 +165,10 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     F_arb_front = 0.5 * params['k_arb_f'] * (x_FL_raw - x_FR_raw)
     F_arb_rear  = 0.5 * params['k_arb_r'] * (x_RL_raw - x_RR_raw)
 
-    F_FL += -F_arb_front
-    F_FR += +F_arb_front
-    F_RL += -F_arb_rear
-    F_RR += +F_arb_rear
+    F_FL += +F_arb_front
+    F_FR += -F_arb_front
+    F_RL += +F_arb_rear
+    F_RR += -F_arb_rear
 
     # --- Aerodinámica ---
     dyn_hF = h - lf * phi + params.get('hRideF')
@@ -795,14 +795,21 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         params['bumpstop_front'], params['bumpstop_front'],
         params['bumpstop_rear'],  params['bumpstop_rear']
     ]
-
+    x_spring_clipped = np.clip(
+        x_spring_raw,
+        z_topout[:,None],     # máxima extensión
+        z_bottomout[:,None],  # máxima compresión
+    )
     x0_static = np.array([
         params['x_static_FL'] , params['x_static_FR'],
         params['x_static_RL'], params['x_static_RR']
     ])[:, None]
 
     gap_wheel = (gap_bump)      # (4,1)
-    comp_bump = np.maximum(0.0, x_spring_raw - gap_wheel)
+    comp_bump = np.maximum(
+        0.0,
+        x_spring_clipped - x0_static - gap_wheel
+    )
 
     f_bump = np.zeros_like(x_spring)
     for i in range(n_corners):
@@ -826,18 +833,19 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     arb_torque_front = np.zeros(N)
     arb_torque_rear  = np.zeros(N)
     if k_arb_f != 0.0:
-        arb_force_front = 0.5 * k_arb_f * (x_spring[0] - x_spring[1])
-        f_arb[0] += -arb_force_front
-        f_arb[1] +=  arb_force_front
-        arb_torque_front = arb_force_front * (track_f / 2.0)
+        # k_arb_f en [N·m/rad]: rigidez torsional de la barra
+        arb_torque_front = k_arb_f * theta               # [N·m]
+        arb_force_front  = arb_torque_front / (track_f/2)  # [N] en cada rueda
+        f_arb[0] += +arb_force_front
+        f_arb[1] += -arb_force_front
     if k_arb_r != 0.0:
-        arb_force_rear = 0.5 * k_arb_r * (x_spring[2] - x_spring[3])
-        f_arb[2] += -arb_force_rear
-        f_arb[3] +=  arb_force_rear
-        arb_torque_rear = arb_force_rear * (track_r / 2.0)
+        arb_torque_rear = k_arb_r * theta
+        arb_force_rear  = arb_torque_rear / (track_r/2)
+        f_arb[2] += +arb_force_rear
+        f_arb[3] += -arb_force_rear
 
         # 4d) Fuerza neta en rueda (nunca negativa)␊
-    wheel_load = (static - aero + f_arb) / 9.81   # (4, N)
+    wheel_load = (static - aero + f_arb ) / 9.81   # (4, N)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]␊
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]␊
     f_wheel = (static - aero + f_arb)    # (4, N)
