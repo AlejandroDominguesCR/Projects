@@ -167,13 +167,13 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     x_RL_raw = zRL   - (phi_off_rear  +  theta_off_rear  +  h)
     x_RR_raw = zRR   - (phi_off_rear  -  theta_off_rear  +  h)
     
-    F_arb_front = 0.5 * params['k_arb_f'] * (x_FR_raw - x_FL_raw)
-    F_arb_rear  = 0.5 * params['k_arb_r'] * (x_RR_raw - x_RL_raw)
+    F_arb_front = 0.5 * params['k_arb_f'] * (x_FL_raw - x_FR_raw)
+    F_arb_rear  = 0.5 * params['k_arb_r'] * (x_RL_raw - x_RR_raw)
 
-    F_FL += +F_arb_front
-    F_FR += -F_arb_front
-    F_RL += +F_arb_rear
-    F_RR += -F_arb_rear
+    F_FL += -F_arb_front
+    F_FR += +F_arb_front
+    F_RL += -F_arb_rear
+    F_RR += +F_arb_rear
 
     # --- Aerodinámica ---
     dyn_hF = h - lf * phi + params.get('hRideF')
@@ -192,7 +192,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     # Altura instantánea del centro de gravedad respecto al suelo            
     h_cg = params.get('zCoG', 0.3)                                      
     ax   = params.get('ax', 0.0)                                            
-    ay   = -sign_z * params.get('ay', 0.0)                                           
+    ay   = params.get('ay', 0.0)                                           
 
     # --- Load transfer ------------------------------------------------ 
     Mu_f = 2 * params['mHubF']                                         
@@ -206,28 +206,27 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     F_RL += 0.5*dF_long
     F_RR += 0.5*dF_long
                       
-    # 2) lateral geométrico (signo corregido)
-    dF_lat_f =  (Ms + Mu_f) * ay * h_cg / tF
-    dF_lat_r =  (Ms + Mu_r) * ay * h_cg / tR
+    # 2) lateral geométrico
+    dF_lat_f =  (Ms+Mu_f)*ay*h_cg/tF
+    dF_lat_r =  (Ms+Mu_r)*ay*h_cg/tR
 
-    F_FL -= 0.5 * dF_lat_f   # rueda interior en giro a la izquierda
-    F_FR += 0.5 * dF_lat_f
-    F_RL -= 0.5 * dF_lat_r
-    F_RR += 0.5 * dF_lat_r
+    F_FL += 0.5*dF_lat_f
+    F_FR -= 0.5*dF_lat_f
+    F_RL += 0.5*dF_lat_r
+    F_RR -= 0.5*dF_lat_r
                           
     # 3) lateral elástico (roll)  ––– usa θ integrado
     Kroll_f = (kFL + kFR + params['k_arb_f'] + params['ktf']*(tF/2)**2) / 4
     Kroll_r = (kRL + kRR + params['k_arb_r'] + params['ktr']*(tR/2)**2) / 4
     theta   = Ms*ay*h_cg/(Kroll_f+Kroll_r)        # ¡usar theta, no phi!
 
-    # 3) lateral elástico (roll, signo corregido)
-    dF_el_f = theta * Kroll_f / (tF/2)
-    dF_el_r = theta * Kroll_r / (tR/2)
+    dF_el_f = theta*Kroll_f/(tF/2)
+    dF_el_r = theta*Kroll_r/(tR/2)
 
-    F_FL -= 0.5 * dF_el_f
-    F_FR += 0.5 * dF_el_f
-    F_RL -= 0.5 * dF_el_r
-    F_RR += 0.5 * dF_el_r      
+    #F_FL += 0.5*dF_el_f
+    #F_FR -= 0.5*dF_el_f
+    #F_RL += 0.5*dF_el_r
+    #F_RR -= 0.5*dF_el_r        
 
     # === Ecuaciones de dinámica ===
     h_ddot     = (F_FL + F_FR + F_RL + F_RR - Ms*g) / Ms
@@ -808,7 +807,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     ])[:, None]
 
     gap_wheel = (gap_bump)      # (4,1)
-    comp_bump = np.maximum(0.0, x_spring_raw - gap_wheel)
+    comp_bump = np.maximum(0.0, -x_spring_raw - gap_wheel)
 
     f_bump = np.zeros_like(x_spring)
     for i in range(n_corners):
@@ -842,20 +841,12 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         f_arb[3] +=  arb_force_rear
         arb_torque_rear = arb_force_rear * (track_r / 2.0)
 
-    # 4d) Fuerza neta en rueda (nunca negativa)␊
-    #wheel_load = (static - (0.8*aero) + f_arb) / 9.81   # (4, N)
-    #wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]␊
-    #wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]␊
-    #f_wheel = (static - aero + f_arb)    # (4, N)
+        # 4d) Fuerza neta en rueda (nunca negativa)␊
+    wheel_load = (static - (0.8*aero) + f_arb) / 9.81   # (4, N)
+    wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]␊
+    wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]␊
+    f_wheel = (static - aero + f_arb)    # (4, N)
     #f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
-
-    f_wheel      = static - aero + (f_spring + f_damper + f_bump + f_arb)   # (4, N)
-    # opcional: clampeo para garantizar ≥ 0
-    f_wheel      = np.maximum(f_wheel, 0.0)
-    # si lo quieres en kgf:
-    wheel_load   = f_wheel / 9.81
-    wheel_load_max = np.max(wheel_load, axis=1)
-    wheel_load_min = np.min(wheel_load, axis=1)
 
     f_damp_FL, Pxx_damp_FL = welch(f_damper[0], fs=fs, nperseg=nperseg, noverlap=noverlap)
     f_damp_RL, Pxx_damp_RL = welch(f_damper[2], fs=fs, nperseg=nperseg, noverlap=noverlap)
