@@ -6,6 +6,7 @@ from dash.exceptions import PreventUpdate
 import plotly.express as px
 from dash import dash_table  
 import plotly.graph_objects as go
+import argparse
 from plotly.offline import plot
 import tkinter as tk
 from tkinter import filedialog
@@ -28,6 +29,7 @@ from data_process import (
     export_raw_session,
     unify_timestamps,
     convert_time_column,
+    compute_gap_columns,
     seconds_to_mmss,
     parse_time_to_seconds,
 )
@@ -228,6 +230,7 @@ def load_data(folder: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd
     # (2) columna legible para mostrar
     df_analysis["driver"] = df_analysis[driver_col]
     df_analysis = convert_time_column(df_analysis, "lap_time")
+    df_analysis = compute_gap_columns(df_analysis)
 
     if not df_class.empty:
         class_driver = next(
@@ -417,49 +420,6 @@ def build_figures(
         df_tmp['slipstream'] = False
 
 
-    if "GapAhead" not in df_analysis.columns:
-        if "timestamp" not in df_analysis.columns:
-            df_analysis["timestamp"] = pd.to_datetime(df_analysis["hour"], errors="coerce")
-        df_analysis = df_analysis.sort_values("timestamp").reset_index(drop=True)
-        df_analysis["GapAhead"] = df_analysis["timestamp"].diff().dt.total_seconds().abs()
-    
-    
-    need_sec_gaps = {"GapAhead_S1", "GapAhead_S2", "GapAhead_S3"}
-    if need_sec_gaps - set(df_analysis.columns):
-        # ① localizar columnas de sector en segundos
-        s2 = next((c for c in df_analysis.columns
-                if c.lower() in {"s2_seconds","s2","sector2"}), None)
-        s3 = next((c for c in df_analysis.columns
-                if c.lower() in {"s3_seconds","s3","sector3"}), None)
-        if s2 and s3:
-            # ② asegurar que S2/S3 están en segundos
-            for col in (s2, s3):
-                if not pd.api.types.is_numeric_dtype(df_analysis[col]):
-                    df_analysis[col] = df_analysis[col].apply(parse_time_to_seconds)
-            # ③ timestamps por vuelta
-            if "timestamp" not in df_analysis.columns:
-                df_analysis["timestamp"] = pd.to_datetime(df_analysis["hour"],
-                                                        errors="coerce")
-            df_analysis["T3"] = df_analysis["timestamp"]
-            df_analysis["T2"] = df_analysis["T3"] - pd.to_timedelta(df_analysis[s3], unit="s")
-            df_analysis["T1"] = df_analysis["T2"] - pd.to_timedelta(df_analysis[s2], unit="s")
-            # ④ gaps ordenando por cada split
-            df_analysis["GapAhead_S1"] = (
-                df_analysis.loc[df_analysis["T1"].sort_values().index, "T1"]
-                            .diff().dt.total_seconds().abs()
-                            .reindex(df_analysis.index)
-            )
-            df_analysis["GapAhead_S2"] = (
-                df_analysis.loc[df_analysis["T2"].sort_values().index, "T2"]
-                            .diff().dt.total_seconds().abs()
-                            .reindex(df_analysis.index)
-            )
-            df_analysis["GapAhead_S3"] = (
-                df_analysis.loc[df_analysis["T3"].sort_values().index, "T3"]
-                            .diff().dt.total_seconds().abs()
-                            .reindex(df_analysis.index)
-            )
-
     gain_df = slipstream_gap_gain(
         df_analysis,
         gap_col="GapAhead",
@@ -474,18 +434,20 @@ def build_figures(
         )
         figs["Slipstream gain vs gap"] = fig_gain
     
-    for raw, std in [(s2, "Sector2"), (s3, "Sector3")]:
+    # asegurar columnas Sector1/2/3 en segundos si existen
+    sector_map = {
+        "Sector1": {"s1_seconds", "s1", "sector1"},
+        "Sector2": {"s2_seconds", "s2", "sector2"},
+        "Sector3": {"s3_seconds", "s3", "sector3"},
+    }
+    for std, aliases in sector_map.items():
+        raw = next((c for c in df_analysis.columns if c.lower() in aliases), None)
+        if raw is None:
+            continue
         if not pd.api.types.is_numeric_dtype(df_analysis[raw]):
             df_analysis[raw] = df_analysis[raw].apply(parse_time_to_seconds)
-        df_analysis[std] = df_analysis[raw]            
+        df_analysis[std] = df_analysis[raw]
 
-    #     necesitamos también S1
-    s1 = next((c for c in df_analysis.columns
-            if c.lower() in {"s1_seconds","s1","sector1"}), None)
-    if s1:
-        if not pd.api.types.is_numeric_dtype(df_analysis[s1]):
-            df_analysis[s1] = df_analysis[s1].apply(parse_time_to_seconds)
-        df_analysis["Sector1"] = df_analysis[s1]  
 
     sector_gain = slipstream_sector_gap_gain(df_analysis)
     if not sector_gain.empty:
@@ -1308,10 +1270,28 @@ def on_export(n_clicks, session_data):
 
     return dict(content=content, filename="session_report.html")
 
-def run_app():
-    """Launch the Dash application and open it in the browser."""
-    webbrowser.open_new("http://127.0.0.1:8050/")
-    app.run(debug=False, threaded=False, use_reloader=False)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Session Analysis Dashboard")
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("DASH_HOST", "127.0.0.1"),
+        help="Host donde se servirá el Dash (p.ej. 0.0.0.0 o 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("DASH_PORT", 8053)),
+        help="Puerto en el que escuchará el Dash",
+    )
+    return parser.parse_args()
+
+def run_app(host: str, port: int):
+    """Lanza el Dash y abre el navegador en la URL correcta."""
+    url = f"http://{host}:{port}/"
+    webbrowser.open_new(url)
+    # Nota: puedes usar app.run_server si prefieres. Aquí usamos Flask.run para seguir tu estilo.
+    app.run(host=host, port=port, debug=False, threaded=False, use_reloader=False)
 
 if __name__ == "__main__":
-    run_app()
+    args = parse_args()
+    run_app(args.host, args.port)

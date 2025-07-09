@@ -157,3 +157,75 @@ def seconds_to_mmss(t: float | int | str) -> str:
         return ""
     m, s = divmod(t, 60)
     return f"{int(m):d}:{s:06.3f}"
+
+
+def compute_gap_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute gap-related columns if not already present.
+
+    Parameters
+    ----------
+    df:
+        DataFrame that should contain at least a ``hour`` column.  The
+        function adds ``timestamp`` (if missing), ``GapAhead`` and, when the
+        three sector times are available, ``GapAhead_S1``, ``GapAhead_S2`` and
+        ``GapAhead_S3``.
+
+    Returns
+    -------
+    pd.DataFrame
+        The DataFrame with the computed columns.
+    """
+
+    df = df.copy()
+
+    # ── timestamp global + GapAhead (meta) ─────────────────────────────
+    if "timestamp" not in df.columns:
+        if "hour" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
+        else:
+            return df
+
+    df = df.sort_values("timestamp").reset_index(drop=True)
+
+    if "GapAhead" not in df.columns:
+        df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
+
+    # ── gaps por sector (S1/S2/S3) si existen ─────────────────────────
+    need_cols = {"GapAhead_S1", "GapAhead_S2", "GapAhead_S3"}
+    if need_cols - set(df.columns):
+        sector_aliases = {
+            "sector1": ["sector1", "s1", "sector1_seconds", "s1_seconds"],
+            "sector2": ["sector2", "s2", "sector2_seconds", "s2_seconds"],
+            "sector3": ["sector3", "s3", "sector3_seconds", "s3_seconds"],
+        }
+        sector_cols = {
+            std: next((c for c in aliases if c in df.columns), None)
+            for std, aliases in sector_aliases.items()
+        }
+
+        if all(sector_cols.values()):
+            for col in sector_cols.values():
+                if not pd.api.types.is_numeric_dtype(df[col]):
+                    df[col] = df[col].apply(parse_time_to_seconds)
+
+            df["T3"] = df["timestamp"]
+            df["T2"] = df["T3"] - pd.to_timedelta(df[sector_cols["sector3"]], unit="s")
+            df["T1"] = df["T2"] - pd.to_timedelta(df[sector_cols["sector2"]], unit="s")
+
+            df["GapAhead_S1"] = (
+                df.loc[df["T1"].sort_values().index, "T1"]
+                  .diff().dt.total_seconds().abs()
+                  .reindex(df.index)
+            )
+            df["GapAhead_S2"] = (
+                df.loc[df["T2"].sort_values().index, "T2"]
+                  .diff().dt.total_seconds().abs()
+                  .reindex(df.index)
+            )
+            df["GapAhead_S3"] = (
+                df.loc[df["T3"].sort_values().index, "T3"]
+                  .diff().dt.total_seconds().abs()
+                  .reindex(df.index)
+            )
+
+    return df

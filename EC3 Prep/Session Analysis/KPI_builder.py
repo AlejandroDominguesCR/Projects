@@ -794,11 +794,11 @@ def build_driver_tables(
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
     # ── 3· timestamp global + GapAhead (meta) ─────────────────────────
-    df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
-    df = df.sort_values("timestamp").reset_index(drop=True)
-    df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
-
-
+    if "timestamp" not in df.columns:
+        df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
+        df = df.sort_values("timestamp").reset_index(drop=True)
+    if "GapAhead" not in df.columns:
+        df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
 
     # ── 4· localizar columnas de sector (si existen) ──────────────────
     sector_aliases = {
@@ -819,18 +819,21 @@ def build_driver_tables(
             if not pd.api.types.is_numeric_dtype(df[col]):
                 df[col] = df[col].apply(parse_time_to_seconds)
 
-        df["T3"] = df["timestamp"]
-        df["T2"] = df["T3"] - pd.to_timedelta(df[sector_cols["sector3"]], unit="s")
-        df["T1"] = df["T2"] - pd.to_timedelta(df[sector_cols["sector2"]], unit="s")
+        if {"GapAhead_S1", "GapAhead_S2", "GapAhead_S3"} - set(df.columns):
+            df["T3"] = df["timestamp"]
+            df["T2"] = df["T3"] - pd.to_timedelta(df[sector_cols["sector3"]], unit="s")
+            df["T1"] = df["T2"] - pd.to_timedelta(df[sector_cols["sector2"]], unit="s")
 
-        for lab, tcol in zip(("S1", "S2", "S3"), ("T1", "T2", "T3")):
-            df[f"GapAhead_{lab}"] = (
-                df.loc[df[tcol].sort_values().index, tcol]
-                  .diff().dt.total_seconds().abs()
-                  .reindex(df.index)
-            )
-            if include_sector_gaps:
-                gap_cols.append(f"GapAhead_{lab}")
+            for lab, tcol in zip(("S1", "S2", "S3"), ("T1", "T2", "T3")):
+                colname = f"GapAhead_{lab}"
+                if colname not in df.columns:
+                    df[colname] = (
+                        df.loc[df[tcol].sort_values().index, tcol]
+                          .diff().dt.total_seconds().abs()
+                          .reindex(df.index)
+                    )
+                if include_sector_gaps and colname not in gap_cols:
+                    gap_cols.append(colname)
 
         # GapStart basado en GapAhead_S3 de la vuelta anterior
         df["GapStart"] = df.groupby("number")["GapAhead_S3"].shift(1)
@@ -888,56 +891,48 @@ def build_fastest_lap_table(
     df: pd.DataFrame,
     df_class: pd.DataFrame | None = None,
     *,
+    teams: list[str] | None = None,
     filter_fast: bool = True,
     include_sectors: bool = True,
     include_sector_gaps: bool = False,
 ) -> pd.DataFrame:
     """
-    Devuelve una tabla con la vuelta más rápida de cada coche ordenada por
-    la posición oficial de la sesión (df_class['position']).  Si no se
-    proporciona df_class, se ordena por BestLap ascendente.
+    Igual que antes, pero ahora acepta `teams` para filtrar la tabla
+    **tras** haber calculado todos los gaps en el DataFrame completo,
+    de modo que quitar pilotos no altere los valores de gap.
     """
 
-    # ── 0 · Normalizar nombre del piloto/número ────────────────────────
+    # 0 · normalizar “number”
     if "number" not in df.columns:
-        rename_map = {
-            "driver_name": "number",
-            "driver_shortname": "number",
-            "driver_number": "number",
-        }
-        for src, dst in rename_map.items():
+        for src in ("driver_name","driver_shortname","driver_number"):
             if src in df.columns:
-                df = df.rename(columns={src: dst})
+                df = df.rename(columns={src:"number"})
                 break
 
-    if df.empty or {"number", "lap_time"} - set(df.columns):
+    if df.empty or {"number","lap_time"} - set(df.columns):
         return pd.DataFrame()
 
     df = df.copy()
 
-    # ── 1 · Timestamp global y GapAhead (meta) ─────────────────────────
+    # 1 · timestamp + GapAhead (meta)
     if "timestamp" not in df.columns and "hour" in df.columns:
         df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
-
     df = df.sort_values("timestamp").reset_index(drop=True)
     df["GapAhead"] = df["timestamp"].diff().dt.total_seconds().abs()
 
-    # ── 2 · Gaps por split (S1/S2/S3) y GapStart preliminar ────────────
+    # 2 · splits y gaps sectoriales (si existen)
     sector_aliases = {
-        "sector1": ["sector1", "s1", "sector1_seconds", "s1_seconds"],
-        "sector2": ["sector2", "s2", "sector2_seconds", "s2_seconds"],
-        "sector3": ["sector3", "s3", "sector3_seconds", "s3_seconds"],
+        "sector1": ["sector1","s1","sector1_seconds","s1_seconds"],
+        "sector2": ["sector2","s2","sector2_seconds","s2_seconds"],
+        "sector3": ["sector3","s3","sector3_seconds","s3_seconds"],
     }
-    sector_cols = {
-        std: next((c for c in aliases if c in df.columns), None)
-        for std, aliases in sector_aliases.items()
-    }
+    sector_cols = {std: next((c for c in aliases if c in df.columns), None)
+                   for std,aliases in sector_aliases.items()}
 
     if all(sector_cols.values()):
-        for col in sector_cols.values():
-            df[col] = pd.to_numeric(
-                df[col].apply(parse_time_to_seconds), errors="coerce"
-            )
+        # convertir a segundos
+        for c in sector_cols.values():
+            df[c] = pd.to_numeric(df[c].apply(parse_time_to_seconds), errors="coerce")
 
         df["T3"] = df["timestamp"]
         df["T2"] = df["T3"] - pd.to_timedelta(df[sector_cols["sector3"]], unit="s")
@@ -945,74 +940,77 @@ def build_fastest_lap_table(
 
         df = df.assign(
             GapAhead_S1=lambda d: (
-                d.loc[d["T1"].sort_values().index, "T1"]
-                  .diff().dt.total_seconds().abs()
-                  .reindex(d.index)
+                d.loc[d["T1"].sort_values().index,"T1"]
+                 .diff().dt.total_seconds().abs()
+                 .reindex(d.index)
             ),
             GapAhead_S2=lambda d: (
-                d.loc[d["T2"].sort_values().index, "T2"]
-                  .diff().dt.total_seconds().abs()
-                  .reindex(d.index)
+                d.loc[d["T2"].sort_values().index,"T2"]
+                 .diff().dt.total_seconds().abs()
+                 .reindex(d.index)
             ),
             GapAhead_S3=lambda d: (
-                d.loc[d["T3"].sort_values().index, "T3"]
-                  .diff().dt.total_seconds().abs()
-                  .reindex(d.index)
+                d.loc[d["T3"].sort_values().index,"T3"]
+                 .diff().dt.total_seconds().abs()
+                 .reindex(d.index)
             ),
         )
-
-        # GapStart preliminar basado en S3
+        # GapStart en bruto
         df["GapStart"] = df.groupby("number")["GapAhead_S3"].shift(1)
 
-        # sectores para mostrar
         if include_sectors:
             df["Sector1"] = df[sector_cols["sector1"]]
             df["Sector2"] = df[sector_cols["sector2"]]
             df["Sector3"] = df[sector_cols["sector3"]]
     else:
-        # sin sectores: usar únicamente el gap en meta
+        # solo GapAhead meta
         df["GapStart"] = df.groupby("number")["GapAhead"].shift(1)
 
-    # ── 3 · Filtro rápido  (DESPUÉS de tener GapStart) ─────────────────
+    # 3 · filtro rápido SOLO por lap_time (no tocamos gaps)
     if filter_fast:
         best = df.groupby("number")["lap_time"].transform("min")
-        mask = (df["lap_time"] <= 1.20 * best) 
-        df = df[mask].copy()
+        df = df[df["lap_time"] <= 1.20 * best].copy()
 
-    # ── 4 · Asegurar lap_time en segundos ──────────────────────────────
+    # 4 · asegurar lap_time en segundos
     if not pd.api.types.is_numeric_dtype(df["lap_time"]):
         df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
 
-    # ── 5 · Vuelta más rápida de cada coche ────────────────────────────
-    idx_fast = df.groupby("number")["lap_time"].idxmin()
-    base = df.loc[idx_fast].copy()
+    # 5 · extraer índice de la best lap
+    idx = df.groupby("number")["lap_time"].idxmin()
+    base = df.loc[idx].copy()
 
-    # ── 6 · Selección dinámica de columnas ─────────────────────────────
-    keep = ["number", "team", "lap_time", "GapStart", "top_speed"]
+    # 6 · selección dinámica de columnas
+    cols = ["number","team","lap_time","GapStart","top_speed"]
     if include_sectors:
-        keep += [c for c in ("Sector1", "Sector2", "Sector3") if c in base.columns]
+        cols += [c for c in ("Sector1","Sector2","Sector3") if c in base.columns]
     if include_sector_gaps:
-        keep += [c for c in ("GapAhead_S1", "GapAhead_S2", "GapAhead_S3") if c in base.columns]
+        cols += [c for c in ("GapAhead_S1","GapAhead_S2","GapAhead_S3") if c in base.columns]
+    base = base[cols].rename(columns={"lap_time":"BestLap"})
 
-    base = base[keep].rename(columns={"lap_time": "BestLap"})
-
-    # ── 7 · Orden final: posición oficial o BestLap ────────────────────
-    if df_class is not None and {"position", "number"} <= set(df_class.columns):
+    # 7 · ordenar según df_class o por BestLap
+    if df_class is not None and {"position","number"} <= set(df_class.columns):
         order = (
-            df_class.dropna(subset=["number", "position"])
+            df_class.dropna(subset=["number","position"])
                     .sort_values("position")["number"]
                     .astype(str)
                     .tolist()
         )
         base["number"] = base["number"].astype(str)
-        base = (base.set_index("number")
-                     .reindex(order)
-                     .dropna(subset=["BestLap"])
-                     .reset_index())
+        base = (
+            base.set_index("number")
+                .reindex(order)
+                .dropna(subset=["BestLap"])
+                .reset_index()
+        )
     else:
         base = base.sort_values("BestLap").reset_index(drop=True)
 
+    # 8 · **ahora** filtramos SOLO para mostrar los teams seleccionados
+    if teams is not None:
+        base = base[base["team"].isin(teams)].reset_index(drop=True)
+
     return base
+
 
 def slipstream_gap_gain(
     df: pd.DataFrame,
