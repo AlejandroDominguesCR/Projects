@@ -14,6 +14,8 @@ from PyQt5.QtGui import QPixmap, QPalette, QColor, QFont, QIcon, QDoubleValidato
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from model import run_vehicle_model_simple, postprocess_7dof
 
+sign_z = +1  # Cambia a -1 si el eje Z va hacia abajo en tu modelo
+
 def set_dark_theme(app):
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor(30, 30, 30))
@@ -161,7 +163,7 @@ def parse_json_setup(json_data):
     "gap_bumpstop_RR": params[3]["bump_gap"]
     })
 
-    mr_f_wd = 1.43456 
+    mr_f_wd = 1.491587949 #1.43456 
     mr_r_wd = 1.32579 
 
     mr_f_rd = (1.491587949 * (np.pi / 180.0))/1000  #mr_wd * mr_rd para sacar el mr_rw, es decir, el paso directo
@@ -253,8 +255,8 @@ def parse_json_setup(json_data):
     aARB_R_mm = dist(pts_r["rARBAxis"], pts_r["rARBRockerPickup"]) * 1000
 
     # 2. Wheel-rate (N/mm) de la barra para UNA rueda
-    kARB_F_wheel = 2 * kARB_F * 1000 / (aARB_F_mm ** 2 * mr_f_wd)
-    kARB_R_wheel = 2 * kARB_R * 1000 / (aARB_R_mm ** 2 * mr_r_wd)
+    kARB_F_wheel = 2*kARB_F * 1000 / (aARB_F_mm ** 2 * mr_f_wd)
+    kARB_R_wheel = 2*kARB_R * 1000 / (aARB_R_mm ** 2 * mr_r_wd)
 
     # 3. Guárdalo en global_setup
     global_setup.update({
@@ -273,15 +275,17 @@ def prepare_simple_params(params, global_setup):
     # global_setup: diccionario global
 
     from scipy.interpolate import interp1d
-    
-    
-    kFL = params[0]['kSpring'] / global_setup['MR_spring_FL']**2
-    kFR = params[1]['kSpring'] / global_setup['MR_spring_FR']**2
-    kRL = params[2]['kSpring'] / global_setup['MR_spring_RL']**2
-    kRR = params[3]['kSpring'] / global_setup['MR_spring_RR']**2
+    gainF = 1
+    gainR = 1
 
-    kinstf = global_setup['kVerticalSuspensionComplianceF'] / 2    
-    kinstr = global_setup['kVerticalSuspensionComplianceR'] / 2
+
+    kFL = (gainF*params[0]['kSpring']) / global_setup['MR_spring_FL']**2
+    kFR = (gainF*params[1]['kSpring']) / global_setup['MR_spring_FR']**2
+    kRL = (gainR*params[2]['kSpring']) / global_setup['MR_spring_RL']**2
+    kRR = (gainR*params[3]['kSpring']) / global_setup['MR_spring_RR']**2
+
+    kinstf = (global_setup['kVerticalSuspensionComplianceF'] / 2)  
+    kinstr = (global_setup['kVerticalSuspensionComplianceR'] / 2) 
     
 
     # Damper y bumpstop interpoladores
@@ -321,10 +325,8 @@ def prepare_simple_params(params, global_setup):
     bumpstop_front = lambda x: np.where(x < 0, 0, bumpstop_front_interp(x))
     bumpstop_rear = lambda x: np.where(x < 0, 0, bumpstop_rear_interp(x))
 
-
     k_arb_f = global_setup['kARB_F_wheel'] * 1000  
     k_arb_r = global_setup['kARB_R_wheel'] * 1000
-
 
     # --- Cálculo de topes físicos (top-out y bumpstop) para cada esquina ---
     z_topout_FL = float(min(params[0]['spring_x'][0], params[0]['bump_x'][0]))
@@ -347,13 +349,10 @@ def prepare_simple_params(params, global_setup):
     stroke_RL = params[2].get("stroke")
     stroke_RR = params[3].get("stroke")
 
-
     tires = global_setup.get('tires', {})
     tire_front = tires.get('front', {})
     tire_rear = tires.get('rear', {})
 
-
-    
     return {
         'ms': ms_total,
         'Ixx': global_setup['ICar'][0],
