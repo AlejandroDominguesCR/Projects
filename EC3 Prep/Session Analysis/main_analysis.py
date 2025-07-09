@@ -293,9 +293,6 @@ def build_figures(
     if teams:
         df_analysis = df_analysis[df_analysis["team"].isin(teams)]
     figs = {}
-    if teams:
-        df_analysis = df_analysis[df_analysis["team"].isin(teams)]
-    figs = {}
     driver_tables = build_driver_tables(
         df_analysis,
         teams=teams,
@@ -332,13 +329,17 @@ def build_figures(
     ts = compute_top_speeds(df_analysis)
     # Mapa de colores por equipo (igual que Team Ranking)
     team_colors = get_team_colors()
-    # Mapa de colores por equipo (igual que Team Ranking)
-    team_colors = get_team_colors()
+
     for team in ts['team'].unique():
         team_colors.setdefault(team, f'#{random.randint(0, 0xFFFFFF):06x}')
 
     ss = slipstream_stats(df_analysis)
-    ss_sector = sector_slipstream_stats(df_analysis)
+    ss_sector = sector_slipstream_stats(df_analysis).rename(columns={
+        "min_time_with_slip_s1": "min_s1_with_slip",
+        "min_time_no_slip_s1": "min_s1_no_slip",
+        "min_time_with_slip_s2": "min_s2_with_slip",
+        "min_time_no_slip_s2": "min_s2_no_slip",
+    })
 
     if not ss.empty:
         # 1) Lap-time mínimo (orden asc.)
