@@ -42,6 +42,8 @@ def launch_dash(sol, post, setup_name="Setup"):
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
         wheel_f_filtered = smooth_signal(wheel_f)
+        spring_force_filtered = smooth_signal(post['f_spring'])
+        damper_force_filtered = smooth_signal(post['f_damper'])
 
         # Travel absoluto por rueda 
         graphs.append(dcc.Graph(figure=go.Figure([
@@ -121,6 +123,31 @@ def launch_dash(sol, post, setup_name="Setup"):
             id='bumpstop-forces', style={'height': '300px'}, config={'displayModeBar': False}
         ))
 
+        graphs.append(dcc.Graph(
+            figure=go.Figure([
+                go.Scatter(x=distance, y=spring_force_filtered[0], name="Spring FL"),
+                go.Scatter(x=distance, y=spring_force_filtered[1], name="Spring FR"),
+                go.Scatter(x=distance, y=spring_force_filtered[2], name="Spring RL"),
+                go.Scatter(x=distance, y=spring_force_filtered[3], name="Spring RR"),
+            ]).update_layout(
+                title="Spring Force per Wheel [N]",
+                xaxis_title="Distance [m]",
+                yaxis_title="Force [N]"
+            )),
+        )
+
+        graphs.append(dcc.Graph(
+            figure=go.Figure([
+                go.Scatter(x=distance, y=damper_force_filtered[0], name="Damper FL"),
+                go.Scatter(x=distance, y=damper_force_filtered[1], name="Damper FR"),
+                go.Scatter(x=distance, y=damper_force_filtered[2], name="Damper RL"),
+                go.Scatter(x=distance, y=damper_force_filtered[3], name="Damper RR"),
+            ]).update_layout(
+                title="Damper Force per Wheel [N]",
+                xaxis_title="Distance [m]",
+                yaxis_title="Force [N]"
+            )),
+        )
         if "arb_torque_front" in post:
             fig_arb = go.Figure([
                 go.Scatter(x=distance, y=post["arb_torque_front"], name="Front ARB"),

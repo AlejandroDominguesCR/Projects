@@ -75,10 +75,10 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    stroke_FL = 0.029 #0.01965
-    stroke_FR = 0.029 #0.01965
-    stroke_RL = 0.059 #0.0305
-    stroke_RR = 0.059 #0.0305
+    stroke_FL = 0.029 #0.01965  0.029 
+    stroke_FR = 0.029 #0.01965  0.029
+    stroke_RL = 0.059 #0.0305 0.059
+    stroke_RR = 0.059 #0.0305  0.059
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -89,10 +89,10 @@ def parse_json_setup(json_data):
         # --- Corrección damper: separar compresión y extensión ---
         v = np.array(damper["vDamperBasis"])
         F = np.array(damper["FDamperLU"])
-        damper_f_ext = F[v > 0] 
-        damper_v_ext = v[v > 0]
-        damper_f_comp = F[v < 0]
-        damper_v_comp = v[v < 0]
+        damper_f_ext = F[v < 0] 
+        damper_v_ext = v[v < 0]
+        damper_f_comp = F[v > 0]
+        damper_v_comp = v[v > 0]
 
         # Si no hay valores negativos/positivos, usar arrays vacíos
         if damper_f_ext.size == 0:
@@ -106,7 +106,7 @@ def parse_json_setup(json_data):
         spring_travel = np.linspace(0, stroke, 100)
         kSpring = spring["kSpring"]
         FSpringPreload = spring.get("FSpringPreload", 0)
-        spring_force = kSpring * spring_travel + FSpringPreload
+        spring_force = (kSpring * spring_travel) + FSpringPreload
         bump_x = np.array(bump["xData"])
         bump_f = np.array(bump["FData"])
         bump_gap = bump["xFreeGap"]
@@ -190,7 +190,6 @@ def parse_json_setup(json_data):
     tyres = json_data['config']['tyres']
 
     aero = {
-        'zCoG': chassis.get('zCoG', 0.0),
         'kUndertrayFront': chassis.get('kUndertrayFront', 0),
         'kUndertrayMid': chassis.get('kUndertrayMid', 0),
         'kUndertrayRear': chassis.get('kUndertrayRear', 0),
@@ -244,7 +243,7 @@ def parse_json_setup(json_data):
     global_setup['aero_DRS'] = aero_poly.get('DRS', {})
     global_setup['tires'] = tires
 
-        # === BRAZO Y RIGIDEZ DE LA BARRA (wheel-rate) ======================
+    # === BRAZO Y RIGIDEZ DE LA BARRA (wheel-rate) ======================
     def dist(p, q):
         return ((p[0]-q[0])**2 + (p[1]-q[1])**2 + (p[2]-q[2])**2) ** 0.5
 
@@ -278,7 +277,6 @@ def prepare_simple_params(params, global_setup):
     gainF = 1
     gainR = 1
 
-
     kFL = (gainF*params[0]['kSpring']) / global_setup['MR_spring_FL']**2
     kFR = (gainF*params[1]['kSpring']) / global_setup['MR_spring_FR']**2
     kRL = (gainR*params[2]['kSpring']) / global_setup['MR_spring_RL']**2
@@ -287,7 +285,6 @@ def prepare_simple_params(params, global_setup):
     kinstf = (global_setup['kVerticalSuspensionComplianceF'] / 2)  
     kinstr = (global_setup['kVerticalSuspensionComplianceR'] / 2) 
     
-
     # Damper y bumpstop interpoladores
     # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
     def damper_interp_factory(v_ext, f_ext, v_comp, f_comp, mr_wd):
@@ -301,8 +298,8 @@ def prepare_simple_params(params, global_setup):
             v_damper = np.asarray(v_wheel) / mr_wd
             # 2) fuerza interna en el amortiguador
             f_int = np.where(v_damper > 0,
-                             interp_ext(v_damper),
-                             interp_comp(v_damper))
+                             interp_comp(v_damper),
+                             interp_ext(v_damper))
             # 3) fuerza pistón → fuerza rueda
             return f_int / mr_wd
         return damper_func
@@ -363,7 +360,7 @@ def prepare_simple_params(params, global_setup):
         'tr': global_setup['track_r'],
         'mHubF': global_setup['mHubF'],
         'mHubR': global_setup['mHubR'],
-        'zCoG': global_setup['zCoG'],
+        'zCoG': abs(global_setup['zCoG']),
         'hRideF': global_setup['hRideF'],
         'hRideR': global_setup['hRideR'],
         'rWeightBalF': global_setup['rWeightBalF'],
