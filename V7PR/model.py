@@ -82,15 +82,16 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
                     x_static):
         
         # 1) desplazamiento total a nivel pistón
-        x_raw = sign_z * (z_w + (phi_off + theta_off + h))
+        #    compresión -> x_raw negativo con eje Z positivo hacia arriba
+        x_raw = sign_z * (z_w - (phi_off + theta_off + h))
         # 2) clipping al recorrido físico
         x_clipped = np.clip(x_raw, z_top, z_bot)
 
         # 3) bumpstop (pistón → rueda)
-        x_piston = (x_clipped - x_bump)       
-        comp_bump = np.maximum(0.0, x_piston)
+        x_piston = x_clipped + x_bump
+        comp_bump = np.maximum(0.0, -x_piston)
         f_bump_p  = bump(comp_bump)                    # fuerza en el pistón
-        f_bump    = f_bump_p                                 
+        f_bump    = f_bump_p                           
 
         # 4) resortes en serie + preload
         k_total = 1.0/(1.0/k_spring + 1.0/k_inst)
@@ -103,20 +104,6 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         # 6) tope rígido (pistón → rueda)
         f_stop_p = tope_fuerza(x_raw, z_top, z_bot)  # [N] pistón
         f_stop   = f_stop_p * mr_dw                 # [N] rueda
-
-        if 10.0 < t < 10.1:  # escoge una zona de recta
-            x_raw_rl = (sign_z * (zRL - (phi_off_rear + theta_off_rear + h)))
-            x_piston_rl = (x_raw_rl - gap_RL) 
-            comp_bump_rl = np.maximum(0.0, x_piston_rl)
-            f_bump_p_rl = bump_rear(comp_bump_rl)
-            f_bump_rl = f_bump_p_rl 
-
-            k_rl = params['kRL']
-            kinst = params['kinstr']
-            k_total_rl = 1.0 / (1.0/k_rl + 1.0/kinst)
-            f_spring_rl = k_total_rl * x_piston_rl - params['FSpringPreload_RL']
-
-            print(f"[RL] F_spring = {f_spring_rl:.1f} N | F_bump = {f_bump_rl:.1f} N | total = {f_spring_rl + f_bump_rl:.1f} N")
 
         return f_spring + f_bump + f_damper + f_stop
 
@@ -822,7 +809,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         params['x_static_RL'], params['x_static_RR']
     ])[:, None]
 
-    f_spring = k_spring * x_spring_raw  # (4, N)
+    f_spring = k_spring * (-x_spring_raw)  # (4, N)
 
     # 4.2) bump-stop dinámico (sin MR en x, solo en fuerza)
     # gap_bump: (4,1) distancia libre hasta que pica el bumpstop
@@ -834,7 +821,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     ])[:, None]  # (4,1)
 
     # compresión real de la rueda sobre el bumpstop (en m)
-    comp_bump = np.maximum(0.0, x_wheel - gap_bump)  # (4, N)
+    comp_bump = np.maximum(0.0, -(x_spring_raw + gap_bump))  # (4, N)
 
     # fuerza en el pistón del bumpstop (4, N)
     f_bump = np.vstack([
