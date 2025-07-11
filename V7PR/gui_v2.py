@@ -14,7 +14,7 @@ from PyQt5.QtGui import QPixmap, QPalette, QColor, QFont, QIcon, QDoubleValidato
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from model import run_vehicle_model_simple, postprocess_7dof
 
-sign_z = +1  # Cambia a -1 si el eje Z va hacia abajo en tu modelo
+
 
 def set_dark_theme(app):
     palette = QPalette()
@@ -75,10 +75,15 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    stroke_FL = 0.029 #0.01965  0.029 
-    stroke_FR = 0.029 #0.01965  0.029
-    stroke_RL = 0.059 #0.0305 0.059
-    stroke_RR = 0.059 #0.0305  0.059
+    #stroke_FL = 0.01965  #0.029 
+    #stroke_FR = 0.01965  #0.029
+    #stroke_RL = 0.0305  #0.059
+    #stroke_RR = 0.0305  #0.059
+
+    stroke_FL = 0.029 
+    stroke_FR = 0.029
+    stroke_RL = 0.059
+    stroke_RR = 0.059
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -360,7 +365,7 @@ def prepare_simple_params(params, global_setup):
         'tr': global_setup['track_r'],
         'mHubF': global_setup['mHubF'],
         'mHubR': global_setup['mHubR'],
-        'zCoG': abs(global_setup['zCoG']),
+        'zCoG': global_setup['zCoG'],
         'hRideF': global_setup['hRideF'],
         'hRideR': global_setup['hRideR'],
         'rWeightBalF': global_setup['rWeightBalF'],

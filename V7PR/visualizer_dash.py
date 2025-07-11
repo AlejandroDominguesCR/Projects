@@ -97,13 +97,13 @@ def launch_dash(sol, post, setup_name="Setup"):
         # Curvas de carga por rueda
         for i, name in enumerate(wheel_names):
             fig_load.add_trace(
-                go.Scatter(x=distance, y=wheel_f_filtered[i], name=name))
+                go.Scatter(x=distance, y=wheel_ld[i], name=name))
 
         # Marcadores grip-limited para cada rueda
         for i, name in enumerate(wheel_names):
             fig_load.add_trace(
                 go.Scatter(
-                    x=distance[grip_mask], y=wheel_f_filtered[i, grip_mask],
+                    x=distance[grip_mask], y=wheel_ld[i, grip_mask],
                     mode='markers', name=f"{name} Grip-Limited",
                     marker=dict(color='black', symbol='line-ns-open'))
             )
