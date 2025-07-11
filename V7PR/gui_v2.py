@@ -14,7 +14,7 @@ from PyQt5.QtGui import QPixmap, QPalette, QColor, QFont, QIcon, QDoubleValidato
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from model import run_vehicle_model_simple, postprocess_7dof
 
-
+sign_z = +1  # Cambia a -1 si el eje Z va hacia abajo en tu modelo
 
 def set_dark_theme(app):
     palette = QPalette()
@@ -35,17 +35,17 @@ def set_dark_theme(app):
 def parse_json_setup(json_data):
     import numpy as np
     # Extrae masas y parámetros globales
-    m_car = json_data["config"]["chassis"]["carRunningMass"]["mCar"] #Kg 
-    wbal_f = json_data["config"]["chassis"]["carRunningMass"]["rWeightBalF"] #Ratio
-    mHubF = json_data["config"]["chassis"]["mHubF"] #Kg
-    mHubR = json_data["config"]["chassis"]["mHubR"] #Kg
-    ICar = json_data["config"]["chassis"]["ICar"] #Momento de inercia del coche (Kg*m^2)
-    wheelbase = abs(json_data["config"]["chassis"]["rRideR"][0] - json_data["config"]["chassis"]["rRideF"][0]) #Distancia entre ejes (m)
-    track_f = 2*json_data["config"]["suspension"]["front"]["external"]["pickUpPts"]["rUserTCP"][1] #Distancia entre ruedas delantera (m)
-    track_r = 2*json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1] #Distancia entre ruedas trasera (m)
+    m_car = json_data["config"]["chassis"]["carRunningMass"]["mCar"]
+    wbal_f = json_data["config"]["chassis"]["carRunningMass"]["rWeightBalF"]
+    mHubF = json_data["config"]["chassis"]["mHubF"]
+    mHubR = json_data["config"]["chassis"]["mHubR"]
+    ICar = json_data["config"]["chassis"]["ICar"]
+    wheelbase = abs(json_data["config"]["chassis"]["rRideR"][0] - json_data["config"]["chassis"]["rRideF"][0])
+    track_f = 2*json_data["config"]["suspension"]["front"]["external"]["pickUpPts"]["rUserTCP"][1]
+    track_r = 2*json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1]
 
     # Extrae rigidez de barra estabilizadora (antiroll bar)
-    kARB_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"] 
+    kARB_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"]
     kARB_R = json_data["config"]["suspension"]["rear"]["internal"]["antiRollBar"]["kAntiRollBar"]
     
     # Masas por esquina 
@@ -75,15 +75,15 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    #stroke_FL = 0.01965  #0.029 
-    #stroke_FR = 0.01965  #0.029
-    #stroke_RL = 0.0305  #0.059
-    #stroke_RR = 0.0305  #0.059
+    #stroke_FL = 0.029 #
+    #stroke_FR = 0.029 #
+    #stroke_RL = 0.059 #
+    #stroke_RR = 0.059 #
 
-    stroke_FL = 0.029 
-    stroke_FR = 0.029
-    stroke_RL = 0.059
-    stroke_RR = 0.059
+    stroke_FL = 0.01965
+    stroke_FR = 0.01965
+    stroke_RL = 0.0305
+    stroke_RR = 0.0305
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -111,10 +111,10 @@ def parse_json_setup(json_data):
         spring_travel = np.linspace(0, stroke, 100)
         kSpring = spring["kSpring"]
         FSpringPreload = spring.get("FSpringPreload", 0)
-        spring_force = (kSpring * spring_travel) + FSpringPreload
+        spring_force = kSpring * spring_travel + FSpringPreload
         bump_x = np.array(bump["xData"])
         bump_f = np.array(bump["FData"])
-        bump_gap = -bump["xFreeGap"]
+        bump_gap = bump["xFreeGap"]
         bump_force = np.zeros_like(spring_travel)
         bump_indices = spring_travel > bump_gap
         bump_force[bump_indices] = np.interp(spring_travel[bump_indices] - bump_gap, bump_x, bump_f, left=0, right=bump_f[-1])
@@ -195,6 +195,7 @@ def parse_json_setup(json_data):
     tyres = json_data['config']['tyres']
 
     aero = {
+        'zCoG': chassis.get('zCoG', 0.0),
         'kUndertrayFront': chassis.get('kUndertrayFront', 0),
         'kUndertrayMid': chassis.get('kUndertrayMid', 0),
         'kUndertrayRear': chassis.get('kUndertrayRear', 0),
@@ -248,7 +249,7 @@ def parse_json_setup(json_data):
     global_setup['aero_DRS'] = aero_poly.get('DRS', {})
     global_setup['tires'] = tires
 
-    # === BRAZO Y RIGIDEZ DE LA BARRA (wheel-rate) ======================
+        # === BRAZO Y RIGIDEZ DE LA BARRA (wheel-rate) ======================
     def dist(p, q):
         return ((p[0]-q[0])**2 + (p[1]-q[1])**2 + (p[2]-q[2])**2) ** 0.5
 
@@ -282,6 +283,7 @@ def prepare_simple_params(params, global_setup):
     gainF = 1
     gainR = 1
 
+
     kFL = (gainF*params[0]['kSpring']) / global_setup['MR_spring_FL']**2
     kFR = (gainF*params[1]['kSpring']) / global_setup['MR_spring_FR']**2
     kRL = (gainR*params[2]['kSpring']) / global_setup['MR_spring_RL']**2
@@ -290,6 +292,7 @@ def prepare_simple_params(params, global_setup):
     kinstf = (global_setup['kVerticalSuspensionComplianceF'] / 2)  
     kinstr = (global_setup['kVerticalSuspensionComplianceR'] / 2) 
     
+
     # Damper y bumpstop interpoladores
     # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
     def damper_interp_factory(v_ext, f_ext, v_comp, f_comp, mr_wd):
@@ -303,8 +306,8 @@ def prepare_simple_params(params, global_setup):
             v_damper = np.asarray(v_wheel) / mr_wd
             # 2) fuerza interna en el amortiguador
             f_int = np.where(v_damper > 0,
-                             interp_comp(v_damper),
-                             interp_ext(v_damper))
+                             interp_ext(v_damper),
+                             interp_comp(v_damper))
             # 3) fuerza pistón → fuerza rueda
             return f_int / mr_wd
         return damper_func
@@ -365,7 +368,7 @@ def prepare_simple_params(params, global_setup):
         'tr': global_setup['track_r'],
         'mHubF': global_setup['mHubF'],
         'mHubR': global_setup['mHubR'],
-        'zCoG': global_setup['zCoG'],
+        'zCoG': abs(global_setup['zCoG']),
         'hRideF': global_setup['hRideF'],
         'hRideR': global_setup['hRideR'],
         'rWeightBalF': global_setup['rWeightBalF'],
@@ -520,8 +523,8 @@ def load_track_channels(track_path):
         ]
     }
 
-    # Conversión y cambio de convención: Z+ downward
-    data['z_tracks'] = [-z / 1000.0 for z in data['z_tracks']]
+    # Conversión vienen en mm
+    data['z_tracks'] = [z / 1000.0 for z in data['z_tracks']]
     data['ax'] = [ax * 9.81 for ax in data['ax']]
     data['ay'] = [ay * 9.81 for ay in data['ay']]
     return data
