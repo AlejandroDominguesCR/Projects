@@ -49,19 +49,17 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     damper_front = params['damper_front']
     damper_rear  = params['damper_rear']
 
-    z_topout_FL    = sign_z * params['z_topout_FL']
-    z_bottomout_FL = sign_z * params['z_bottomout_FL']
-    z_topout_FR    = sign_z * params['z_topout_FR']
-    z_bottomout_FR = sign_z * params['z_bottomout_FR']
-    z_topout_RL    = sign_z * params['z_topout_RL']
-    z_bottomout_RL = sign_z * params['z_bottomout_RL']
-    z_topout_RR    = sign_z * params['z_topout_RR']
-    z_bottomout_RR = sign_z * params['z_bottomout_RR']
-
-    x_bump_FL = params['x_bump_FL'] 
-    x_bump_FR = params['x_bump_FR']
-    x_bump_RL = params['x_bump_RL']
-    x_bump_RR = params['x_bump_RR']
+    # Topes en coordenada pistón (signo coherente con x_raw).  Se almacenan
+    # directamente en el diccionario de parámetros con la convención de que
+    # ``z_topout`` es el límite inferior y ``z_bottomout`` el superior.
+    z_topout_FL    = params['z_topout_FL']
+    z_bottomout_FL = params['z_bottomout_FL']
+    z_topout_FR    = params['z_topout_FR']
+    z_bottomout_FR = params['z_bottomout_FR']
+    z_topout_RL    = params['z_topout_RL']
+    z_bottomout_RL = params['z_bottomout_RL']
+    z_topout_RR    = params['z_topout_RR']
+    z_bottomout_RR = params['z_bottomout_RR']
 
     gap_FL = params['gap_bumpstop_FL']   
     gap_FR = params['gap_bumpstop_FR']
@@ -81,13 +79,10 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
                     x_bump,
                     x_static):
         
-        if not hasattr(wheel_force, "_debug_count"):
-            wheel_force._debug_count = 0
-        
         # 1) desplazamiento total a nivel pistón.  Con sign_z = -1 y coordenadas
         #    positivas hacia arriba, compresión → x_raw positivo
         x_raw = sign_z * ((phi_off + theta_off + h) - z_w)
-        # 2) clipping al recorrido físico
+        # 2) clipping al recorrido físico (z_top < z_bot)
         x_clipped = np.clip(x_raw, z_top, z_bot)
 
         # 3) recorrido dinámico respecto al sag estático
@@ -107,7 +102,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         f_damper = damper(rel_vel)
 
         # 7) tope rígido (pistón → rueda)
-        f_stop = tope_fuerza(x_clipped, z_top, z_bot) * sign_z
+        f_stop = tope_fuerza(x_raw, z_top, z_bot) * sign_z
 
         return f_spring + f_bump + f_damper + f_stop
         
@@ -470,6 +465,8 @@ def compute_static_equilibrium(params, vx=0):
     print("kFL efectivo =", kf_eff)
 
     sol, info, ier, msg = fsolve(residual, x0, full_output=True)
+    if ier != 1:
+        raise RuntimeError(f"fsolve failed to converge: {msg}")
 
     # === Diagnóstico estático: sag rueda, lectura de pot y márgenes =====  ### FIX
     corners = ['FL', 'FR', 'RL', 'RR']
@@ -503,13 +500,12 @@ def compute_static_equilibrium(params, vx=0):
         # Márgenes (stroke damper pasado a rueda)
         topout    = params[f'z_topout_{corner}']
         bottom    = params[f'z_bottomout_{corner}']
-        margen_ext  =  (x_static - topout)  * 1000
-        margen_comp = (bottom   - x_static) * 1000
+        margen_ext  =  (topout + x_static )  * 1000
 
         print(f"[INFO] {corner}: sag rueda = {x_static*1000:.2f} mm | "
               f"pot = {pot_mm:.2f} mm | "
-              f"margen ext = {margen_ext:.2f} mm | "
-              f"margen comp = {margen_comp:.2f} mm")
+              f"margen ext = {margen_ext:.2f} mm | ")
+
 
         # mantenemos compatibilidad con los nombres antiguos
         params[f'x_static_{corner}'] = x_static
@@ -541,7 +537,11 @@ def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, throttle, brake, param
     vx0 = float(vx_func(t_vec[0]))
 
     # --- Equilibrio estático ---
-    h0, phi0, theta0, zFR0, zFL0, zRL0, zRR0 = compute_static_equilibrium(params, vx0)
+    try:
+        h0, phi0, theta0, zFR0, zFL0, zRL0, zRR0 = compute_static_equilibrium(params)
+    except RuntimeError as e:
+        print(f"[ERROR] Static equilibrium failed: {e}")
+        return None
 
     # Travel estático (referencia para topes reales)
     x_FL_static = sign_z * ((-lf * phi0 + (tf / 2) * theta0 + h0) - zFL0)
@@ -553,26 +553,6 @@ def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, throttle, brake, param
     x_FR_static = abs(x_FR_static)
     x_RL_static = abs(x_RL_static)
     x_RR_static = abs(x_RR_static)
-
-    
-    # tras calcular x_FL_static, x_FR_static, etc.:
-    for corner, x_stat in zip(
-        ['FL','FR','RL','RR'],
-        [x_FL_static, x_FR_static, x_RL_static, x_RR_static]
-    ):
-        stroke = params[f'stroke_{corner}']           # carrera total
-        # por defecto, asignamos todo el espacio por encima del punto estático
-        # como stroke_top = compresión estática, y el resto a stroke_bottom
-        stroke_top    = params.get(f'stroke_top_{corner}', x_stat)
-        stroke_bottom = params.get(f'stroke_bottom_{corner}', stroke - stroke_top)
-        # gap_bumpstop_corner = espacio libre desde la compresión estática
-        gap0 = params[f'gap_bumpstop_{corner}']
-
-        # x_bump = posición a partir de la cual empieza a actuar el bumpstop
-        params[f'x_bump_{corner}'] = gap0
-        params[f'z_topout_{corner}']    = x_stat - stroke_top
-        params[f'z_bottomout_{corner}'] = x_stat + stroke_bottom
-    # Guardamos el punto estático para cálculo de topes reales
 
 
     y0 = [h0, 0.0, phi0, 0.0, theta0, 0.0, zFR0, 0.0, zFL0, 0.0, zRL0, 0.0, zRR0, 0.0]

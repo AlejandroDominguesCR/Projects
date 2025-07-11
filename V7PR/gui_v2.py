@@ -35,17 +35,17 @@ def set_dark_theme(app):
 def parse_json_setup(json_data):
     import numpy as np
     # Extrae masas y parámetros globales
-    m_car = json_data["config"]["chassis"]["carRunningMass"]["mCar"]
-    wbal_f = json_data["config"]["chassis"]["carRunningMass"]["rWeightBalF"]
-    mHubF = json_data["config"]["chassis"]["mHubF"]
-    mHubR = json_data["config"]["chassis"]["mHubR"]
-    ICar = json_data["config"]["chassis"]["ICar"]
-    wheelbase = abs(json_data["config"]["chassis"]["rRideR"][0] - json_data["config"]["chassis"]["rRideF"][0])
-    track_f = 2*json_data["config"]["suspension"]["front"]["external"]["pickUpPts"]["rUserTCP"][1]
-    track_r = 2*json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1]
+    m_car = json_data["config"]["chassis"]["carRunningMass"]["mCar"] #Kg 
+    wbal_f = json_data["config"]["chassis"]["carRunningMass"]["rWeightBalF"] #Ratio
+    mHubF = json_data["config"]["chassis"]["mHubF"] #Kg
+    mHubR = json_data["config"]["chassis"]["mHubR"] #Kg
+    ICar = json_data["config"]["chassis"]["ICar"] #Momento de inercia del coche (Kg*m^2)
+    wheelbase = abs(json_data["config"]["chassis"]["rRideR"][0] - json_data["config"]["chassis"]["rRideF"][0]) #Distancia entre ejes (m)
+    track_f = 2*json_data["config"]["suspension"]["front"]["external"]["pickUpPts"]["rUserTCP"][1] #Distancia entre ruedas delantera (m)
+    track_r = 2*json_data["config"]["suspension"]["rear"]["external"]["pickUpPts"]["rUserTCP"][1] #Distancia entre ruedas trasera (m)
 
     # Extrae rigidez de barra estabilizadora (antiroll bar)
-    kARB_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"]
+    kARB_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"] 
     kARB_R = json_data["config"]["suspension"]["rear"]["internal"]["antiRollBar"]["kAntiRollBar"]
     
     # Masas por esquina 
@@ -114,7 +114,7 @@ def parse_json_setup(json_data):
         spring_force = (kSpring * spring_travel) + FSpringPreload
         bump_x = np.array(bump["xData"])
         bump_f = np.array(bump["FData"])
-        bump_gap = bump["xFreeGap"]
+        bump_gap = -bump["xFreeGap"]
         bump_force = np.zeros_like(spring_travel)
         bump_indices = spring_travel > bump_gap
         bump_force[bump_indices] = np.interp(spring_travel[bump_indices] - bump_gap, bump_x, bump_f, left=0, right=bump_f[-1])
