@@ -520,8 +520,8 @@ def load_track_channels(track_path):
         ]
     }
 
-    # Conversión vienen en mm
-    data['z_tracks'] = [z / 1000.0 for z in data['z_tracks']]
+    # Conversión y cambio de convención: Z+ downward
+    data['z_tracks'] = [-z / 1000.0 for z in data['z_tracks']]
     data['ax'] = [ax * 9.81 for ax in data['ax']]
     data['ay'] = [ay * 9.81 for ay in data['ay']]
     return data
