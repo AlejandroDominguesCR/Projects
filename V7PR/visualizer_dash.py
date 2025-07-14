@@ -30,7 +30,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         graphs = []
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
-        spring_travel = smooth_signal(post['wheel_travel']) * 1000
+        spring_travel = smooth_signal(post['travel']) * 1000
         travel = post['travel']
         wheel_f = post['f_wheel']          # shape (4, N)
         grip_mask = post['grip_limited_lateral_mask']  # (N,)
@@ -44,6 +44,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         wheel_f_filtered = smooth_signal(wheel_f)
         spring_force_filtered = smooth_signal(post['f_spring'])
         damper_force_filtered = smooth_signal(post['f_damper'])
+        arb_force_filtered = smooth_signal(post['f_arb'])
 
         # Travel absoluto por rueda 
         graphs.append(dcc.Graph(figure=go.Figure([
@@ -144,6 +145,19 @@ def launch_dash(sol, post, setup_name="Setup"):
                 go.Scatter(x=distance, y=damper_force_filtered[3], name="Damper RR"),
             ]).update_layout(
                 title="Damper Force per Wheel [N]",
+                xaxis_title="Distance [m]",
+                yaxis_title="Force [N]"
+            )),
+        )
+
+        graphs.append(dcc.Graph(
+            figure=go.Figure([
+                go.Scatter(x=distance, y=arb_force_filtered[0], name="ARB FL"),
+                go.Scatter(x=distance, y=arb_force_filtered[1], name="ARB FR"),
+                go.Scatter(x=distance, y=arb_force_filtered[2], name="ARB RL"),
+                go.Scatter(x=distance, y=arb_force_filtered[3], name="ARB RR"),
+            ]).update_layout(
+                title="ARB Force per Wheel [N]",
                 xaxis_title="Distance [m]",
                 yaxis_title="Force [N]"
             )),

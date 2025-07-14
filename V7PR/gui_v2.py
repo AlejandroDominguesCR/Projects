@@ -5,16 +5,14 @@ import os
 import visualizer_dash
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QVBoxLayout, QScrollArea,
-    QLabel, QFileDialog, QTextEdit, QHBoxLayout, QSpinBox, QComboBox, QGroupBox, QTabWidget, QGridLayout, QProgressBar, QLineEdit, QFormLayout, QMessageBox, QListWidget, QAbstractItemView, QTableWidgetItem
+    QLabel, QFileDialog, QComboBox, QGroupBox, QTabWidget, QGridLayout, QProgressBar, QLineEdit, QFormLayout, QMessageBox, QListWidget, QAbstractItemView, QTableWidgetItem
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from visualizer_dash import export_full_report
-from PyQt5.QtCore import Qt, QMimeData, QTimer, QUrl
-from PyQt5.QtGui import QPixmap, QPalette, QColor, QFont, QIcon, QDoubleValidator, QIntValidator
+from PyQt5.QtCore import Qt,QUrl
+from PyQt5.QtGui import QPalette, QColor, QIcon, QDoubleValidator
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from model import run_vehicle_model_simple, postprocess_7dof
-
-sign_z = +1  # Cambia a -1 si el eje Z va hacia abajo en tu modelo
 
 def set_dark_theme(app):
     palette = QPalette()
@@ -111,7 +109,7 @@ def parse_json_setup(json_data):
         spring_travel = np.linspace(0, stroke, 100)
         kSpring = spring["kSpring"]
         FSpringPreload = spring.get("FSpringPreload", 0)
-        spring_force = kSpring * spring_travel + FSpringPreload
+        spring_force = (kSpring * spring_travel) + FSpringPreload
         bump_x = np.array(bump["xData"])
         bump_f = np.array(bump["FData"])
         bump_gap = bump["xFreeGap"]
@@ -280,19 +278,15 @@ def prepare_simple_params(params, global_setup):
     # global_setup: diccionario global
 
     from scipy.interpolate import interp1d
-    gainF = 1
-    gainR = 1
 
-
-    kFL = (gainF*params[0]['kSpring']) / global_setup['MR_spring_FL']**2
-    kFR = (gainF*params[1]['kSpring']) / global_setup['MR_spring_FR']**2
-    kRL = (gainR*params[2]['kSpring']) / global_setup['MR_spring_RL']**2
-    kRR = (gainR*params[3]['kSpring']) / global_setup['MR_spring_RR']**2
+    kFL = (params[0]['kSpring']) / global_setup['MR_spring_FL']**2
+    kFR = (params[1]['kSpring']) / global_setup['MR_spring_FR']**2
+    kRL = (params[2]['kSpring']) / global_setup['MR_spring_RL']**2
+    kRR = (params[3]['kSpring']) / global_setup['MR_spring_RR']**2
 
     kinstf = (global_setup['kVerticalSuspensionComplianceF'] / 2)  
     kinstr = (global_setup['kVerticalSuspensionComplianceR'] / 2) 
     
-
     # Damper y bumpstop interpoladores
     # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
     def damper_interp_factory(v_ext, f_ext, v_comp, f_comp, mr_wd):
@@ -333,19 +327,6 @@ def prepare_simple_params(params, global_setup):
     k_arb_f = global_setup['kARB_F_wheel'] * 1000  
     k_arb_r = global_setup['kARB_R_wheel'] * 1000
 
-    # --- Cálculo de topes físicos (top-out y bumpstop) para cada esquina ---
-    z_topout_FL = float(min(params[0]['spring_x'][0], params[0]['bump_x'][0]))
-    z_bottomout_FL = float(max(params[0]['spring_x'][-1], params[0]['bump_x'][-1]))
-
-    z_topout_FR = float(min(params[1]['spring_x'][0], params[1]['bump_x'][0]))
-    z_bottomout_FR = float(max(params[1]['spring_x'][-1], params[1]['bump_x'][-1]))
-
-    z_topout_RL = float(min(params[2]['spring_x'][0], params[2]['bump_x'][0]))
-    z_bottomout_RL = float(max(params[2]['spring_x'][-1], params[2]['bump_x'][-1]))
-
-    z_topout_RR = float(min(params[3]['spring_x'][0], params[3]['bump_x'][0]))
-    z_bottomout_RR = float(max(params[3]['spring_x'][-1], params[3]['bump_x'][-1]))
-
     # --- Masa suspendida total: suma de las 4 esquinas ---
     ms_total = sum([params[i]['ms'] for i in range(4)])
 
@@ -358,36 +339,33 @@ def prepare_simple_params(params, global_setup):
     tire_front = tires.get('front', {})
     tire_rear = tires.get('rear', {})
 
-    return {
+
+        # ─── 1) Construir el diccionario plano  ───────────────────────────────
+    simple_params = {
         'ms': ms_total,
         'Ixx': global_setup['ICar'][0],
         'Iyy': global_setup['ICar'][4],
-        'lf': global_setup['wheelbase'] * (1 - global_setup['rWeightBalF']),
-        'lr': global_setup['wheelbase'] * global_setup['rWeightBalF'],
-        'tf': global_setup['track_f'],
-        'tr': global_setup['track_r'],
+        'lf':  global_setup['wheelbase'] * (1 - global_setup['rWeightBalF']),
+        'lr':  global_setup['wheelbase'] *  global_setup['rWeightBalF'],
+        'tf':  global_setup['track_f'],
+        'tr':  global_setup['track_r'],
         'mHubF': global_setup['mHubF'],
         'mHubR': global_setup['mHubR'],
-        'zCoG': abs(global_setup['zCoG']),
+        'zCoG':  global_setup['zCoG'],
         'hRideF': global_setup['hRideF'],
         'hRideR': global_setup['hRideR'],
         'rWeightBalF': global_setup['rWeightBalF'],
-        'kFL': kFL,
-        'kFR': kFR,
-        'kRL': kRL,
-        'kRR': kRR,
-        'kinstf': kinstf,  
-        'kinstr': kinstr,
-        'ktf': params[0]['kt'],
-        'ktr': params[2]['kt'],
+        'kFL': kFL, 'kFR': kFR, 'kRL': kRL, 'kRR': kRR,
+        'kinstf': kinstf,  'kinstr': kinstr,
+        'ktf': params[0]['kt'],     'ktr': params[2]['kt'],
         'z_FL_free': params[0]['bump_gap'],
         'z_FR_free': params[1]['bump_gap'],
         'z_RL_free': params[2]['bump_gap'],
         'z_RR_free': params[3]['bump_gap'],
         'bumpstop_front': bumpstop_front,
-        'bumpstop_rear': bumpstop_rear,
+        'bumpstop_rear':  bumpstop_rear,
         'damper_front': damper_front,
-        'damper_rear': damper_rear,
+        'damper_rear':  damper_rear,
         'spring_x_FL': params[0]['spring_x'],
         'spring_x_FR': params[1]['spring_x'],
         'spring_x_RL': params[2]['spring_x'],
@@ -402,16 +380,8 @@ def prepare_simple_params(params, global_setup):
         'stroke_FR': stroke_FR,
         'stroke_RL': stroke_RL,
         'stroke_RR': stroke_RR,
-        'z_topout_FL': z_topout_FL,
-        'z_bottomout_FL': z_bottomout_FL,
-        'z_topout_FR': z_topout_FR,
-        'z_bottomout_FR': z_bottomout_FR,
-        'z_topout_RL': z_topout_RL,
-        'z_bottomout_RL': z_bottomout_RL,
-        'z_topout_RR': z_topout_RR,
-        'z_bottomout_RR': z_bottomout_RR,
         'tire_front': tire_front,
-        'tire_rear': tire_rear,
+        'tire_rear':  tire_rear,
         'aero_polynomials': global_setup['aero_polynomials'],
         'gap_bumpstop_FL': global_setup['gap_bumpstop_FL'],
         'gap_bumpstop_FR': global_setup['gap_bumpstop_FR'],
@@ -428,8 +398,16 @@ def prepare_simple_params(params, global_setup):
         'FSpringPreload_FL': params[0].get('FSpringPreload', 0.0) / global_setup['MR_FL'],
         'FSpringPreload_FR': params[1].get('FSpringPreload', 0.0) / global_setup['MR_FR'],
         'FSpringPreload_RL': params[2].get('FSpringPreload', 0.0) / global_setup['MR_RL'],
-        'FSpringPreload_RR': params[3].get('FSpringPreload', 0.0) / global_setup['MR_RR'],      
+        'FSpringPreload_RR': params[3].get('FSpringPreload', 0.0) / global_setup['MR_RR'],
     }
+
+    # ─── 2) Límites PROVISIONALES para que compute_static_equilibrium() arranque
+    for corner in ('FL', 'FR', 'RL', 'RR'):
+        simple_params[f'z_topout_{corner}']    = 0.0                              # extens.
+        simple_params[f'z_bottomout_{corner}'] = simple_params[f'stroke_{corner}']  # compr.
+
+    # ─── 3) Devolver el diccionario plano
+    return simple_params
 
 def simulate_combo(setup_path, track_path, kt_overrides=None):
     import json
