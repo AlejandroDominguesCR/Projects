@@ -563,7 +563,7 @@ def extract_session_summary(df_analysis: pd.DataFrame,
 def slipstream_stats(
     df: pd.DataFrame,
     *,
-    fast_threshold: float = 0.02,         
+    fast_threshold: float = 0.02,
     dt_min: float = 0.20,
     dt_max: float = 2.50,
     topspeed_delta: float = 6.0,
@@ -667,7 +667,14 @@ def slipstream_stats(
 
     return stats
 
-def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
+def sector_slipstream_stats(
+    df: pd.DataFrame,
+    *,
+    fast_threshold: float = 0.05,
+    dt_min: float = 0.20,
+    dt_max: float = 2.50,
+    topspeed_delta: float = 6.0,
+) -> pd.DataFrame:
     """Slipstream KPIs per number by sector.
 
     Parameters
@@ -726,12 +733,13 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     # ─── Vuelta competitiva (≤ 110 % de su mejor) ---------------------------
     best_lap = data.groupby("number")["lap_time"].transform("min")
-    data["competitive"] = data["lap_time"] <= 1.05 * best_lap
+    data["competitive"] = data["lap_time"] <= (1 + fast_threshold) * best_lap
+
 
     # umbral de velocidad: mediana del propio piloto + 4 km/h
     speed_thr = (
-        data.groupby("number")["top_speed"].transform("median") + 6.0
-    )
+        data.groupby("number")["top_speed"].transform("median") + topspeed_delta
+        )
 
     # ─── Sector 1 detection ────────────────────────────────────────────────
     s1 = data.sort_values("T1").reset_index()
@@ -741,7 +749,7 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     s1["slip_flag_s1"] = (
         s1["competitive"]
         & (prev_drv != s1["number"])
-        & dt1.between(0.20, 2.50)                 # mismo rango que meta
+        & dt1.between(dt_min, dt_max)                 # mismo rango que meta
         & (s1["top_speed"] >= speed_thr)
     )
     s1 = s1.sort_values(["number", "lap_number"]).reset_index(drop=True)
@@ -758,7 +766,7 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     s2["slip_flag_s2"] = (
         s2["competitive"]
         & (prev_drv2 != s2["number"])
-        & dt2.between(0.20, 2.50)
+        & dt2.between(dt_min, dt_max)
         & (s2["top_speed"] >= speed_thr)
     )
     s2 = s2.sort_values(["number", "lap_number"]).reset_index(drop=True)

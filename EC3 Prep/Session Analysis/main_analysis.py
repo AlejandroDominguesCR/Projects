@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import dash
 from dash import dcc, html, Input, Output, State
+import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
 import plotly.express as px
 from dash import dash_table  
@@ -275,6 +276,7 @@ def build_figures(
     filter_fast=True,
     include_sectors=True,
     include_sector_gaps=False,
+    kpi_params: dict[str, float] | None = None,
 ):
     """Compute a minimal set of KPI figures and a lap table.
 
@@ -294,6 +296,8 @@ def build_figures(
         The figures dictionary, a mapping of number names to tables, the summary
         table of fastest laps, and the preferred number order.
     """
+
+    cfg = kpi_params or {}
 
     # 1) calculamos ALWAYS sobre todo el df
     figs = {}
@@ -348,8 +352,20 @@ def build_figures(
     for team in ts['team'].unique():
         team_colors.setdefault(team, f'#{random.randint(0, 0xFFFFFF):06x}')
 
-    ss = slipstream_stats(df_analysis)
-    ss_sector = sector_slipstream_stats(df_analysis).rename(columns={
+    ss = slipstream_stats(
+        df_analysis,
+        fast_threshold=cfg.get("fast_threshold", 0.02),
+        dt_min=cfg.get("dt_min", 0.20),
+        dt_max=cfg.get("dt_max", 2.50),
+        topspeed_delta=cfg.get("topspeed_delta", 6.0),
+    )
+    ss_sector = sector_slipstream_stats(
+        df_analysis,
+        fast_threshold=0.05,
+        dt_min=0.20,
+        dt_max=2.50,
+        topspeed_delta=6.0,
+    ).rename(columns={
         "min_time_with_slip_s1": "min_s1_with_slip",
         "min_time_no_slip_s1": "min_s1_no_slip",
         "min_time_with_slip_s2": "min_s2_with_slip",
@@ -439,8 +455,11 @@ def build_figures(
     gain_df = slipstream_gap_gain(
         df_analysis,
         gap_col="GapAhead",
-        fast_threshold=0.03,   # ← solo vueltas ≤ 107 % de la best-lap
+        fast_threshold=cfg.get("fast_threshold", 0.03),
+        ref_gap=cfg.get("ref_gap", 5.0),
+        min_laps=int(cfg.get("min_laps", 3)),
     )
+
     if not gain_df.empty:
         fig_gain = px.scatter(
             gain_df, x="gap_range", y="mean_gain",
@@ -465,7 +484,13 @@ def build_figures(
         df_analysis[std] = df_analysis[raw]
 
 
-    sector_gain = slipstream_sector_gap_gain(df_analysis)
+    sector_gain = slipstream_sector_gap_gain(
+        df_analysis,
+        fast_threshold=cfg.get("fast_threshold", 0.10),
+        ref_gap=cfg.get("ref_gap", 5.0),
+        min_laps=int(cfg.get("min_laps", 3)),
+    )
+
     if not sector_gain.empty:
         fig_sector = px.line(
             sector_gain, x="gap_range", y="mean_gain",
@@ -495,7 +520,13 @@ def build_figures(
         best = df["lap_time"].min()
         df["competitive"] = df["lap_time"] <= 1.05 * best
 
-        delta = pd.to_datetime(df["hour"], ...).diff().dt.total_seconds()
+        delta = (
+            pd.to_datetime(
+                df["hour"], format="%H:%M:%S.%f", errors="coerce"
+            )
+            .diff()
+            .dt.total_seconds()
+        )
 
         df["slip_flag"] = (
             df["competitive"]
@@ -684,7 +715,13 @@ def build_figures(
             figs[f"{sec.upper()} Diff"] = fig
 
     
-    cons_df = lap_time_consistency(df_analysis)
+    cons_df = lap_time_consistency(
+        df_analysis,
+        threshold=cfg.get("consistency_threshold", 0.08),
+        trim=cfg.get("consistency_trim", 0.10),
+        min_laps=int(cfg.get("consistency_min_laps", 3)),
+    )
+
     if "team" in df_analysis.columns:
         cons_df = cons_df.merge(
             df_analysis[["number", "team"]].drop_duplicates(),
@@ -1002,7 +1039,7 @@ def export_report(
             # --- cierre del documento ---------------------------------------
             f.write("</body></html>")
 
-app = dash.Dash(__name__)
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 app.layout = html.Div(
     [
@@ -1014,11 +1051,30 @@ app.layout = html.Div(
         dcc.Download(id="download-report"),
         dcc.Store(id="data-store"),
         dcc.Store(id="session-data"),
-        dcc.Dropdown(id="team-filter", multi=True),
-        dcc.Dropdown(
-            id="number-filter",
-            multi=True,
-            placeholder="Selecciona pilotos",   # se rellenará tras cargar la sesión
+        dcc.Store(id="kpi-config", storage_type="session"),
+        html.Div(
+            id="control-panel",
+            children=[
+                dbc.Row([
+                    dbc.Col(dcc.Dropdown(id="team-filter", multi=True, placeholder="Teams"), width=6),
+                    dbc.Col(dcc.Dropdown(id="number-filter", multi=True, placeholder="Drivers"), width=6),
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Input(id="kpi-fast-threshold", type="number", step=0.01, value=0.02, placeholder="fast_threshold")),
+                    dbc.Col(dbc.Input(id="kpi-dt-min", type="number", step=0.01, value=0.2, placeholder="dt_min")),
+                    dbc.Col(dbc.Input(id="kpi-dt-max", type="number", step=0.01, value=2.5, placeholder="dt_max")),
+                    dbc.Col(dbc.Input(id="kpi-topspeed-delta", type="number", step=0.1, value=6.0, placeholder="topspeed_delta")),
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col(dbc.Input(id="kpi-ref-gap", type="number", step=0.5, value=5.0, placeholder="ref_gap")),
+                    dbc.Col(dbc.Input(id="kpi-min-laps", type="number", step=1, value=3, placeholder="min_laps")),
+                    dbc.Col(dbc.Input(id="kpi-consistency-threshold", type="number", step=0.01, value=0.08, placeholder="consistency_threshold")),
+                    dbc.Col(dbc.Input(id="kpi-consistency-trim", type="number", step=0.01, value=0.10, placeholder="consistency_trim")),
+                    dbc.Col(dbc.Input(id="kpi-consistency-min-laps", type="number", step=1, value=3, placeholder="consistency_min_laps")),
+                ], className="mb-2"),
+                dbc.Button("Apply", id="apply-kpi-btn", color="primary", className="mt-2"),
+            ],
+            className="mb-3",
         ),
         dcc.Checklist(id="lap-filter-toggle",
                   options=[{"label": "Ver todas las vueltas", "value": "ALL"}],
@@ -1063,7 +1119,7 @@ def on_browse(n_clicks):
     Output("team-filter", "value"),
     Output("session-data", "data"),
     Output("number-filter", "options"),
-    Output("number-filter", "value"),  
+    Output("number-filter", "value"),
     Input("load-btn", "n_clicks"),
     Input("team-filter", "value"),
     State("folder-input", "value"),
@@ -1071,9 +1127,10 @@ def on_browse(n_clicks):
     Input("sector-toggle", "value"),
     Input("gap-toggle", "value"),
     Input("number-filter", "value"),
+    State("kpi-config", "data"),
 )
 
-def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers):
+def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers, kpi_cfg):
     if not n_clicks or not folder or not os.path.isdir(folder):
         raise PreventUpdate
     df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
@@ -1094,11 +1151,13 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     filter_fast   = "ALL" not in (lap_toggle or [])
     include_sects = "SECT" in (sec_toggle or [])
     include_gap   = "GAP" in (gap_toggle or [])
+    cfg = kpi_cfg or {}
     figs, driver_tables, fast_table, grid_order = build_figures(
         df_analysis, df_class, weather_df, tracklimits_df, teams,
         filter_fast=filter_fast,
         include_sectors=include_sects,
         include_sector_gaps=include_gap,
+        kpi_params=cfg,
     )
 
     grid_order = list(driver_tables.keys())
@@ -1132,6 +1191,86 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     return (
         serialized, team_opts, teams, serialized, driver_opts, drivers,
     )
+
+
+@app.callback(
+    Output("data-store", "data", allow_duplicate=True),
+    Output("session-data", "data", allow_duplicate=True),
+    Output("kpi-config", "data"),
+    Input("apply-kpi-btn", "n_clicks"),
+    State("team-filter", "value"),
+    State("folder-input", "value"),
+    State("lap-filter-toggle", "value"),
+    State("sector-toggle", "value"),
+    State("gap-toggle", "value"),
+    State("number-filter", "value"),
+    State("kpi-fast-threshold", "value"),
+    State("kpi-dt-min", "value"),
+    State("kpi-dt-max", "value"),
+    State("kpi-topspeed-delta", "value"),
+    State("kpi-ref-gap", "value"),
+    State("kpi-min-laps", "value"),
+    State("kpi-consistency-threshold", "value"),
+    State("kpi-consistency-trim", "value"),
+    State("kpi-consistency-min-laps", "value"),
+    prevent_initial_call=True,
+)
+
+def apply_kpi_params(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers,
+                     fast_thr, dt_min, dt_max, ts_delta, ref_gap, min_laps,
+                     cons_thr, cons_trim, cons_min):
+    if not n_clicks or not folder or not os.path.isdir(folder):
+        raise PreventUpdate
+
+    cfg = {
+        "fast_threshold": fast_thr,
+        "dt_min": dt_min,
+        "dt_max": dt_max,
+        "topspeed_delta": ts_delta,
+        "ref_gap": ref_gap,
+        "min_laps": min_laps,
+        "consistency_threshold": cons_thr,
+        "consistency_trim": cons_trim,
+        "consistency_min_laps": cons_min,
+    }
+
+    df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
+    team_names = sorted(df_analysis["team"].dropna().unique().tolist())
+    driver_names = sorted(df_analysis["number"].dropna().unique().tolist())
+
+    if not teams:
+        teams = team_names
+    if not drivers:
+        drivers = driver_names
+
+    df_analysis = df_analysis[df_analysis["number"].isin(drivers)]
+    filter_fast = "ALL" not in (lap_toggle or [])
+    include_sects = "SECT" in (sec_toggle or [])
+    include_gap = "GAP" in (gap_toggle or [])
+
+    figs, driver_tables, fast_table, grid_order = build_figures(
+        df_analysis, df_class, weather_df, tracklimits_df, teams,
+        filter_fast=filter_fast,
+        include_sectors=include_sects,
+        include_sector_gaps=include_gap,
+        kpi_params=cfg,
+    )
+
+    grid_order = [d for d in grid_order if d in drivers]
+    for drv in drivers:
+        if drv not in grid_order:
+            grid_order.append(drv)
+
+    fast_rows = [] if fast_table is None else fast_table.to_dict(orient="records")
+    serialized = {
+        "figs": {name: fig.to_dict() for name, fig in figs.items()},
+        "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
+        "fast_table": fast_rows,
+        "include_gap": include_gap,
+        "grid_order": grid_order,
+    }
+
+    return serialized, serialized, cfg
 
 @app.callback(
     Output("tab-content", "children"),
