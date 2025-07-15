@@ -85,6 +85,136 @@ def get_team_colors() -> dict[str, str]:
 
 TEAM_COLOR = get_team_colors()
 
+# ---------------------------------------------------------------------------
+# Control panel utilities
+# ---------------------------------------------------------------------------
+
+DEFAULT_KPI_VALUES: dict[str, float] = {
+    "fast_threshold": 0.02,
+    "dt_min": 0.20,
+    "dt_max": 2.50,
+    "topspeed_delta": 6.0,
+    "ref_gap": 5.0,
+    "min_laps": 3,
+    "consistency_threshold": 0.08,
+    "consistency_trim": 0.10,
+    "consistency_min_laps": 3,
+}
+
+def build_control_panel(defaults: dict[str, float]) -> html.Div:
+    """Return the KPI control panel layout."""
+
+    return html.Div(
+        [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Dropdown(id="team-filter", multi=True, placeholder="Teams"),
+                        width=6,
+                    ),
+                    dbc.Col(
+                        dcc.Dropdown(id="number-filter", multi=True, placeholder="Drivers"),
+                        width=6,
+                    ),
+                ],
+                className="mb-2",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-fast-threshold",
+                            type="number",
+                            step=0.01,
+                            value=defaults.get("fast_threshold", 0.02),
+                            placeholder="fast_threshold",
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-dt-min",
+                            type="number",
+                            step=0.01,
+                            value=defaults.get("dt_min", 0.20),
+                            placeholder="dt_min",
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-dt-max",
+                            type="number",
+                            step=0.01,
+                            value=defaults.get("dt_max", 2.50),
+                            placeholder="dt_max",
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-topspeed-delta",
+                            type="number",
+                            step=0.1,
+                            value=defaults.get("topspeed_delta", 6.0),
+                            placeholder="topspeed_delta",
+                        )
+                    ),
+                ],
+                className="mb-2",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-ref-gap",
+                            type="number",
+                            step=0.5,
+                            value=defaults.get("ref_gap", 5.0),
+                            placeholder="ref_gap",
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-min-laps",
+                            type="number",
+                            step=1,
+                            value=defaults.get("min_laps", 3),
+                            placeholder="min_laps",
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-consistency-threshold",
+                            type="number",
+                            step=0.01,
+                            value=defaults.get("consistency_threshold", 0.08),
+                            placeholder="consistency_threshold",
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-consistency-trim",
+                            type="number",
+                            step=0.01,
+                            value=defaults.get("consistency_trim", 0.10),
+                            placeholder="consistency_trim",
+                        )
+                    ),
+                    dbc.Col(
+                        dbc.Input(
+                            id="kpi-consistency-min-laps",
+                            type="number",
+                            step=1,
+                            value=defaults.get("consistency_min_laps", 3),
+                            placeholder="consistency_min_laps",
+                        )
+                    ),
+                ],
+                className="mb-2",
+            ),
+            dbc.Button("Apply", id="apply-kpi-btn", color="primary", className="mt-2"),
+        ],
+        className="mb-3",
+    )
+
 def get_grid_order(df_analysis: pd.DataFrame, df_class: pd.DataFrame) -> list[str]:
     if not df_class.empty and "position" in df_class.columns:
         drv_col = next(
@@ -359,19 +489,20 @@ def build_figures(
         dt_max=cfg.get("dt_max", 2.50),
         topspeed_delta=cfg.get("topspeed_delta", 6.0),
     )
+
     ss_sector = sector_slipstream_stats(
         df_analysis,
-        fast_threshold=0.05,
-        dt_min=0.20,
-        dt_max=2.50,
-        topspeed_delta=6.0,
+        fast_threshold=cfg.get("fast_threshold", 0.05),
+        dt_min=cfg.get("dt_min", 0.20),
+        dt_max=cfg.get("dt_max", 2.50),
+        topspeed_delta=cfg.get("topspeed_delta", 6.0),
     ).rename(columns={
         "min_time_with_slip_s1": "min_s1_with_slip",
         "min_time_no_slip_s1": "min_s1_no_slip",
         "min_time_with_slip_s2": "min_s2_with_slip",
         "min_time_no_slip_s2": "min_s2_no_slip",
     })
-
+    
     if not ss.empty:
         # 1) Lap-time mínimo (orden asc.)
         ss_lap   = ss.sort_values("min_lap_time_with_slip")
@@ -1039,6 +1170,34 @@ def export_report(
             # --- cierre del documento ---------------------------------------
             f.write("</body></html>")
 
+def build_control_panel(params: dict[str, float] | None = None) -> list:
+    """Return the list of Dash components for the KPI control panel."""
+    p = params or DEFAULT_KPI_VALUES
+    panel = [
+        dbc.Row([
+            dbc.Col(dcc.Dropdown(id="team-filter", multi=True, placeholder="Teams"), width=6),
+            dbc.Col(dcc.Dropdown(id="number-filter", multi=True, placeholder="Drivers"), width=6),
+        ], className="mb-2"),
+        dbc.Row([
+            dbc.Col(dbc.Input(id="kpi-fast-threshold", type="number", step=0.01, value=p["fast_threshold"], placeholder="fast_threshold")),
+            dbc.Col(dbc.Input(id="kpi-dt-min", type="number", step=0.01, value=p["dt_min"], placeholder="dt_min")),
+            dbc.Col(dbc.Input(id="kpi-dt-max", type="number", step=0.01, value=p["dt_max"], placeholder="dt_max")),
+            dbc.Col(dbc.Input(id="kpi-topspeed-delta", type="number", step=0.1, value=p["topspeed_delta"], placeholder="topspeed_delta")),
+        ], className="mb-2"),
+        dbc.Row([
+            dbc.Col(dbc.Input(id="kpi-ref-gap", type="number", step=0.5, value=p["ref_gap"], placeholder="ref_gap")),
+            dbc.Col(dbc.Input(id="kpi-min-laps", type="number", step=1, value=p["min_laps"], placeholder="min_laps")),
+            dbc.Col(dbc.Input(id="kpi-consistency-threshold", type="number", step=0.01, value=p["consistency_threshold"], placeholder="consistency_threshold")),
+            dbc.Col(dbc.Input(id="kpi-consistency-trim", type="number", step=0.01, value=p["consistency_trim"], placeholder="consistency_trim")),
+            dbc.Col(dbc.Input(id="kpi-consistency-min-laps", type="number", step=1, value=p["consistency_min_laps"], placeholder="consistency_min_laps")),
+        ], className="mb-2"),
+        html.Div([
+            dbc.Button("Apply", id="apply-kpi-btn", color="primary", className="mt-2 me-2"),
+            dbc.Button("Reset", id="reset-kpi-btn", color="secondary", className="mt-2"),
+        ]),
+    ]
+    return panel
+
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 app.layout = html.Div(
@@ -1051,31 +1210,7 @@ app.layout = html.Div(
         dcc.Download(id="download-report"),
         dcc.Store(id="data-store"),
         dcc.Store(id="session-data"),
-        dcc.Store(id="kpi-config", storage_type="session"),
-        html.Div(
-            id="control-panel",
-            children=[
-                dbc.Row([
-                    dbc.Col(dcc.Dropdown(id="team-filter", multi=True, placeholder="Teams"), width=6),
-                    dbc.Col(dcc.Dropdown(id="number-filter", multi=True, placeholder="Drivers"), width=6),
-                ], className="mb-2"),
-                dbc.Row([
-                    dbc.Col(dbc.Input(id="kpi-fast-threshold", type="number", step=0.01, value=0.02, placeholder="fast_threshold")),
-                    dbc.Col(dbc.Input(id="kpi-dt-min", type="number", step=0.01, value=0.2, placeholder="dt_min")),
-                    dbc.Col(dbc.Input(id="kpi-dt-max", type="number", step=0.01, value=2.5, placeholder="dt_max")),
-                    dbc.Col(dbc.Input(id="kpi-topspeed-delta", type="number", step=0.1, value=6.0, placeholder="topspeed_delta")),
-                ], className="mb-2"),
-                dbc.Row([
-                    dbc.Col(dbc.Input(id="kpi-ref-gap", type="number", step=0.5, value=5.0, placeholder="ref_gap")),
-                    dbc.Col(dbc.Input(id="kpi-min-laps", type="number", step=1, value=3, placeholder="min_laps")),
-                    dbc.Col(dbc.Input(id="kpi-consistency-threshold", type="number", step=0.01, value=0.08, placeholder="consistency_threshold")),
-                    dbc.Col(dbc.Input(id="kpi-consistency-trim", type="number", step=0.01, value=0.10, placeholder="consistency_trim")),
-                    dbc.Col(dbc.Input(id="kpi-consistency-min-laps", type="number", step=1, value=3, placeholder="consistency_min_laps")),
-                ], className="mb-2"),
-                dbc.Button("Apply", id="apply-kpi-btn", color="primary", className="mt-2"),
-            ],
-            className="mb-3",
-        ),
+        dcc.Store(id="kpi-config", storage_type="session", data=DEFAULT_KPI_VALUES),
         dcc.Checklist(id="lap-filter-toggle",
                   options=[{"label": "Ver todas las vueltas", "value": "ALL"}],
                   value=[], style={"marginTop": "10px"}),
@@ -1092,11 +1227,16 @@ app.layout = html.Div(
             children=[
                 dcc.Tab(label="Tables", value="tab-tables"),
                 dcc.Tab(label="Figures", value="tab-figs"),
+                dcc.Tab(label="Control Panel", value="tab-control",
+                        children=[html.Div(id="control-panel-body",
+                                           style={"padding": "15px", "maxWidth": "500px"})]),
             ],
         ),
         html.Div(id="tab-content"),
     ]
 )
+
+app.layout["control-panel-body"].children = build_control_panel(DEFAULT_KPI_VALUES)
 
 @app.callback(
     Output("folder-input", "value"),
@@ -1127,7 +1267,7 @@ def on_browse(n_clicks):
     Input("sector-toggle", "value"),
     Input("gap-toggle", "value"),
     Input("number-filter", "value"),
-    State("kpi-config", "data"),
+    Input("kpi-config", "data"),
 )
 
 def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers, kpi_cfg):
@@ -1192,7 +1332,6 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
         serialized, team_opts, teams, serialized, driver_opts, drivers,
     )
 
-
 @app.callback(
     Output("data-store", "data", allow_duplicate=True),
     Output("session-data", "data", allow_duplicate=True),
@@ -1217,21 +1356,15 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
 )
 
 def apply_kpi_params(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers,
-                     fast_thr, dt_min, dt_max, ts_delta, ref_gap, min_laps,
-                     cons_thr, cons_trim, cons_min):
+                     _fast_thr, _dt_min, _dt_max, _ts_delta, _ref_gap, _min_laps,
+                     _cons_thr, _cons_trim, _cons_min):
     if not n_clicks or not folder or not os.path.isdir(folder):
         raise PreventUpdate
 
+    ctx = dash.callback_context
     cfg = {
-        "fast_threshold": fast_thr,
-        "dt_min": dt_min,
-        "dt_max": dt_max,
-        "topspeed_delta": ts_delta,
-        "ref_gap": ref_gap,
-        "min_laps": min_laps,
-        "consistency_threshold": cons_thr,
-        "consistency_trim": cons_trim,
-        "consistency_min_laps": cons_min,
+        key: ctx.states.get(f"kpi-{key.replace('_', '-')}.value")
+        for key in DEFAULT_KPI_VALUES
     }
 
     df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
@@ -1273,12 +1406,24 @@ def apply_kpi_params(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle
     return serialized, serialized, cfg
 
 @app.callback(
+    Output("control-panel", "children"),
+    Input("reset-kpi-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+def reset_kpi_params(n_clicks):
+    if not n_clicks:
+        raise PreventUpdate
+    return build_control_panel()
+
+@app.callback(
     Output("tab-content", "children"),
     Input("data-store", "data"),
     Input("result-tabs", "value"),
+    Input("kpi-config", "data"),
 )
 
-def update_tab_content(data, tab):
+def update_tab_content(data, tab, _):
     if not data:
         raise PreventUpdate
 
