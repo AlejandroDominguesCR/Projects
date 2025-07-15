@@ -16,6 +16,7 @@ import random
 from plotly.subplots import make_subplots 
 from collections import OrderedDict
 import numpy as np
+
 try:
     import statsmodels.api as sm  # noqa:F401
     HAS_STATSMODELS = True
@@ -81,7 +82,6 @@ def get_team_colors() -> dict[str, str]:
         "Saintéloc Raccing": "#FF02DD",
     }
 
-
 TEAM_COLOR = get_team_colors()
 
 def get_grid_order(df_analysis: pd.DataFrame, df_class: pd.DataFrame) -> list[str]:
@@ -122,20 +122,25 @@ def make_gap_table(
         df_tbl[col] = df_tbl[col].apply(seconds_to_mmss)
 
     # formateo numérico antes de construir la DataTable
-    round_specs = {
-        "GapStart": 1,
-        "GapAhead_S1": 1,
-        "GapAhead_S2": 1,
-        "GapAhead_S3": 1,
-        "TopSpeed": 0,
-    }
+    # ── 1· redondeo numérico dinámico ─────────────────────────────
+    round_specs = {"GapStart": 1, "TopSpeed": 0}
+    #   ▸ cualquier columna cuyo nombre empiece por “GapAhead_” o “GapSector”
+    for col in df_tbl.columns:
+        if col.startswith(("GapAhead_", "GapSector")):
+            round_specs[col] = 1
+
     for col, decimals in round_specs.items():
         if col in df_tbl.columns and pd.api.types.is_numeric_dtype(df_tbl[col]):
             df_tbl[col] = df_tbl[col].round(decimals)
 
+    # ── 2· columnas de gap a colorear ──────────────────────────────
     gap_cols = ["GapStart"]
     if include_sector_gaps:
-        gap_cols += ["GapAhead_S1", "GapAhead_S2", "GapAhead_S3"]
+        # añade cualquier columna que empiece por GapAhead_ o GapSector
+        gap_cols += [
+            c for c in df_tbl.columns
+            if c.startswith(("GapAhead_", "GapSector"))
+        ]
 
     style_cond = []
     for col in gap_cols:
@@ -290,22 +295,32 @@ def build_figures(
         table of fastest laps, and the preferred number order.
     """
 
-    if teams:
-        df_analysis = df_analysis[df_analysis["team"].isin(teams)]
+    # 1) calculamos ALWAYS sobre todo el df
     figs = {}
     driver_tables = build_driver_tables(
         df_analysis,
-        teams=teams,
+        teams=None,  # aquí pasamos None para que calcule gaps con TODOS
         filter_fast=filter_fast,
         include_sectors=include_sectors,
         include_sector_gaps=include_sector_gaps,
     )
+    # 2) filtramos sólo la presentación de tablas
+    if teams:
+        driver_tables = OrderedDict(
+            (drv, tbl)
+            for drv, tbl in driver_tables.items()
+            if tbl["Team"].iloc[0] in teams
+        )
+
     fastest_table = build_fastest_lap_table(
         df_analysis,
         df_class,
-        include_sectors=include_sectors,       # ← usa los dos flags que ya calculas
+        teams=teams,                  # <— aquí indicamos qué equipos queremos ver
+        filter_fast=filter_fast,
+        include_sectors=include_sectors,
         include_sector_gaps=include_sector_gaps,
     )
+
     grid_order = list(driver_tables.keys())
     if not df_class.empty and "position" in df_class.columns:
         grid_order = (
@@ -478,14 +493,12 @@ def build_figures(
     def _flag_slip(df):
         df = df.sort_values("hour")
         best = df["lap_time"].min()
-        df["fast"] = df["lap_time"] <= 1.10 * best
+        df["competitive"] = df["lap_time"] <= 1.05 * best
 
-        delta = pd.to_datetime(df["hour"], format="%H:%M:%S.%f").diff().dt.total_seconds()
-        prev_fast = df["fast"].shift()
+        delta = pd.to_datetime(df["hour"], ...).diff().dt.total_seconds()
 
         df["slip_flag"] = (
-            df["fast"]
-            & prev_fast
+            df["competitive"]
             & delta.between(0.4, 2.5)
             & (df["top_speed"] >= df["top_speed"].median() + 6)
         )
@@ -1077,7 +1090,6 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
         drivers = driver_names
 
     df_analysis = df_analysis[df_analysis["number"].isin(drivers)]
-    df_analysis = df_analysis[df_analysis["team"].isin(teams)]
 
     filter_fast   = "ALL" not in (lap_toggle or [])
     include_sects = "SECT" in (sec_toggle or [])
@@ -1200,7 +1212,7 @@ def update_tab_content(data, tab):
             style_header={"fontWeight": "bold"},
             style_data_conditional=team_styles  + gap_styles    
         )
-        table_divs.insert(0, html.Div(summary, style={"flex": "1 0 50%", "padding": "5px"}))
+        table_divs.insert(0, html.Div(summary, style={"flex": "1 0 100%", "padding": "5px"}))
 
     if tab == "tab-tables":
         return html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})

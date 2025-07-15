@@ -560,7 +560,14 @@ def extract_session_summary(df_analysis: pd.DataFrame,
 
     return summary
 
-def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
+def slipstream_stats(
+    df: pd.DataFrame,
+    *,
+    fast_threshold: float = 0.02,         
+    dt_min: float = 0.20,
+    dt_max: float = 2.50,
+    topspeed_delta: float = 6.0,
+) -> pd.DataFrame:
     """
     KPIs de rebufo por piloto (number).
 
@@ -581,7 +588,10 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     extra = ["team"] if "team" in df.columns else []
-    data = df[list(required | set(extra))].copy()
+    gap_cols_present = [c for c in ("GapAhead_S1", "GapAhead_S2", "GapAhead_S3")
+                        if c in df.columns]
+    use_cols = list(required | set(extra) | set(gap_cols_present))
+    data = df[use_cols].copy()
 
     # ─── Formatos ──────────────────────────────────────────────────────────
     if not pd.api.types.is_numeric_dtype(data["lap_time"]):
@@ -594,25 +604,42 @@ def slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     # ─── Bandera de vuelta rápida / Δt con el coche anterior ───────────────
     best_lap = data.groupby("number")["lap_time"].transform("min")
-    data["fast"] = data["lap_time"] <= 1.05 * best_lap        # ≤ 110 %
-
+    data["competitive"] = data["lap_time"] <= (1 + fast_threshold) * best_lap
+      
     median_speed = data["top_speed"].median()
-
-    prev_num  = data["number"].shift()
-    prev_fast = data["fast"].shift()
     delta_t   = (data["timestamp"] - data["timestamp"].shift()).dt.total_seconds()
-
-    data["slip_flag"] = (
-        data["fast"] & prev_fast
-        & (prev_num != data["number"])
-        & delta_t.between(0.2, 2.5)
-        & (data["top_speed"] >= median_speed + 6)
+    prev_num  = data["number"].shift()
+    speed_thr = (
+        data.groupby("number")["top_speed"].transform("median") + topspeed_delta
     )
 
-    # ─── Propaga rebufo a la vuelta siguiente del mismo piloto ─────────────
+    # ① Rebufo al cruzar meta -------------------------------------------------
+    data["slip_meta"] = (
+        data["competitive"]
+        & (prev_num != data["number"])
+        & delta_t.between(dt_min, dt_max)
+        & (data["top_speed"] >= speed_thr)
+    )
+
+    # ② Rebufo en sectores ----------------------------------------------------
+    need_cols = {"GapAhead_S1", "GapAhead_S2", "GapAhead_S3"}
+    if need_cols <= set(data.columns):      
+        for lab in ("S1", "S2", "S3"):
+            gcol = f"GapAhead_{lab}"
+            data[f"slip_{lab}"] = (
+                data["competitive"]
+                & (data[gcol].between(dt_min, dt_max))
+            )
+    else:
+        data[["slip_S1", "slip_S2", "slip_S3"]] = False
+
+    # ③ Bandera global + propagación -----------------------------------------
+    data["slip_base"] = (
+        data["slip_meta"] | data["slip_S1"] | data["slip_S2"] | data["slip_S3"]
+    )
     data = data.sort_values(["number", "lap_number"]).reset_index(drop=True)
-    data["slip_prev"] = data.groupby("number")["slip_flag"].shift(fill_value=False)
-    data["slipstream"] = data["slip_flag"] | data["slip_prev"]
+    data["slip_prev"] = data.groupby("number")["slip_base"].shift(fill_value=False)
+    data["slipstream"] = data["slip_base"] | data["slip_prev"]
 
     # ─── KPIs agregados ────────────────────────────────────────────────────
     stats = (
@@ -679,6 +706,10 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     extra = ["team"] if "team" in df.columns else []
     use_cols = list(req_base | {s1_col, s2_col} | set(extra))
+    # ── selección mínima de columnas (añadimos dinámicamente GapAhead_S*) ──
+    gap_cols_present = [c for c in ("GapAhead_S1", "GapAhead_S2", "GapAhead_S3")
+                        if c in df.columns]
+    use_cols = list(req_base | {s1_col, s2_col} | set(extra) | set(gap_cols_present))
     data = df[use_cols].copy()
 
     if not pd.api.types.is_numeric_dtype(data["lap_time"]):
@@ -693,21 +724,25 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
 
     data = data.sort_values("T3").reset_index(drop=True)
 
+    # ─── Vuelta competitiva (≤ 110 % de su mejor) ---------------------------
     best_lap = data.groupby("number")["lap_time"].transform("min")
-    data["fast"] = data["lap_time"] <= 1.10 * best_lap
-    median_speed = data["top_speed"].median()
+    data["competitive"] = data["lap_time"] <= 1.05 * best_lap
+
+    # umbral de velocidad: mediana del propio piloto + 4 km/h
+    speed_thr = (
+        data.groupby("number")["top_speed"].transform("median") + 6.0
+    )
 
     # ─── Sector 1 detection ────────────────────────────────────────────────
     s1 = data.sort_values("T1").reset_index()
     dt1 = (s1["T1"] - s1["T1"].shift()).dt.total_seconds()
     prev_drv = s1["number"].shift()
-    prev_fast = s1["fast"].shift()
+    prev_fast = s1["competitive"].shift()
     s1["slip_flag_s1"] = (
-        s1["fast"]
-        & prev_fast
+        s1["competitive"]
         & (prev_drv != s1["number"])
-        & dt1.between(0.4, 2.5)
-        & (s1["top_speed"] >= median_speed + 6)
+        & dt1.between(0.20, 2.50)                 # mismo rango que meta
+        & (s1["top_speed"] >= speed_thr)
     )
     s1 = s1.sort_values(["number", "lap_number"]).reset_index(drop=True)
     s1["slip_prev_s1"] = s1.groupby("number")["slip_flag_s1"].shift(fill_value=False)
@@ -719,13 +754,12 @@ def sector_slipstream_stats(df: pd.DataFrame) -> pd.DataFrame:
     s2 = data.sort_values("T2").reset_index()
     dt2 = (s2["T2"] - s2["T2"].shift()).dt.total_seconds()
     prev_drv2 = s2["number"].shift()
-    prev_fast2 = s2["fast"].shift()
+    prev_fast2 = s2["competitive"].shift()
     s2["slip_flag_s2"] = (
-        s2["fast"]
-        & prev_fast2
+        s2["competitive"]
         & (prev_drv2 != s2["number"])
-        & dt2.between(0.4, 2.5)
-        & (s2["top_speed"] >= median_speed + 6)
+        & dt2.between(0.20, 2.50)
+        & (s2["top_speed"] >= speed_thr)
     )
     s2 = s2.sort_values(["number", "lap_number"]).reset_index(drop=True)
     s2["slip_prev_s2"] = s2.groupby("number")["slip_flag_s2"].shift(fill_value=False)
@@ -841,6 +875,11 @@ def build_driver_tables(
         # sin sectores → GapStart = GapAhead de la vuelta anterior
         df["GapStart"] = df.groupby("number")["GapAhead"].shift(1)
 
+    if include_sector_gaps:
+        for colname in ("GapAhead_S1", "GapAhead_S2", "GapAhead_S3"):
+            if colname in df.columns and colname not in gap_cols:
+                gap_cols.append(colname)
+
 
     # ── 3·5 FILTRO idéntico al de build_fastest_lap_table ─────────────
     if filter_fast:
@@ -864,7 +903,7 @@ def build_driver_tables(
                     df[std] = df[raw]
                 sec_cols.append(std)
 
-    # ── 7· columnas finales y tablas por piloto ───────────────────────
+    # 7· columnas finales y tablas por piloto
     base_cols = [
         "team",
         "lap_number", "lap_time",
@@ -872,12 +911,17 @@ def build_driver_tables(
         "GapStart", *gap_cols,
         "top_speed",
     ]
+
+    # ahora añadimos también los gap de sectores
     rename = {
-        "team":       "Team",
-        "lap_number": "Vuelta",
-        "lap_time":   "LapTime",
-        "GapStart":   "GapStart",
-        "top_speed":  "TopSpeed",
+        "team":         "Team",
+        "lap_number":   "Vuelta",
+        "lap_time":     "LapTime",
+        "GapStart":     "GapStart",
+        "GapAhead_S1":  "GapSector1",
+        "GapAhead_S2":  "GapSector2",
+        "GapAhead_S3":  "GapSector3",
+        "top_speed":    "TopSpeed",
     }
 
     tables = OrderedDict()
@@ -1010,7 +1054,6 @@ def build_fastest_lap_table(
         base = base[base["team"].isin(teams)].reset_index(drop=True)
 
     return base
-
 
 def slipstream_gap_gain(
     df: pd.DataFrame,
