@@ -1208,6 +1208,32 @@ app.layout = html.Div(
 app.layout["control-panel-body"].children = build_control_panel(DEFAULT_KPI_VALUES)
 
 @app.callback(
+    Output("kpi-config", "data"),
+    Input("apply-kpi-btn", "n_clicks"),
+    State("kpi-fast-threshold", "value"),
+    State("kpi-dt-min", "value"),
+    State("kpi-dt-max", "value"),
+    State("kpi-topspeed-delta", "value"),
+    State("kpi-ref-gap", "value"),
+    State("kpi-min-laps", "value"),
+    State("kpi-consistency-trim", "value"),
+    prevent_initial_call=True,
+)
+
+def on_apply_kpi(n_clicks, fast_thr, dt_min, dt_max,
+                 ts_delta, ref_gap, min_laps, trim):
+    """Save current Control Panel thresholds."""
+    return {
+        "fast_threshold": fast_thr,
+        "dt_min": dt_min,
+        "dt_max": dt_max,
+        "topspeed_delta": ts_delta,
+        "ref_gap": ref_gap,
+        "min_laps": min_laps,
+        "consistency_trim": trim,
+    }
+
+@app.callback(
     Output("folder-input", "value"),
     Input("browse-btn", "n_clicks"),
     prevent_initial_call=True,
@@ -1287,6 +1313,7 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
         fast_rows = fast_table.to_dict(orient="records")
 
     serialized = {
+        "folder": folder,
         "figs": {name: fig.to_dict() for name, fig in figs.items()},
         "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
         "fast_table": fast_rows,
@@ -1302,16 +1329,8 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     )
 
 @app.callback(
-    Output("data-store", "data", allow_duplicate=True),
-    Output("session-data", "data", allow_duplicate=True),
     Output("kpi-config", "data"),
     Input("apply-kpi-btn", "n_clicks"),
-    State("team-filter", "value"),
-    State("folder-input", "value"),
-    State("lap-filter-toggle", "value"),
-    State("sector-toggle", "value"),
-    State("gap-toggle", "value"),
-    State("number-filter", "value"),
     State("kpi-fast-threshold", "value"),
     State("kpi-dt-min", "value"),
     State("kpi-dt-max", "value"),
@@ -1324,19 +1343,69 @@ def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers
     prevent_initial_call=True,
 )
 
-def apply_kpi_params(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers,
-                     _fast_thr, _dt_min, _dt_max, _ts_delta, _ref_gap, _min_laps,
-                     _cons_thr, _cons_trim, _cons_min):
-    if not n_clicks or not folder or not os.path.isdir(folder):
+def apply_kpi_params(n_clicks, fast_thr, dt_min, dt_max, ts_delta, ref_gap,
+                     min_laps, cons_thr, cons_trim, cons_min):
+    if not n_clicks:
         raise PreventUpdate
 
-    ctx = dash.callback_context
     cfg = {
-        key: ctx.states.get(f"kpi-{key.replace('_', '-')}.value")
-        for key in DEFAULT_KPI_VALUES
+        "fast_threshold": fast_thr,
+        "dt_min": dt_min,
+        "dt_max": dt_max,
+        "topspeed_delta": ts_delta,
+        "ref_gap": ref_gap,
+        "min_laps": min_laps,
+        "consistency_threshold": cons_thr,
+        "consistency_trim": cons_trim,
+        "consistency_min_laps": cons_min,
     }
 
+    return cfg
+
+@app.callback(
+    Output("control-panel", "children"),
+    Input("reset-kpi-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+def reset_kpi_params(n_clicks):
+    if not n_clicks:
+        raise PreventUpdate
+    return build_control_panel(DEFAULT_KPI_VALUES)
+
+@app.callback(
+    Output("kpi-config", "data"),
+    Input("reset-kpi-btn", "n_clicks"),  # verify button ID
+    prevent_initial_call=True,
+)
+
+def on_reset_kpi(n_clicks):
+    """Restore default KPI thresholds."""
+    return DEFAULT_KPI_VALUES.copy()
+
+@app.callback(
+    Output("tab-content", "children"),
+    Output("data-store", "data", allow_duplicate=True),
+    Output("session-data", "data", allow_duplicate=True),
+    Input("load-btn", "n_clicks"),
+    Input("result-tabs", "value"),
+    Input("kpi-config", "data"),
+    State("folder-input", "value"),
+    State("team-filter", "value"),
+    State("lap-filter-toggle", "value"),
+    State("sector-toggle", "value"),
+    State("gap-toggle", "value"),
+    State("number-filter", "value"),
+    prevent_initial_call=True,
+)
+
+def update_tab_content(_, tab, kpi_cfg, folder, teams, lap_toggle, sec_toggle,
+                       gap_toggle, drivers):
+    if not folder or not os.path.isdir(folder):
+        raise PreventUpdate
+
     df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
+
     team_names = sorted(df_analysis["team"].dropna().unique().tolist())
     driver_names = sorted(df_analysis["number"].dropna().unique().tolist())
 
@@ -1355,7 +1424,7 @@ def apply_kpi_params(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle
         filter_fast=filter_fast,
         include_sectors=include_sects,
         include_sector_gaps=include_gap,
-        kpi_params=cfg,
+        kpi_params=kpi_cfg or {},
     )
 
     grid_order = [d for d in grid_order if d in drivers]
@@ -1365,6 +1434,7 @@ def apply_kpi_params(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle
 
     fast_rows = [] if fast_table is None else fast_table.to_dict(orient="records")
     serialized = {
+        "folder": folder,
         "figs": {name: fig.to_dict() for name, fig in figs.items()},
         "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
         "fast_table": fast_rows,
@@ -1372,43 +1442,20 @@ def apply_kpi_params(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle
         "grid_order": grid_order,
     }
 
-    return serialized, serialized, cfg
-
-@app.callback(
-    Output("control-panel", "children"),
-    Input("reset-kpi-btn", "n_clicks"),
-    prevent_initial_call=True,
-)
-
-def reset_kpi_params(n_clicks):
-    if not n_clicks:
-        raise PreventUpdate
-    return build_control_panel()
-
-@app.callback(
-    Output("tab-content", "children"),
-    Input("data-store", "data"),
-    Input("result-tabs", "value"),
-    Input("kpi-config", "data"),
-)
-
-def update_tab_content(data, tab, _):
-    if not data:
-        raise PreventUpdate
-
-    figs_dict = data.get("figs", {})
+    figs_dict = serialized.get("figs", {})
     figs = {
         name: go.Figure(fig) if isinstance(fig, dict) else fig
         for name, fig in figs_dict.items()
     }
 
-    tables_dict = data.get("tables", {})
+    tables_dict = serialized.get("tables", {})
     driver_tables = {drv: pd.DataFrame(rows) for drv, rows in tables_dict.items()}
-    fast_rows = data.get("fast_table", [])
+    fast_rows = serialized.get("fast_table", [])
     fast_df = pd.DataFrame(fast_rows)
-    include_gap = data.get("include_gap", False)
+    include_gap = serialized.get("include_gap", False)
 
-    grid_order = data.get("grid_order", [])
+    grid_order = serialized.get("grid_order", [])
+
     table_divs = [
         make_gap_table(driver_tables[drv], drv, include_gap)
         for drv in grid_order
@@ -1468,7 +1515,8 @@ def update_tab_content(data, tab, _):
         table_divs.insert(0, html.Div(summary, style={"flex": "1 0 100%", "padding": "5px"}))
 
     if tab == "tab-tables":
-        return html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
+        return (html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"}),
+                serialized, serialized)
     elif tab == "tab-figs":
         graphs = []
 
@@ -1495,11 +1543,11 @@ def update_tab_content(data, tab, _):
                 )
             )
 
-        return html.Div(graphs)
+        return html.Div(graphs), serialized, serialized
     elif tab == "tab-control":
-        return html.Div()
+        return html.Div(), dash.no_update, dash.no_update
 
-    return html.Div()
+    return html.Div(), dash.no_update, dash.no_update
 
 @app.callback(
     Output("download-report", "data"),
