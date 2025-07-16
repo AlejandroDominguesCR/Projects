@@ -101,120 +101,6 @@ DEFAULT_KPI_VALUES: dict[str, float] = {
     "consistency_min_laps": 3,
 }
 
-def build_control_panel(defaults: dict[str, float]) -> html.Div:
-    """Return the KPI control panel layout."""
-
-    return html.Div(
-        [
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dcc.Dropdown(id="team-filter", multi=True, placeholder="Teams"),
-                        width=6,
-                    ),
-                    dbc.Col(
-                        dcc.Dropdown(id="number-filter", multi=True, placeholder="Drivers"),
-                        width=6,
-                    ),
-                ],
-                className="mb-2",
-            ),
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-fast-threshold",
-                            type="number",
-                            step=0.01,
-                            value=defaults.get("fast_threshold", 0.02),
-                            placeholder="fast_threshold",
-                        )
-                    ),
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-dt-min",
-                            type="number",
-                            step=0.01,
-                            value=defaults.get("dt_min", 0.20),
-                            placeholder="dt_min",
-                        )
-                    ),
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-dt-max",
-                            type="number",
-                            step=0.01,
-                            value=defaults.get("dt_max", 2.50),
-                            placeholder="dt_max",
-                        )
-                    ),
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-topspeed-delta",
-                            type="number",
-                            step=0.1,
-                            value=defaults.get("topspeed_delta", 6.0),
-                            placeholder="topspeed_delta",
-                        )
-                    ),
-                ],
-                className="mb-2",
-            ),
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-ref-gap",
-                            type="number",
-                            step=0.5,
-                            value=defaults.get("ref_gap", 5.0),
-                            placeholder="ref_gap",
-                        )
-                    ),
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-min-laps",
-                            type="number",
-                            step=1,
-                            value=defaults.get("min_laps", 3),
-                            placeholder="min_laps",
-                        )
-                    ),
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-consistency-threshold",
-                            type="number",
-                            step=0.01,
-                            value=defaults.get("consistency_threshold", 0.08),
-                            placeholder="consistency_threshold",
-                        )
-                    ),
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-consistency-trim",
-                            type="number",
-                            step=0.01,
-                            value=defaults.get("consistency_trim", 0.10),
-                            placeholder="consistency_trim",
-                        )
-                    ),
-                    dbc.Col(
-                        dbc.Input(
-                            id="kpi-consistency-min-laps",
-                            type="number",
-                            step=1,
-                            value=defaults.get("consistency_min_laps", 3),
-                            placeholder="consistency_min_laps",
-                        )
-                    ),
-                ],
-                className="mb-2",
-            ),
-            dbc.Button("Apply", id="apply-kpi-btn", color="primary", className="mt-2"),
-        ],
-        className="mb-3",
-    )
-
 def get_grid_order(df_analysis: pd.DataFrame, df_class: pd.DataFrame) -> list[str]:
     if not df_class.empty and "position" in df_class.columns:
         drv_col = next(
@@ -502,7 +388,7 @@ def build_figures(
         "min_time_with_slip_s2": "min_s2_with_slip",
         "min_time_no_slip_s2": "min_s2_no_slip",
     })
-    
+
     if not ss.empty:
         # 1) Lap-time mínimo (orden asc.)
         ss_lap   = ss.sort_values("min_lap_time_with_slip")
@@ -1170,32 +1056,115 @@ def export_report(
             # --- cierre del documento ---------------------------------------
             f.write("</body></html>")
 
-def build_control_panel(params: dict[str, float] | None = None) -> list:
-    """Return the list of Dash components for the KPI control panel."""
-    p = params or DEFAULT_KPI_VALUES
-    panel = [
-        dbc.Row([
-            dbc.Col(dcc.Dropdown(id="team-filter", multi=True, placeholder="Teams"), width=6),
-            dbc.Col(dcc.Dropdown(id="number-filter", multi=True, placeholder="Drivers"), width=6),
-        ], className="mb-2"),
-        dbc.Row([
-            dbc.Col(dbc.Input(id="kpi-fast-threshold", type="number", step=0.01, value=p["fast_threshold"], placeholder="fast_threshold")),
-            dbc.Col(dbc.Input(id="kpi-dt-min", type="number", step=0.01, value=p["dt_min"], placeholder="dt_min")),
-            dbc.Col(dbc.Input(id="kpi-dt-max", type="number", step=0.01, value=p["dt_max"], placeholder="dt_max")),
-            dbc.Col(dbc.Input(id="kpi-topspeed-delta", type="number", step=0.1, value=p["topspeed_delta"], placeholder="topspeed_delta")),
-        ], className="mb-2"),
-        dbc.Row([
-            dbc.Col(dbc.Input(id="kpi-ref-gap", type="number", step=0.5, value=p["ref_gap"], placeholder="ref_gap")),
-            dbc.Col(dbc.Input(id="kpi-min-laps", type="number", step=1, value=p["min_laps"], placeholder="min_laps")),
-            dbc.Col(dbc.Input(id="kpi-consistency-threshold", type="number", step=0.01, value=p["consistency_threshold"], placeholder="consistency_threshold")),
-            dbc.Col(dbc.Input(id="kpi-consistency-trim", type="number", step=0.01, value=p["consistency_trim"], placeholder="consistency_trim")),
-            dbc.Col(dbc.Input(id="kpi-consistency-min-laps", type="number", step=1, value=p["consistency_min_laps"], placeholder="consistency_min_laps")),
-        ], className="mb-2"),
-        html.Div([
-            dbc.Button("Apply", id="apply-kpi-btn", color="primary", className="mt-2 me-2"),
-            dbc.Button("Reset", id="reset-kpi-btn", color="secondary", className="mt-2"),
-        ]),
-    ]
+def build_control_panel(defaults: dict[str, float]) -> html.Div:
+    """Return a 1-column control panel (label + input per row)."""
+
+    def row(label: str, component) -> dbc.Row:
+        return dbc.Row(
+            [
+                dbc.Col(html.Label(label), width=2, style={"fontWeight": 600}),
+                dbc.Col(component,        width=12),
+            ],
+            className="mb-2",
+        )
+
+    panel = html.Div(
+        [
+            row(
+                "Teams",
+                dcc.Dropdown(
+                    id="team-filter",
+                    multi=True,
+                    placeholder="Select teams…",
+                    style={"width": "100%"}
+                ),
+            ),
+
+            row(
+                "Drivers",
+                dcc.Dropdown(
+                    id="number-filter",
+                    multi=True,
+                    placeholder="Select drivers…",
+                    style={"width": "100%"}
+                ),
+            ),
+
+            html.Hr(),
+
+            row(
+                "% vuelta competitiva",
+                dbc.Input(
+                    id="kpi-fast-threshold",
+                    type="number",
+                    step=0.01,
+                    value=defaults.get("fast_threshold", 0.02),
+                ),
+            ),
+            row(
+                "Δ\u202F t mínimo meta (s)",
+                dbc.Input(
+                    id="kpi-dt-min",
+                    type="number",
+                    step=0.01,
+                    value=defaults.get("dt_min", 0.20),
+                ),
+            ),
+            row(
+                "Δ\u202F t máximo meta (s)",
+                dbc.Input(
+                    id="kpi-dt-max",
+                    type="number",
+                    step=0.01,
+                    value=defaults.get("dt_max", 2.50),
+                ),
+            ),
+            row(
+                "+Top-Speed rebufo (km/h)",
+                dbc.Input(
+                    id="kpi-topspeed-delta",
+                    type="number",
+                    step=0.1,
+                    value=defaults.get("topspeed_delta", 6.0),
+                ),
+            ),
+            row(
+                "Gap ref. gain (s)",
+                dbc.Input(
+                    id="kpi-ref-gap",
+                    type="number",
+                    step=0.5,
+                    value=defaults.get("ref_gap", 5.0),
+                ),
+            ),
+            row(
+                "Laps mín. gain",
+                dbc.Input(
+                    id="kpi-min-laps",
+                    type="number",
+                    step=1,
+                    min=1,
+                    value=defaults.get("min_laps", 3),
+                ),
+            ),
+            row(
+                "% trim consistencia",
+                dbc.Input(
+                    id="kpi-consistency-trim",
+                    type="number",
+                    step=0.01,
+                    value=defaults.get("consistency_trim", 0.10),
+                ),
+            ),
+
+            html.Hr(),
+            dbc.Button("Apply",  id="apply-kpi-btn", color="primary", className="me-2"),
+            dbc.Button("Reset",  id="reset-kpi-btn", color="secondary"),
+        ],
+        style={"maxWidth": "1600px", "width": "100vw",  
+               "padding": "15px"}
+    )
+
     return panel
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
@@ -1500,33 +1469,37 @@ def update_tab_content(data, tab, _):
 
     if tab == "tab-tables":
         return html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
+    elif tab == "tab-figs":
+        graphs = []
 
-    graphs = []
+        sector_keys = ["SECTOR1 Diff", "SECTOR2 Diff", "SECTOR3 Diff"]
+        gap_key = "Gap a Vuelta Ideal"
 
-    sector_keys = ["SECTOR1 Diff", "SECTOR2 Diff", "SECTOR3 Diff"]
-    gap_key = "Gap a Vuelta Ideal"
+        sector_figs = [
+            dcc.Graph(figure=figs[k], style={"flex": 1})
+            for k in sector_keys if k in figs
+        ]
+        if sector_figs:
+            graphs.append(html.Div(sector_figs, style={"display": "flex", "gap": "10px"}))
 
-    sector_figs = [
-        dcc.Graph(figure=figs[k], style={"flex": 1})
-        for k in sector_keys if k in figs
-    ]
-    if sector_figs:
-        graphs.append(html.Div(sector_figs, style={"display": "flex", "gap": "10px"}))
+        if gap_key in figs:
+            graphs.append(dcc.Graph(figure=figs[gap_key], style={"width": "100%"}))
 
-    if gap_key in figs:
-        graphs.append(dcc.Graph(figure=figs[gap_key], style={"width": "100%"}))
-
-    remaining = [k for k in figs if k not in sector_keys + [gap_key]]
-    if remaining:
-        grid_items = [dcc.Graph(figure=figs[k]) for k in remaining]
-        graphs.append(
-            html.Div(
-                grid_items,
-                style={"display": "grid", "gridTemplateColumns": "repeat(2, 1fr)", "gap": "10px"}
+        remaining = [k for k in figs if k not in sector_keys + [gap_key]]
+        if remaining:
+            grid_items = [dcc.Graph(figure=figs[k]) for k in remaining]
+            graphs.append(
+                html.Div(
+                    grid_items,
+                    style={"display": "grid", "gridTemplateColumns": "repeat(2, 1fr)", "gap": "10px"}
+                )
             )
-        )
 
-    return html.Div(graphs)
+        return html.Div(graphs)
+    elif tab == "tab-control":
+        return html.Div()
+
+    return html.Div()
 
 @app.callback(
     Output("download-report", "data"),
