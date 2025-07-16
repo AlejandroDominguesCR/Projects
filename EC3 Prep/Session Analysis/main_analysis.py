@@ -1363,7 +1363,7 @@ def apply_kpi_params(n_clicks, fast_thr, dt_min, dt_max, ts_delta, ref_gap,
     return cfg
 
 @app.callback(
-    Output("control-panel", "children"),
+    Output("control-panel-body", "children"),
     Input("reset-kpi-btn", "n_clicks"),
     prevent_initial_call=True,
 )
