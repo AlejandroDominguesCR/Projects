@@ -18,6 +18,35 @@ import dash_bootstrap_components as dbc
 import plotly.io as pio
 from dash import callback_context
 
+# --- Canonical mapping helpers ----------------------------------------------
+try:
+    import variable_mapping as vm  # opcional; sólo para futura extensión
+except ImportError:
+    vm = None
+
+def detect_source_dict(data: dict) -> str:
+    """
+    Devuelve 'wintax', 'canopy' o None en función de los metadatos del JSON.
+    Prefiere la clave data['Source']; fallback: inspecciona nombres de columnas.
+    """
+    src = (data.get("Source") or "").lower()
+    if src in ("wintax", "canopy"):
+        return src
+    datos = data.get("Datos", {}) or {}
+    # fallback heurístico
+    if "CarSpeed" in datos:
+        return "wintax"
+    if "vCar" in datos:
+        return "canopy"
+    # heurística adicional por si ya hubo alias
+    lowered = {k.lower(): k for k in datos.keys()}
+    if any(k.startswith("carspeed") or k.startswith("speed") for k in lowered):
+        return "wintax"
+    if any(k == "vcar" or k.startswith("veh") for k in lowered):
+        return "canopy"
+    return None
+# ---------------------------------------------------------------------------
+
 UPLOAD_DIRECTORY = os.path.join(os.path.dirname(__file__), "uploads")
 PROCESADOS_DIRECTORY = os.path.join(os.path.dirname(__file__), "../procesados")
 os.makedirs(UPLOAD_DIRECTORY, exist_ok=True)
@@ -210,7 +239,6 @@ overlay_controls = html.Div([
 
 ensure_default_conditions()
 
-
 def build_standard_tab():
     return html.Div([
         html.H1(
@@ -334,7 +362,6 @@ def build_standard_tab():
         ),
     ])
 
-
 def build_detailed_tab():
     return dbc.Container(
         [
@@ -347,7 +374,6 @@ def build_detailed_tab():
         fluid=True,
     )
 
-
 app.layout = html.Div([
     dcc.Location(id="url", refresh=False),
     dcc.Tabs(id="main-tabs", value="standard", children=[
@@ -357,7 +383,6 @@ app.layout = html.Div([
                 children=[html.Div(id="detailed-tab-content")]),
     ])
 ])
-
 
 @app.callback(
     Output('file-list', 'children'),
@@ -409,67 +434,95 @@ def handle_file_upload(list_of_contents, list_of_names):
     State('upload-data', 'filename'),
     State({'type': 'file-type-dropdown', 'index': ALL}, 'value')
 )
-
 def process_files(n_clicks, filenames, file_types):
-    if not n_clicks or not filenames or not file_types or len(filenames) != len(file_types):
+    """
+    Procesa la tanda seleccionada. Reprocesa si:
+      - No existe JSON, o
+      - El CSV es más reciente que el JSON.
+    Pasa reset=True a las funciones de procesado para evitar contaminación
+    de ejecuciones previas.
+    """
+    if (not n_clicks) or (not filenames) or (not file_types) or len(filenames) != len(file_types):
         raise PreventUpdate
-    import procesar_datos
+
     wintax_files = []
     canopy_files = []
     processed_jsons = []
-    already_processed = []
+    reused = []      # archivos cuyo JSON vigente se reutiliza
+    reproc = []      # archivos que se reprocesan (nuevo o más reciente)
+
     for name, ftype in zip(filenames, file_types):
-        file_path = os.path.join(UPLOAD_DIRECTORY, name)
+        if not ftype:
+            continue
+        csv_path = os.path.join(UPLOAD_DIRECTORY, name)
         base = os.path.splitext(os.path.basename(name))[0] + '_procesado.json'
         json_path = os.path.join(PROCESADOS_DIRECTORY, base)
+
+        # ¿Necesita reprocesarse?
+        needs = True
         if os.path.exists(json_path):
-            already_processed.append(name)
-            processed_jsons.append(json_path)
-        else:
+            try:
+                if os.path.getmtime(csv_path) <= os.path.getmtime(json_path):
+                    needs = False
+            except Exception:
+                needs = True  # por si falla stat
+        if needs:
+            reproc.append(name)
             if ftype == 'wintax':
-                wintax_files.append(file_path)
+                wintax_files.append(csv_path)
             elif ftype == 'canopy':
-                canopy_files.append(file_path)
-    # Process only new files
+                canopy_files.append(csv_path)
+        else:
+            reused.append(name)
+            processed_jsons.append(json_path)
+
+    # Procesar tandas
     if wintax_files:
-        procesar_datos.procesar_archivos_wintax(wintax_files)
-        for name in wintax_files:
-            base = os.path.splitext(os.path.basename(name))[0] + '_procesado.json'
-            processed_jsons.append(os.path.join(PROCESADOS_DIRECTORY, base))
+        new_jsons = procesar_datos.procesar_archivos_wintax(
+            wintax_files, header_map_overrides=None, platform='wintax', reset=True
+        )
+        processed_jsons.extend(new_jsons)
     if canopy_files:
-        procesar_datos.procesar_archivos_canopy(canopy_files)
-        for name in canopy_files:
-            base = os.path.splitext(os.path.basename(name))[0] + '_procesado.json'
-            processed_jsons.append(os.path.join(PROCESADOS_DIRECTORY, base))
-    # Extract variables from the first processed file of each type
+        new_jsons = procesar_datos.procesar_archivos_canopy(
+            canopy_files, header_map_overrides=None, platform='canopy', reset=True
+        )
+        processed_jsons.extend(new_jsons)
+
+    # Extraer variables por tipo usando metadata 'Source'
     wintax_vars = []
     canopy_vars = []
-    for json_path in processed_jsons:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if 'CarSpeed' in data['Datos']:
-                wintax_vars = data.get('Variables', [])
-            elif 'vCar' in data['Datos']:
-                canopy_vars = data.get('Variables', [])
-    # UI logic
+    for jp in processed_jsons:
+        try:
+            with open(jp, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        src = detect_source_dict(data)
+        if src == 'wintax' and not wintax_vars:
+            wintax_vars = data.get('Variables', [])
+        elif src == 'canopy' and not canopy_vars:
+            canopy_vars = data.get('Variables', [])
+
     both_types = bool(wintax_vars) and bool(canopy_vars)
-    # Prepare user message
-    if already_processed and (wintax_files or canopy_files):
-        msg = dbc.Alert([
-            html.Strong("Warning: "),
-            f"The following files were already processed and were not processed again: {', '.join(already_processed)}. "
-            "Other files were processed successfully."
-        ], color="warning", dismissable=True)
-    elif already_processed:
-        msg = dbc.Alert([
-            html.Strong("Warning: "),
-            f"All selected files were already processed: {', '.join(already_processed)}."
-        ], color="warning", dismissable=True)
-    else:
-        msg = dbc.Alert("Files processed successfully!", color="success", dismissable=True)
-    # Output logic for dropdowns
+
+    # Mensaje al usuario
+    alerts = []
+    if reproc:
+        alerts.append(html.Div([
+            html.Strong("Procesados/Reprocesados: "),
+            ", ".join(reproc)
+        ]))
+    if reused:
+        alerts.append(html.Div([
+            html.Strong("Usando procesados existentes (más recientes que CSV): "),
+            ", ".join(reused)
+        ]))
+    if not alerts:
+        alerts = [html.Div("No files processed? (check input).")]
+    msg = dbc.Alert(alerts, color="info", dismissable=True)
+
+    # Salidas para dropdowns
     if both_types:
-        # Show two dropdowns, both enabled, no value selected
         return (
             processed_jsons,
             [{'label': v, 'value': v} for v in wintax_vars],
@@ -483,7 +536,6 @@ def process_files(n_clicks, filenames, file_types):
             None
         )
     elif wintax_vars:
-        # Only WinTAX files
         return (
             processed_jsons,
             [{'label': v, 'value': v} for v in wintax_vars],
@@ -497,21 +549,19 @@ def process_files(n_clicks, filenames, file_types):
             None
         )
     elif canopy_vars:
-        # Only Canopy files
         return (
             processed_jsons,
-            [],  # No options for WinTAX dropdown
+            [],
             msg,
-            {'display': 'none'},  # Hide WinTAX dropdown
-            '',                   # Placeholder for WinTAX dropdown
+            {'display': 'none'},
+            '',
             None,
-            [{'label': v, 'value': v} for v in canopy_vars],  # Canopy dropdown options
-            {'display': 'block'},  # Show Canopy dropdown
+            [{'label': v, 'value': v} for v in canopy_vars],
+            {'display': 'block'},
             'Select Y variable for Canopy',
             None
         )
     else:
-        # No variables found
         return (
             processed_jsons,
             [],
@@ -524,6 +574,7 @@ def process_files(n_clicks, filenames, file_types):
             '',
             None
         )
+
 
 @app.callback(
     Output("download-conditions", "data"),
@@ -845,6 +896,7 @@ def build_show_conditions(config):
     Input('reset-conditions-btn', 'n_clicks'),
     prevent_initial_call=True
 )
+
 def reset_conditions_to_default(n_clicks):
     if not n_clicks:
         raise PreventUpdate
@@ -870,6 +922,7 @@ def reset_conditions_to_default(n_clicks):
     State({'type': 'condition-input', 'section': ALL, 'key': ALL}, 'value'),
     prevent_initial_call=True,
 )
+
 def save_conditions(n_clicks, values):
     if not n_clicks:
         raise PreventUpdate
@@ -939,50 +992,41 @@ def generate_plots(n_clicks, processed_files, wintax_vars, canopy_vars):
     except Exception:
         condiciones_activas = {}
 
-    # Identificar los JSONs
-    def is_wintax_json(json_path):
+    def get_source(path):
         try:
-            with open(json_path, 'r', encoding='utf-8') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            return 'CarSpeed' in data.get('Datos', {})
+            return detect_source_dict(data)
         except Exception:
-            return False
+            return None
 
-    def is_canopy_json(json_path):
-        try:
-            with open(json_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return 'vCar' in data.get('Datos', {})
-        except Exception:
-            return False
-
-    wintax_jsons = [f for f in processed_files if os.path.exists(f) and is_wintax_json(f)]
-    canopy_jsons = [f for f in processed_files if os.path.exists(f) and is_canopy_json(f)]
+    wintax_jsons = [p for p in processed_files if os.path.exists(p) and get_source(p) == 'wintax']
+    canopy_jsons = [p for p in processed_files if os.path.exists(p) and get_source(p) == 'canopy']
 
     print('Processed files:', processed_files)
-    print('Selected WinTAX Y variables:', wintax_vars)
-    print('Selected Canopy Y variables:', canopy_vars)
     print('Detected WinTAX JSONs:', wintax_jsons)
     print('Detected Canopy JSONs:', canopy_jsons)
+    print('Selected WinTAX Y variables:', wintax_vars)
+    print('Selected Canopy Y variables:', canopy_vars)
 
     if wintax_jsons and canopy_jsons:
         fig = Grafico_de_prueba_plotly.main_comparacion_plotly(
             wintax_jsons,
             canopy_jsons,
-            wintax_vars[0],
-            canopy_vars[0]
+            wintax_vars[0] if wintax_vars else None,
+            canopy_vars[0] if canopy_vars else None
         )
         y_labels = [wintax_vars[0], canopy_vars[0]]
     elif wintax_jsons:
         fig = Grafico_de_prueba_plotly.main_multiple_archivos_plotly(
             wintax_jsons,
-            wintax_vars[0]
+            wintax_vars[0] if wintax_vars else None
         )
         y_labels = wintax_vars
     elif canopy_jsons:
         fig = Grafico_de_prueba_plotly.main_multiple_archivos_plotly(
             canopy_jsons,
-            canopy_vars[0]
+            canopy_vars[0] if canopy_vars else None
         )
         y_labels = canopy_vars
     else:
@@ -1000,6 +1044,7 @@ def generate_plots(n_clicks, processed_files, wintax_vars, canopy_vars):
     State('canopy-variable-dropdown', 'options'),
     prevent_initial_call=True
 )
+
 def update_show_conditions(wintax_vars, canopy_vars, wintax_opts, canopy_opts):
     config_path = resource_path('config_conditions.json')
     try:
@@ -1031,7 +1076,6 @@ def trigger_generate_plot(n_clicks, processed_files, wintax_vars, canopy_vars, c
     current_store["figures"] += new_data["figures"]
 
     return fig, current_store
-
 
 def show_conditions(condiciones_activas, wintax_vars, canopy_vars, wintax_opts, canopy_opts):
     # Validación de listas seleccionadas
@@ -1078,7 +1122,6 @@ def show_conditions(condiciones_activas, wintax_vars, canopy_vars, wintax_opts, 
         html.Button('Edit Conditions', id='show-conditions-btn', className="btn btn-warning mt-2")
     ], style={"border": "1px solid #ccc", "padding": "15px", "borderRadius": "8px", "background": "#f9f9f9"})
 
-
 @app.callback(
     Output('plot-btn', 'disabled'),
     Input('variable-dropdown', 'value'),
@@ -1089,6 +1132,7 @@ def show_conditions(condiciones_activas, wintax_vars, canopy_vars, wintax_opts, 
     State('canopy-variable-dropdown', 'disabled'),
     prevent_initial_call=True
 )
+
 def enable_plot_btn(wintax_val, canopy_val, wintax_opts, canopy_opts, wintax_disabled, canopy_disabled):
     # Solo habilitar si hay una variable seleccionada en el dropdown activo
     if not wintax_disabled and wintax_opts and wintax_val:
@@ -1135,8 +1179,16 @@ def update_plots_and_dropdowns(n_clicks, wintax_vars, canopy_vars, dropdowns, pr
         w_var = d.get('wintax')
         c_var = d.get('canopy')
         fig = None
-        wintax_jsons = [f for f in processed_files if os.path.exists(f) and 'CarSpeed' in json.load(open(f, 'r', encoding='utf-8')).get('Datos', {})]
-        canopy_jsons = [f for f in processed_files if os.path.exists(f) and 'vCar' in json.load(open(f, 'r', encoding='utf-8')).get('Datos', {})]
+        def _src(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as _f:
+                    _d = json.load(_f)
+                return detect_source_dict(_d)
+            except Exception:
+                return None
+
+        wintax_jsons = [f for f in processed_files if os.path.exists(f) and _src(f) == 'wintax']
+        canopy_jsons = [f for f in processed_files if os.path.exists(f) and _src(f) == 'canopy']
         if wintax_jsons and canopy_jsons:
             if w_var and c_var:
                 fig = Grafico_de_prueba_plotly.main_comparacion_plotly(wintax_jsons, canopy_jsons, w_var, c_var)
@@ -1295,12 +1347,12 @@ def generar_overlay(n_clicks, seleccionados, plots_data):
     )
     return merged_fig
 
-
 @app.callback(
     Output('standard-tab-content', 'children'),
     Output('detailed-tab-content', 'children'),
     Input('main-tabs', 'value')
 )
+
 def render_tabs(tab):
     if tab == 'standard':
         return build_standard_tab(), dash.no_update
@@ -1308,14 +1360,13 @@ def render_tabs(tab):
         return dash.no_update, build_detailed_tab()
     return dash.no_update, dash.no_update
 
-
 @app.callback(
     Output('detailed-variable-dropdown', 'options'),
     Input('variable-dropdown', 'options')
 )
+
 def sync_variables(options):
     return options or []
-
 
 @app.callback(
     Output('detailed-graph', 'figure'),
@@ -1323,6 +1374,7 @@ def sync_variables(options):
     State('processed-files-store', 'data'),
     prevent_initial_call=True
 )
+
 def plot_detailed(variable, processed_files):
     if not variable or not processed_files:
         raise PreventUpdate

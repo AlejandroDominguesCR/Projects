@@ -1,0 +1,37 @@
+{
+  "global": {
+    "speed": [
+      "CarSpeed",
+      "vCar",
+      "SpeedVeh",
+      "CarSpeed_kmh"
+    ],
+    "lat_acc": [
+      "Ay",
+      "Ay_LF",
+      "Ay_RF",
+      "gExtAccY"
+    ],
+    "long_acc": [
+      "Ax",
+      "gLong"
+    ],
+    "brake": [
+      "Brake_Press",
+      "Brake_Total",
+      "BrakePress%",
+      "BrakePress_bar"
+    ],
+    "throttle": [
+      "Throttle",
+      "rThrottlePedal",
+      "GasPedal%"
+    ]
+  },
+  "per_file": {
+    "MyLap_2025-07-01.csv": {
+      "lat_acc": "Ay_LF",
+      "speed": "VeloVeh_kmh"
+    }
+  }
+}

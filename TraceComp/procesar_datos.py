@@ -3,55 +3,148 @@ import json
 import os
 import pandas as pd
 import numpy as np
+from typing import Dict, List, Optional
+
+try:
+    import variable_mapping as vm  # mismo directorio
+except ImportError:
+    vm = None  # desactiva mapeo si no se encuentra
 
 datos_registrados_WinTAX = []
 datos_registrados_Canopy = []
 
-def procesar_archivos_wintax(archivos_wintax):
-    print("DEBUG: Starting procesar_archivos_wintax for files:", archivos_wintax)  # Debug
-    global datos_registrados_WinTAX  # Accede a la variable global
-    carpeta_salida = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../procesados")
-)
-    os.makedirs(carpeta_salida, exist_ok=True)  # Crea la carpeta si no existe
+def procesar_archivos_wintax(
+    archivos_wintax: List[str],
+    header_map_overrides: Optional[Dict[str, Dict[str, str]]] = None,
+    platform: str = "wintax",
+    reset: bool = True,
+):
+    """
+    Procesa una tanda de archivos WinTAX y guarda un JSON por archivo.
 
-    # Collect all data for variance calculation
-    all_data = []
+    Parámetros
+    ----------
+    archivos_wintax : list[str]
+        Rutas absolutas de los CSV WinTAX a procesar.
+    header_map_overrides : dict | None
+        Overrides rol->header por archivo (clave = basename CSV).
+    platform : str
+        Etiqueta de origen; se usa en el JSON de salida ("wintax").
+    reset : bool
+        Si True (por defecto), limpia la lista global datos_registrados_WinTAX
+        antes de procesar esta tanda, evitando contaminación de runs previos.
+    """
+    print("DEBUG: Starting procesar_archivos_wintax for files:", archivos_wintax)
+    global datos_registrados_WinTAX
+
+    # --- Reset global state (opcional) --------------------------------------
+    if reset:
+        datos_registrados_WinTAX = []  # o datos_registrados_WinTAX.clear()
+
+    carpeta_salida = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../procesados")
+    )
+    os.makedirs(carpeta_salida, exist_ok=True)
+
+    # Cargar alias_db una sola vez (si usas variable_mapping)
+    try:
+        import variable_mapping as vm
+        alias_db = vm.load_alias_db()
+    except ImportError:
+        vm = None
+        alias_db = None
+
+    registros_locales = []
+    all_data = []  # para varianza
+
     for archivo in archivos_wintax:
         print(f"Procesando archivo WinTAX: {archivo}")
         datos_registrados = registrar_datos_wintax(archivo)
-        datos_registrados_WinTAX.append(datos_registrados)
+
+        # --- Canonical mapping (si vm disponible) --------------------------
+        if vm is not None:
+            headers = datos_registrados.get("Variables", [])
+            overrides = None
+            base = os.path.basename(archivo)
+            if header_map_overrides and base in header_map_overrides:
+                overrides = header_map_overrides[base]
+
+            mapping, datos_can, missing = vm.normalize_data(
+                headers,
+                datos_registrados["Datos"],
+                units_map=None,
+                alias_db=alias_db,
+                overrides=overrides,
+                platform=platform,
+            )
+            datos_registrados["Source"] = platform
+            datos_registrados["HeaderMap"] = mapping
+            datos_registrados["DatosCanonicos"] = datos_can
+            if missing:
+                datos_registrados["MissingRoles"] = missing
+
+            # actualizar alias_db global (agrega headers confirmados)
+            for role, head in mapping.items():
+                if head:
+                    lst = alias_db.setdefault("global", {}).setdefault(role, [])
+                    if head not in lst:
+                        lst.append(head)
+
+        registros_locales.append(datos_registrados)
         all_data.append(datos_registrados["Datos"])
 
-    # Compute variance for each variable at each index
-    if len(all_data) > 1:
-        variables = datos_registrados_WinTAX[0]["Variables"]
+    # Guardar alias_db actualizado (si se usa mapeo)
+    if vm is not None:
+        vm.save_alias_db(alias_db)
+
+    # --- Calcular varianzas sobre la tanda actual ---------------------------
+    if not registros_locales:
+        return []  # nada que hacer
+
+    if len(registros_locales) > 1:
+        variables = registros_locales[0]["Variables"]
         varianzas = {}
         for var in variables:
-            # Gather all values for this variable across files, per index
-            values_matrix = []
-            # 'all_data' already contains only the data dictionaries so we access
-            # the variable directly
-            min_len = min(len(d[var]) for d in all_data)
-            for d in all_data:
-                # Convert to float, pad/cut to min_len
-                vals = [float(x) if str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else np.nan for x in d[var][:min_len]]
-                values_matrix.append(vals)
-            # Transpose to get values at each index
-            values_matrix = np.array(values_matrix)
+            # Sólo columnas que existan en todos los archivos
+            series_list = []
+            min_len = min(len(reg["Datos"].get(var, [])) for reg in registros_locales if var in reg["Datos"])
+            for reg in registros_locales:
+                vals_raw = reg["Datos"].get(var, [])[:min_len]
+                vals = []
+                for x in vals_raw:
+                    try:
+                        vals.append(float(x))
+                    except Exception:
+                        vals.append(np.nan)
+                series_list.append(vals)
+            values_matrix = np.array(series_list, dtype=float)
             varianzas[var] = np.nanvar(values_matrix, axis=0).tolist()
     else:
-        varianzas = {var: [0.0]*len(datos_registrados_WinTAX[0]["Datos"][var]) for var in datos_registrados_WinTAX[0]["Variables"]}
+        # Una sola vuelta -> varianza 0.0
+        reg0 = registros_locales[0]
+        varianzas = {
+            var: [0.0] * len(reg0["Datos"].get(var, []))
+            for var in reg0["Variables"]
+        }
 
-    # Save each file with variance
-    for idx, archivo in enumerate(archivos_wintax):
-        datos_registrados = datos_registrados_WinTAX[idx]
-        datos_registrados["Varianza"] = {var: varianzas[var] for var in datos_registrados["Variables"]}
+    # --- Guardar JSON por archivo -------------------------------------------
+    saved_jsons = []
+    for reg, archivo in zip(registros_locales, archivos_wintax):
+        reg["Varianza"] = {var: varianzas.get(var, []) for var in reg["Variables"]}
         nombre_base = os.path.basename(archivo)
-        nombre_json = os.path.join(carpeta_salida, os.path.splitext(nombre_base)[0] + "_procesado.json")
-        with open(nombre_json, "w") as json_file:
-            json.dump(datos_registrados, json_file, indent=4)
+        nombre_json = os.path.join(
+            carpeta_salida, os.path.splitext(nombre_base)[0] + "_procesado.json"
+        )
+        with open(nombre_json, "w", encoding="utf-8") as json_file:
+            json.dump(reg, json_file, indent=4)
         print(f"DEBUG: Datos guardados en: {nombre_json}")
+        saved_jsons.append(nombre_json)
+
+    # --- Actualizar global al final -----------------------------------------
+    # (Si reset=True la global está vacía, así que simplemente extendemos)
+    datos_registrados_WinTAX.extend(registros_locales)
+
+    return saved_jsons
 
 def registrar_datos_wintax(ruta_archivo):
     """
@@ -80,51 +173,147 @@ def registrar_datos_wintax(ruta_archivo):
 
     return datos_registrados
 
-def procesar_archivos_canopy(archivos_canopy):
-    print("DEBUG: Starting procesar_archivos_canopy for files:", archivos_canopy)  # Debug
-    global datos_registrados_Canopy  # Accede a la variable global
-    carpeta_salida = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../procesados")
-)
-    os.makedirs(carpeta_salida, exist_ok=True)  # Crea la carpeta si no existe
+def procesar_archivos_canopy(
+    archivos_canopy: List[str],
+    header_map_overrides: Optional[Dict[str, Dict[str, str]]] = None,
+    platform: str = "canopy",
+    reset: bool = True,
+):
+    """
+    Procesa una tanda de archivos Canopy y guarda un JSON por archivo.
 
-    all_data = []
+    Parameters
+    ----------
+    archivos_canopy : list[str]
+        Rutas absolutas de los CSV Canopy.
+    header_map_overrides : dict | None
+        Overrides rol->header por archivo (clave = basename CSV).
+    platform : str
+        Etiqueta de origen para el JSON ("canopy").
+    reset : bool
+        Si True (default), limpia datos_registrados_Canopy antes de procesar
+        esta tanda para evitar contaminación de ejecuciones previas.
+    """
+    print("DEBUG: Starting procesar_archivos_canopy for files:", archivos_canopy)
+    global datos_registrados_Canopy
+
+    # --- Reset global state --------------------------------------------------
+    if reset:
+        datos_registrados_Canopy = []  # o datos_registrados_Canopy.clear()
+
+    carpeta_salida = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../procesados")
+    )
+    os.makedirs(carpeta_salida, exist_ok=True)
+
+    # Cargar alias_db una sola vez (si está disponible variable_mapping)
+    try:
+        import variable_mapping as vm
+        alias_db = vm.load_alias_db()
+    except ImportError:
+        vm = None
+        alias_db = None
+
+    registros_locales: List[Dict] = []
+    all_data: List[Dict[str, List]] = []
+
     for archivo in archivos_canopy:
         print(f"Procesando archivo Canopy: {archivo}")
         datos_registrados = registrar_datos_canopy(archivo)
-        if datos_registrados:
-            datos_registrados_Canopy.append(datos_registrados)
-            all_data.append(datos_registrados["Datos"])
-        else:
+        if not datos_registrados:
             print(f"DEBUG: No datos registrados para {archivo}")
+            continue
 
-    # Compute variance for each variable at each index
-    if len(all_data) > 1 and all_data:
-        variables = datos_registrados_Canopy[0]["Variables"]
-        varianzas = {}
+        # --- Canonical mapping ------------------------------------------------
+        if vm is not None:
+            headers = datos_registrados.get("Variables", [])
+            units_list = datos_registrados.get("Unidades", [])
+            units_map = dict(zip(headers, units_list))
+            overrides = None
+            base = os.path.basename(archivo)
+            if header_map_overrides and base in header_map_overrides:
+                overrides = header_map_overrides[base]
+
+            mapping, datos_can, missing = vm.normalize_data(
+                headers,
+                datos_registrados["Datos"],
+                units_map=units_map,
+                alias_db=alias_db,
+                overrides=overrides,
+                platform=platform,
+            )
+            datos_registrados["Source"] = platform
+            datos_registrados["HeaderMap"] = mapping
+            datos_registrados["DatosCanonicos"] = datos_can
+            if missing:
+                datos_registrados["MissingRoles"] = missing
+
+            # Actualizar alias_db en memoria (sólo añadir nuevos encabezados)
+            for role, head in mapping.items():
+                if head:
+                    lst = alias_db.setdefault("global", {}).setdefault(role, [])
+                    if head not in lst:
+                        lst.append(head)
+
+        registros_locales.append(datos_registrados)
+        all_data.append(datos_registrados["Datos"])
+
+    # Guardar alias_db actualizado una vez
+    if vm is not None:
+        vm.save_alias_db(alias_db)
+
+    # Nada procesado
+    if not registros_locales:
+        print("DEBUG: No Canopy files processed (registros_locales vacío).")
+        return []
+
+    # --- Calcular varianzas sobre la tanda actual ----------------------------
+    # Tomamos como referencia el primer registro; sólo variables presentes en todos.
+    ref_vars = registros_locales[0].get("Variables", [])
+    variables = [v for v in ref_vars if all(v in reg["Datos"] for reg in registros_locales)]
+    varianzas: Dict[str, List[float]] = {}
+
+    if len(registros_locales) > 1 and variables:
         for var in variables:
-            min_len = min(len(d[var]) for d in all_data if var in d)
-            values_matrix = []
-            for d in all_data:
-                vals = [float(x) if str(x).replace('.', '', 1).replace('-', '', 1).isdigit() else np.nan for x in d[var][:min_len]]
-                values_matrix.append(vals)
-            values_matrix = np.array(values_matrix)
+            # Longitud mínima común
+            min_len = min(len(reg["Datos"][var]) for reg in registros_locales)
+            series_list = []
+            for reg in registros_locales:
+                raw_vals = reg["Datos"][var][:min_len]
+                vals = []
+                for x in raw_vals:
+                    try:
+                        vals.append(float(x))
+                    except Exception:
+                        vals.append(np.nan)
+                series_list.append(vals)
+            values_matrix = np.array(series_list, dtype=float)
             varianzas[var] = np.nanvar(values_matrix, axis=0).tolist()
-    elif all_data:
-        varianzas = {var: [0.0]*len(datos_registrados_Canopy[0]["Datos"][var]) for var in datos_registrados_Canopy[0]["Variables"]}
     else:
-        varianzas = {}
+        # Una sola serie (o sin intersección) -> varianza 0.0 por variable local
+        reg0 = registros_locales[0]
+        for var in reg0.get("Variables", []):
+            varianzas[var] = [0.0] * len(reg0["Datos"].get(var, []))
 
-    # Save each file with variance
-    for idx, archivo in enumerate(archivos_canopy):
-        if idx < len(datos_registrados_Canopy):
-            datos_registrados = datos_registrados_Canopy[idx]
-            datos_registrados["Varianza"] = {var: varianzas.get(var, []) for var in datos_registrados["Variables"]}
-            nombre_base = os.path.basename(archivo)
-            nombre_json = os.path.join(carpeta_salida, os.path.splitext(nombre_base)[0] + "_procesado.json")
-            with open(nombre_json, "w") as json_file:
-                json.dump(datos_registrados, json_file, indent=4)
-            print(f"DEBUG: Datos guardados en: {nombre_json}")
+    # --- Guardar JSON por archivo --------------------------------------------
+    saved_jsons: List[str] = []
+    for reg, archivo in zip(registros_locales, archivos_canopy):
+        # Añadir varianza (usa varianzas.get(var, []) si var no en intersección)
+        reg["Varianza"] = {var: varianzas.get(var, []) for var in reg.get("Variables", [])}
+
+        nombre_base = os.path.basename(archivo)
+        nombre_json = os.path.join(
+            carpeta_salida, os.path.splitext(nombre_base)[0] + "_procesado.json"
+        )
+        with open(nombre_json, "w", encoding="utf-8") as json_file:
+            json.dump(reg, json_file, indent=4)
+        print(f"DEBUG: Datos guardados en: {nombre_json}")
+        saved_jsons.append(nombre_json)
+
+    # --- Actualizar global al final ------------------------------------------
+    datos_registrados_Canopy.extend(registros_locales)
+
+    return saved_jsons
 
 def registrar_datos_canopy(ruta_archivo):
     """

@@ -19,6 +19,7 @@ CHASSIS_COLOR_MAP = {
 FALLBACK_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c',
                    '#d62728', '#9467bd', '#8c564b']
 
+
 def pick_color(file_name: str, idx: int) -> str:
     """
     Devuelve el color fijo si el nombre de archivo contiene un nº de chasis
@@ -49,6 +50,98 @@ def es_numero(valor):
     except ValueError:
         return False
 
+# Usa los datos normalizados producidos por procesar_datos.py (DatosCanonicos / HeaderMap).
+# Si no están, intenta con candidatos conocidos y patrones básicos.
+try:
+    import variable_mapping as vm  # opcional
+except ImportError:
+    vm = None
+
+_ROLE_CANDIDATES = {
+    "speed":    ["CarSpeed", "vCar", "Speed", "VehSpeed"],
+    "lat_acc":  ["Ay", "Ay_LF", "AyRF", "Ay_RF", "gExtAccY", "LatAcc", "LatG"],
+    "long_acc": ["Ax", "Ax_LF", "gLong", "LongAcc", "LongG"],
+    "brake":    ["Brake_Press", "Brake_Total", "Brake", "pBrakeF", "pBrakeR"],
+    "throttle": ["Throttle", "rThrottlePedal", "GasPedal", "Pedal", "Accel"],
+}
+
+def _slug(s: str) -> str:
+    import re
+    return re.sub(r'[^0-9a-z]+', '', str(s).lower())
+
+def _to_float(v, default=float('nan')):
+    try:
+        return float(v)
+    except Exception:
+        try:
+            return float(str(v).replace(',', '.'))
+        except Exception:
+            return default
+
+def _series_from_header(datos_dict, header, role=None, src=None):
+    """Extrae y convierte a float; aplica m/s→km/h si role=='speed' y header='vCar'."""
+    vals_raw = datos_dict.get(header, [])
+    out = []
+    for v in vals_raw:
+        fv = _to_float(v)
+        if role == "speed" and (header == "vCar" or (src == "canopy" and "vcar" in _slug(header))):
+            fv *= 3.6  # m/s -> km/h
+        out.append(fv)
+    return out
+
+def _resolve_role_series(data: dict, role: str):
+    """
+    Devuelve (serie_float, header_usado) para el rol dado.
+    Prioridad:
+      1. DatosCanonicos[role] (ya normalizado en procesado)
+      2. HeaderMap[role] -> Datos[header]
+      3. Búsqueda en _ROLE_CANDIDATES
+      4. Heurística por slug (regex simple)
+    Si nada se encuentra, devuelve ([], None).
+    """
+    src = (data.get("Source") or "").lower()
+    datos = data.get("Datos", {}) or {}
+
+    # 1. Canonical
+    can = data.get("DatosCanonicos")
+    if can and role in can:
+        return [_to_float(v) for v in can[role]], f"[CANON:{role}]"
+
+    # 2. HeaderMap
+    hmap = data.get("HeaderMap", {})
+    head = hmap.get(role)
+    if head and head in datos:
+        return _series_from_header(datos, head, role=role, src=src), head
+
+    # 3. Candidatos conocidos
+    for cand in _ROLE_CANDIDATES.get(role, []):
+        if cand in datos:
+            return _series_from_header(datos, cand, role=role, src=src), cand
+
+    # 4. Heurística slug
+    slugs = {k: _slug(k) for k in datos}
+    import re
+    patterns = {
+        "speed": r"speed|vcar|veh",
+        "lat_acc": r"ay|lat",
+        "long_acc": r"ax|long",
+        "brake": r"brake",
+        "throttle": r"throttle|pedal|gas|accel",
+    }
+    pat = patterns.get(role, None)
+    if pat:
+        rx = re.compile(pat)
+        for k, s in slugs.items():
+            if rx.search(s):
+                return _series_from_header(datos, k, role=role, src=src), k
+
+    # 5. Nada
+    # Devuelve lista NaN del largo de la primera columna disponible (si hay)
+    if datos:
+        first_len = len(next(iter(datos.values())))
+        return [float('nan')] * first_len, None
+    return [], None
+
 def get_threshold(config, percent_key, abs_key, reference, mode):
     """Return threshold based on config and mode (percent or absolute)."""
     if mode == 'absolute' and abs_key in config:
@@ -58,39 +151,35 @@ def get_threshold(config, percent_key, abs_key, reference, mode):
     else:
         return None
 
-
 def extraer_stats_12pts(data, variable_y):
-    """Compute mean and std for the 9 phase labels using WinTAX logic."""
+    """
+    Compute mean/std for the 9 phase labels usando roles canónicos
+    (speed, long_acc, brake, throttle) independientemente de nombres originales.
+    """
     config_path = resource_path('config_conditions.json')
     with open(config_path, 'r') as f:
         config_all = json.load(f)
     mode = config_all.get('mode', 'percentage')
     config = config_all['absolute_conditions'] if mode == 'absolute' else config_all['percentage_conditions']
 
-    def _num_list(values, scale=1.0):
-        return [float(v) * scale if es_numero(v) else np.nan for v in values]
+    # Series básicas
+    speed, _ = _resolve_role_series(data, "speed")
+    long_acc, _ = _resolve_role_series(data, "long_acc")
+    brake, _ = _resolve_role_series(data, "brake")
+    throttle, _ = _resolve_role_series(data, "throttle")
 
-    if 'CarSpeed' in data['Datos']:
-        vel = _num_list(data['Datos']['CarSpeed'])
-        ax_vals = _num_list(data['Datos']['Ax'])
-        brake = _num_list(data['Datos']['Brake_Press'])
-        throttle = _num_list(data['Datos'].get('Throttle', [np.nan]*len(vel)))
-    else:
-        vel = _num_list(data['Datos']['vCar'], 3.6)
-        ax_vals = _num_list(data['Datos']['gLong'])
-        brake = _num_list(data['Datos']['Brake_Total'])
-        throttle = _num_list(data['Datos'].get('rThrottlePedal', [np.nan]*len(vel)))
+    # Variable Y (tal cual; si no existe -> NaNs)
+    datos = data.get('Datos', {}) or {}
+    y_raw = datos.get(variable_y, [])
+    y = [_to_float(v) for v in y_raw]
 
-    y = _num_list(data['Datos'][variable_y])
-
-    min_decel = min([v for v in ax_vals if not np.isnan(v) and v < 0], default=None)
+    min_decel = min([v for v in long_acc if not np.isnan(v) and v < 0], default=None)
     max_brake = max([v for v in brake if not np.isnan(v)], default=None)
-    max_vel = max([v for v in vel if not np.isnan(v)], default=None)
+    max_vel = max([v for v in speed if not np.isnan(v)], default=None)
 
     stats = {}
 
-    # Helper to compute mean/std
-    def _mean_std(indices, label, pos):
+    def _mean_std(indices, label):
         valores = [y[i] for i in indices if i < len(y) and not np.isnan(y[i])]
         if valores:
             stats[label] = (float(np.mean(valores)), float(np.std(valores)))
@@ -105,47 +194,52 @@ def extraer_stats_12pts(data, variable_y):
     ax_low = get_threshold(config["early_entry_ls"], "ax_lower_percent", "ax_lower", abs(min_decel) if min_decel is not None else None, mode)
     ax_high = get_threshold(config["early_entry_ls"], "ax_upper_percent", "ax_upper", abs(min_decel) if min_decel is not None else None, mode)
     if None not in (speed_low, speed_high, brake_low, brake_high, ax_low, ax_high):
-        idx_ls = [i for i in range(len(vel)) if not np.isnan(vel[i]) and speed_low <= vel[i] <= speed_high and not np.isnan(brake[i]) and brake_low <= brake[i] <= brake_high and not np.isnan(ax_vals[i]) and -ax_high <= ax_vals[i] <= -ax_low]
+        idx_ls = [i for i in range(len(speed))
+                  if not np.isnan(speed[i]) and speed_low <= speed[i] <= speed_high
+                  and not np.isnan(brake[i]) and brake_low <= brake[i] <= brake_high
+                  and not np.isnan(long_acc[i]) and -ax_high <= long_acc[i] <= -ax_low]
     else:
         idx_ls = []
-    _mean_std(idx_ls, 'early_ls', None)
+    _mean_std(idx_ls, 'early_ls')
 
     # Mid Corner LS
     throttle_thresh = get_threshold(config["mid_corner_ls"], "throttle_threshold_percent", "throttle_threshold", max(throttle) if throttle else 1, mode)
-    try:
-        from app_dash import get_default_conditions
-        defaults = get_default_conditions()
-        default_throttle_thresh = defaults["percentage_conditions"]["mid_corner_ls"]["throttle_threshold"]
-    except Exception:
-        default_throttle_thresh = 0.05
     if throttle_thresh is None:
-        throttle_thresh = default_throttle_thresh
-    idx_mid_ls = [i for i in range(len(throttle)) if throttle[i] is not None and not np.isnan(throttle[i]) and abs(throttle[i]) < throttle_thresh]
-    _mean_std(idx_mid_ls, 'mid_ls', None)
+        try:
+            from app_dash import get_default_conditions
+            defaults = get_default_conditions()
+            throttle_thresh = defaults["percentage_conditions"]["mid_corner_ls"]["throttle_threshold"]
+        except Exception:
+            throttle_thresh = 0.05
+    idx_mid_ls = [i for i in range(len(throttle)) if not np.isnan(throttle[i]) and abs(throttle[i]) < throttle_thresh]
+    _mean_std(idx_mid_ls, 'mid_ls')
 
     # Exit LS
     throttle_diff = np.diff(throttle)
     idx_exit_ls = [i + 1 for i, d in enumerate(throttle_diff) if not np.isnan(d) and d > 0.05]
-    _mean_std(idx_exit_ls, 'exit_ls', None)
+    _mean_std(idx_exit_ls, 'exit_ls')
 
-    # Early Entry MS
+    # (Resto igual a tu función original, sustituyendo speed/long_acc/brake/throttle)
+    # --- Early Entry MS ---
     speed_low = get_threshold(config["early_entry_ms"], "speed_lower_percent", "speed_lower", max_vel, mode)
     speed_high = get_threshold(config["early_entry_ms"], "speed_upper_percent", "speed_upper", max_vel, mode)
     brake_low = get_threshold(config["early_entry_ms"], "brake_lower_percent", "brake_lower", max_brake, mode)
     brake_high = get_threshold(config["early_entry_ms"], "brake_upper_percent", "brake_upper", max_brake, mode)
-    idx_early_ms = [i for i in range(len(vel)) if not np.isnan(vel[i]) and speed_low <= vel[i] <= speed_high and not np.isnan(brake[i]) and brake_low <= brake[i] <= brake_high]
-    _mean_std(idx_early_ms, 'early_ms', None)
+    idx_early_ms = [i for i in range(len(speed))
+                    if not np.isnan(speed[i]) and speed_low <= speed[i] <= speed_high
+                    and not np.isnan(brake[i]) and brake_low <= brake[i] <= brake_high]
+    _mean_std(idx_early_ms, 'early_ms')
 
     # Mid Corner MS
     throttle_lower = get_threshold(config["mid_corner_ms"], "throttle_lower_percent", "throttle_lower", max(throttle) if throttle else 1, mode)
     throttle_upper = get_threshold(config["mid_corner_ms"], "throttle_upper_percent", "throttle_upper", max(throttle) if throttle else 1, mode)
-    idx_mid_ms = [i for i in range(len(throttle)) if throttle[i] is not None and not np.isnan(throttle[i]) and throttle_lower <= throttle[i] <= throttle_upper]
-    _mean_std(idx_mid_ms, 'mid_ms', None)
+    idx_mid_ms = [i for i in range(len(throttle)) if not np.isnan(throttle[i]) and throttle_lower <= throttle[i] <= throttle_upper]
+    _mean_std(idx_mid_ms, 'mid_ms')
 
     # Exit MS
     throttle_diff = np.diff(throttle)
     idx_exit_ms = [i + 1 for i, d in enumerate(throttle_diff) if not np.isnan(d) and d > 0.05]
-    _mean_std(idx_exit_ms, 'exit_ms', None)
+    _mean_std(idx_exit_ms, 'exit_ms')
 
     # Early Entry HS
     speed_low = get_threshold(config["early_entry_hs"], "speed_lower_percent", "speed_lower", max_vel, mode)
@@ -153,19 +247,22 @@ def extraer_stats_12pts(data, variable_y):
     brake_upper = get_threshold(config["early_entry_hs"], "brake_upper_percent", "brake_upper", max_brake, mode)
     throttle_low = get_threshold(config["early_entry_hs"], "throttle_lower_percent", "throttle_lower", max(throttle) if throttle else 1, mode)
     throttle_high = get_threshold(config["early_entry_hs"], "throttle_upper_percent", "throttle_upper", max(throttle) if throttle else 1, mode)
-    idx_early_hs = [i for i in range(len(vel)) if not np.isnan(vel[i]) and speed_low <= vel[i] <= speed_high and not np.isnan(brake[i]) and brake[i] <= brake_upper and not np.isnan(throttle[i]) and throttle_low <= throttle[i] <= throttle_high]
-    _mean_std(idx_early_hs, 'early_hs', None)
+    idx_early_hs = [i for i in range(len(speed))
+                    if not np.isnan(speed[i]) and speed_low <= speed[i] <= speed_high
+                    and not np.isnan(brake[i]) and brake[i] <= brake_upper
+                    and not np.isnan(throttle[i]) and throttle_low <= throttle[i] <= throttle_high]
+    _mean_std(idx_early_hs, 'early_hs')
 
     # Mid Corner HS
     throttle_lower = get_threshold(config["mid_corner_hs"], "throttle_lower_percent", "throttle_lower", max(throttle) if throttle else 1, mode)
     throttle_upper = get_threshold(config["mid_corner_hs"], "throttle_upper_percent", "throttle_upper", max(throttle) if throttle else 1, mode)
-    idx_mid_hs = [i for i in range(len(throttle)) if throttle[i] is not None and not np.isnan(throttle[i]) and throttle_lower <= throttle[i] <= throttle_upper]
-    _mean_std(idx_mid_hs, 'mid_hs', None)
+    idx_mid_hs = [i for i in range(len(throttle)) if not np.isnan(throttle[i]) and throttle_lower <= throttle[i] <= throttle_upper]
+    _mean_std(idx_mid_hs, 'mid_hs')
 
     # Exit HS
     throttle_diff_hs = np.diff(throttle)
     idx_exit_hs = [i + 1 for i, d in enumerate(throttle_diff_hs) if not np.isnan(d) and d < -0.05]
-    _mean_std(idx_exit_hs, 'exit_hs', None)
+    _mean_std(idx_exit_hs, 'exit_hs')
 
     return stats
 
@@ -205,20 +302,18 @@ def main_multiple_archivos_plotly(archivos_json, variable_y):
         puntos_std = []
         labels = []
         # --- Straight line points: v60, v75, vEOS ---
-        if "CarSpeed" in data['Datos']:
-            var_x = "CarSpeed"
-            var_ay = "Ay"
-            x = [float(val) if es_numero(val) else np.nan for val in data['Datos'][var_x]]
-            y = [float(val) if es_numero(val) else np.nan for val in data['Datos'][variable_y]]
-            ay = [float(val) if es_numero(val) else np.nan for val in data['Datos'][var_ay]]
-        elif "vCar" in data['Datos']:
-            var_x = "vCar"
-            var_ay = "gExtAccY"
-            x = [float(val) * 3.6 if es_numero(val) else np.nan for val in data['Datos'][var_x]]
-            y = [float(val) if es_numero(val) else np.nan for val in data['Datos'][variable_y]]
-            ay = [float(val) if es_numero(val) else np.nan for val in data['Datos'][var_ay]]
-        else:
+        x, _ = _resolve_role_series(data, "speed")
+        ay, _ = _resolve_role_series(data, "lat_acc")
+        datos_dict = data.get('Datos', {}) or {}
+        y_raw = datos_dict.get(variable_y, [])
+        y = [_to_float(v) for v in y_raw]
+
+        if not x:
+            print(f"[WARN] {nombre}: no speed data found; skipping file.")
             continue
+
+        # Si lat_acc ausente o todo NaN, desactiva filtro recta por Ay
+        use_ay_filter = any(not np.isnan(v) for v in ay)
         max_x = max(x)
         tol = config["straight_line_points"].get("tol", 0.02)
         tol_absolute = config["straight_line_points"].get("tol_absolute", 2)
@@ -229,7 +324,12 @@ def main_multiple_archivos_plotly(archivos_json, variable_y):
             else:
                 objetivo = max_x * frac
                 tolerance = objetivo * tol
-            indices = [i for i, val in enumerate(x) if abs(val - objetivo) <= tolerance and abs(ay[i]) < 0.05]
+                if use_ay_filter:
+                    indices = [i for i, val in enumerate(x)
+                            if abs(val - objetivo) <= tolerance
+                            and i < len(ay) and not np.isnan(ay[i]) and abs(ay[i]) < 0.05]
+                else:
+                    indices = [i for i, val in enumerate(x) if abs(val - objetivo) <= tolerance]
                 # --- DEBUG PRINTS ---
             print(f"[DEBUG] {key} | mode: {mode}")
             print(f"  objetivo: {objetivo}, tolerance: {tolerance}")
