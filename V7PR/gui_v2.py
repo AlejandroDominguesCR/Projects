@@ -1,6 +1,5 @@
 import sys
 import numpy as np
-import pandas as pd
 import os
 import visualizer_dash
 from PyQt5.QtWidgets import (
@@ -8,11 +7,9 @@ from PyQt5.QtWidgets import (
     QLabel, QFileDialog, QComboBox, QGroupBox, QTabWidget, QGridLayout, QProgressBar, QLineEdit, QFormLayout, QMessageBox, QListWidget, QAbstractItemView, QTableWidgetItem
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-from visualizer_dash import export_full_report
 from PyQt5.QtCore import Qt,QUrl
 from PyQt5.QtGui import QPalette, QColor, QIcon, QDoubleValidator
-from concurrent.futures import ProcessPoolExecutor, as_completed
-from model import run_vehicle_model_simple, postprocess_7dof
+
 
 def set_dark_theme(app):
     palette = QPalette()
@@ -251,7 +248,7 @@ def parse_json_setup(json_data):
     def dist(p, q):
         return ((p[0]-q[0])**2 + (p[1]-q[1])**2 + (p[2]-q[2])**2) ** 0.5
 
-    # 1. Brazo "a" (mm) entre el eje de la barra y el punto de la bieleta
+    # 1. Brazo "a" (mm)
     pts_f = json_data["config"]["suspension"]["front"]["internal"]["pickUpPts"]
     pts_r = json_data["config"]["suspension"]["rear"]["internal"]["pickUpPts"]
     aARB_F_mm = dist(pts_f["rARBAxis"], pts_f["rARBRockerPickup"]) * 1000
@@ -300,8 +297,8 @@ def prepare_simple_params(params, global_setup):
             v_damper = np.asarray(v_wheel) / mr_wd
             # 2) fuerza interna en el amortiguador
             f_int = np.where(v_damper > 0,
-                             interp_ext(v_damper),
-                             interp_comp(v_damper))
+                             interp_comp(v_damper),
+                             interp_ext(v_damper))
             # 3) fuerza pistón → fuerza rueda
             return f_int / mr_wd
         return damper_func
@@ -404,7 +401,7 @@ def prepare_simple_params(params, global_setup):
     # ─── 2) Límites PROVISIONALES para que compute_static_equilibrium() arranque
     for corner in ('FL', 'FR', 'RL', 'RR'):
         simple_params[f'z_topout_{corner}']    = 0.0                              # extens.
-        simple_params[f'z_bottomout_{corner}'] = simple_params[f'stroke_{corner}']  # compr.
+        simple_params[f'z_bottomout_{corner}'] = -simple_params[f'stroke_{corner}']  # compr.
 
     # ─── 3) Devolver el diccionario plano
     return simple_params
