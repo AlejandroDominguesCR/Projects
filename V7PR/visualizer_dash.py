@@ -10,6 +10,7 @@ from plotly.offline import plot
 from scipy.signal import savgol_filter
 from datetime import datetime
 import plotly.graph_objects as go
+from gui_v2 import load_track_channels  
 
 app = dash.Dash(__name__)
 app.layout = html.Div([html.H3("Resultados no cargados")])
@@ -979,31 +980,145 @@ def export_full_report(setups, export_path="export_full_report.html"):
     out_dir = os.path.dirname(export_path) or "."
     for sol, post, setup_path, track_path in setups:
         setup_name = os.path.basename(setup_path).replace(".json","")
-        # 1) Leemos canales de entrada
-        df_in = pd.read_csv(track_path)
-        # 2) Preparamos DataFrame de salidas
-        #    Ajusta las claves según lo que postprocess_7dof devuelve
-        df_out = pd.DataFrame({
-            "Travel_FL_mm":   post["travel"][0]*1000,
-            "Travel_FR_mm":   post["travel"][1]*1000,
-            "Travel_RL_mm":   post["travel"][2]*1000,
-            "Travel_RR_mm":   post["travel"][3]*1000,
-            "Heave_mm":       sol.y[0]*1000,
-            "Pitch_deg":      np.degrees(sol.y[2]),
-            "Roll_deg":       np.degrees(sol.y[4]),
-            "WheelLoad_FL_N": post["wheel_load"][0],
-            "WheelLoad_FR_N": post["wheel_load"][1],
-            "WheelLoad_RL_N": post["wheel_load"][2],
-            "WheelLoad_RR_N": post["wheel_load"][3],
-            # añade aquí más canales: bumpstop, downforce, f_spring, f_damper...
-        })
-        # 3) Unimos side-by-side
-        df_all = pd.concat([df_in.reset_index(drop=True),
-                             df_out.reset_index(drop=True)], axis=1)
-        # 4) Guardamos CSV
-        csv_path = os.path.join(out_dir, f"{setup_name}_results.csv")
+
+        # === 1) Inputs ==============================================================
+        track = load_track_channels(track_path)  # t[s], vx[m/s], ax[m/s2], ay[m/s2], ...
+        t_in   = np.asarray(track['t'])
+        vx_in  = np.asarray(track['vx'])
+        ax_in  = np.asarray(track['ax'])
+        ay_in  = np.asarray(track['ay'])
+        thr_in = np.asarray(track['rpedal'])
+        brk_in = np.asarray(track['brake'])
+        ztrk_in = np.vstack(track['z_tracks'])   # (4,N) en m
+
+        # === 2) Re-muestreo / garantía de longitud ==================================
+        # solve_ivp puede devolver sol.t idéntico a t_in si se integró en esos nodos;
+        # por robustez interpolamos todos los inputs al tiempo de la solución.
+        t = sol.t
+        vx  = np.interp(t, t_in, vx_in) * 3.6
+        ax  = np.interp(t, t_in, ax_in) / 9.81
+        ay  = np.interp(t, t_in, ay_in) / 9.81
+        thr = np.interp(t, t_in, thr_in)
+        brk = np.interp(t, t_in, brk_in)
+        ztrk = np.vstack([np.interp(t, t_in, ztrk_in[i]) for i in range(4)])
+
+        # Distancia integrada (trapecios)
+        dt = np.gradient(t)
+        dist = np.cumsum(vx * dt)
+
+        # === 3) Estados del solver ==================================================
+        heave      = sol.y[0]                 # m
+        heave_rate = sol.y[1]
+        pitch      = sol.y[2]                 # rad
+        pitch_rate = sol.y[3]
+        roll       = sol.y[4]                 # rad
+        roll_rate  = sol.y[5]
+
+        # Unsprung (índices como en postprocess_7dof)
+        zu_idx    = [8, 6, 10, 12]
+        zudot_idx = [9, 7, 11, 13]
+        zu     = np.stack([sol.y[i] for i in zu_idx])      # (4,N)
+        zudot  = np.stack([sol.y[i] for i in zudot_idx])   # (4,N)
+
+        # === 4) Canales de salida del postprocesado =================================
+        # (Todos tienen forma (4,N) salvo los listados como escalares/1D)
+        trv     = post['travel']            # (4,N) m (neg = compresión)
+        dmp_trv = post['damper_travel']     # (4,N) m
+        mext    = post['margen_ext']        # (4,N) m
+        mcomp   = post['margen_comp']       # (4,N) m
+        Fspr    = post['f_spring']          # (4,N) N
+        Fdmp    = post['f_damper']          # (4,N) N
+        Fbump   = post['f_bump']            # (4,N) N
+        Farb    = post['f_arb']             # (4,N) N
+        Ftire   = post['f_tire']            # (4,N) N
+        Wload   = post['wheel_load']        # (4,N) N  (asegúrate: si venía en "kg", multiplica por 9.81)
+        # Si tu versión de post devolviera wheel_load en "kg", descomenta:
+        #Wload = Wload * 9.81
+
+        FzAeroF = post.get('Fz_aero_front', np.zeros_like(t))
+        FzAeroR = post.get('Fz_aero_rear',  np.zeros_like(t))
+        
+        # heave por eje ya viene en mm en post:
+        RH_F_mm = post.get('f_rh', np.zeros_like(t))     # mm
+        RH_R_mm = post.get('r_rh',  np.zeros_like(t))     # mm
+
+        # Máscaras grip
+        gl_lat   = post.get('grip_limited_lateral_mask', np.zeros_like(t, dtype=bool))
+        gl_brake = post.get('grip_brake_mask',            np.zeros_like(t, dtype=bool))
+        gl_trac  = post.get('grip_traction_mask',         np.zeros_like(t, dtype=bool))
+
+        # === 5) Construcción DataFrame ==============================================
+        data = {
+            # ----- Tiempo / distancia / entradas -----
+            "t_s": t,
+            "dist_m": dist,
+            "CarSpeed": vx,
+            "Ax": ax,
+            "Ay": ay,
+            "throttle": thr,
+            "brake": brk,
+            "ztrk_FL_mm": ztrk[0]*1000, "ztrk_FR_mm": ztrk[1]*1000,
+            "ztrk_RL_mm": ztrk[2]*1000, "ztrk_RR_mm": ztrk[3]*1000,
+
+            # ----- Estados chasis -----
+            "heave_mm": heave*1000,
+            "heave_rate_mps": heave_rate,
+            "pitch_rad": pitch, "pitch_deg": np.degrees(pitch),
+            "pitch_rate_rps": pitch_rate,
+            "roll_rad": roll, "roll_deg": np.degrees(roll),
+            "roll_rate_rps": roll_rate,
+
+            # ----- Unsprung abs -----
+            "zu_FL_m": zu[0], "zu_FR_m": zu[1], "zu_RL_m": zu[2], "zu_RR_m": zu[3],
+            "zudot_FL_mps": zudot[0], "zudot_FR_mps": zudot[1], "zudot_RL_mps": zudot[2], "zudot_RR_mps": zudot[3],
+
+            # ----- Travels (relativos; compresión negativa) -----
+            "travel_FL_mm": trv[0]*1000, "travel_FR_mm": trv[1]*1000,
+            "travel_RL_mm": trv[2]*1000, "travel_RR_mm": trv[3]*1000,
+            "damper_FL_mm": dmp_trv[0]*1000, "damper_FR_mm": dmp_trv[1]*1000,
+            "damper_RL_mm": dmp_trv[2]*1000, "damper_RR_mm": dmp_trv[3]*1000,
+            "margenExt_FL_mm": mext[0]*1000, "margenExt_FR_mm": mext[1]*1000,
+            "margenExt_RL_mm": mext[2]*1000, "margenExt_RR_mm": mext[3]*1000,
+            "margenComp_FL_mm": mcomp[0]*1000, "margenComp_FR_mm": mcomp[1]*1000,
+            "margenComp_RL_mm": mcomp[2]*1000, "margenComp_RR_mm": mcomp[3]*1000,
+
+            # ----- Fuerzas suspensión -----
+            "Fspring_FL_N": Fspr[0], "Fspring_FR_N": Fspr[1],
+            "Fspring_RL_N": Fspr[2], "Fspring_RR_N": Fspr[3],
+            "Fbump_FL_N": Fbump[0], "Fbump_FR_N": Fbump[1],
+            "Fbump_RL_N": Fbump[2], "Fbump_RR_N": Fbump[3],
+            "Fdamper_FL_N": Fdmp[0], "Fdamper_FR_N": Fdmp[1],
+            "Fdamper_RL_N": Fdmp[2], "Fdamper_RR_N": Fdmp[3],
+            "Farb_FL_N": Farb[0], "Farb_FR_N": Farb[1],
+            "Farb_RL_N": Farb[2], "Farb_RR_N": Farb[3],
+            "ARB_torque_front_Nm": post.get("arb_torque_front", np.zeros_like(t)),
+            "ARB_torque_rear_Nm":  post.get("arb_torque_rear",  np.zeros_like(t)),
+
+            # ----- Fuerza neumático & wheel load -----
+            "Ftire_FL_N": Ftire[0], "Ftire_FR_N": Ftire[1],
+            "Ftire_RL_N": Ftire[2], "Ftire_RR_N": Ftire[3],
+            "WheelLoad_FL_N": Wload[0], "WheelLoad_FR_N": Wload[1],
+            "WheelLoad_RL_N": Wload[2], "WheelLoad_RR_N": Wload[3],
+
+            # ----- Aero -----
+            "FzAeroFront_N": -FzAeroF,
+            "FzAeroRear_N":  -FzAeroR,
+            "RH_F_mm": RH_F_mm,
+            "RH_R_mm": RH_R_mm,
+
+            # ----- Máscaras grip -----
+            "GripLat_mask":   gl_lat.astype(int),
+            "GripBrake_mask": gl_brake.astype(int),
+            "GripTrac_mask":  gl_trac.astype(int),
+        }
+
+        df_all = pd.DataFrame(data)
+
+        # === 6) Guardar =============================================================
+        csv_path = os.path.join(out_dir, f"{setup_name}_results_full.csv")
         df_all.to_csv(csv_path, index=False)
-        print(f"[INFO] CSV de resultados guardado en {csv_path}")
+        print(f"[INFO] CSV extendido guardado en {csv_path}")
+    # -------------------------------------------------------------------------------
 
 def run_in_thread(sol, post, setup_name="Setup"):
     thread = Thread(target=launch_dash, args=(sol, post, setup_name))
