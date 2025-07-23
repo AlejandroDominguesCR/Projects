@@ -31,15 +31,19 @@ def launch_dash(sol, post, setup_name="Setup"):
         graphs = []
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
-        spring_travel = smooth_signal(post['travel']) * 1000
-        travel = post['travel']
+        spring_travel = smooth_signal(post['travel_rel']) * 1000
+        travel = post['z_s']*1000
         wheel_f = post['f_wheel']          # shape (4, N)
         grip_mask = post['grip_limited_lateral_mask']  # (N,)
         wheel_ld = post['wheel_load']       # (4,N)
         wheel_names = ["FL", "FR", "RL", "RR"]
 
         #v_damper = smooth_signal(post['v_damper'])
-        heave_filtered = smooth_signal(sol.y[0])
+        travel_filtered = smooth_signal(travel)
+        # ── Heave en mm, centrado en el valor estático ─────────────────────────────
+        h0_static = float(sol.y[0][0])               # primera muestra = equilibrio
+        heave_mm  = (sol.y[0] - h0_static) * 1000    # pasa a mm
+        heave_filtered = smooth_signal(heave_mm)
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
         wheel_f_filtered = smooth_signal(wheel_f)
@@ -56,9 +60,16 @@ def launch_dash(sol, post, setup_name="Setup"):
         ]).update_layout(
             title="Travel [mm]", xaxis_title="Distance [m]", yaxis_title="Travel [mm]"
         )))
+        # travels (filtrado)
+        graphs.append(dcc.Graph(figure=go.Figure([
+            go.Scatter(x=distance, y=travel_filtered[0], name="Heave FL [mm]"),
+            go.Scatter(x=distance, y=travel_filtered[1], name="Heave FR [mm]"),
+            go.Scatter(x=distance, y=travel_filtered[2], name="Heave RL [mm]"),
+            go.Scatter(x=distance, y=travel_filtered[3], name="Heave RR [mm]"),
+        ]).update_layout(title="Heave R", xaxis_title="Distance [m]", yaxis_title="Heave R [mm]")))
         # Heave (filtrado)
         graphs.append(dcc.Graph(figure=go.Figure([
-            go.Scatter(x=distance, y=heave_filtered * 1000, name="Heave [mm]")
+            go.Scatter(x=distance, y=heave_filtered , name="Heave [mm]")
         ]).update_layout(title="Heave Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Heave [mm]")))
 
         # Pitch (filtrado)
@@ -1023,7 +1034,7 @@ def export_full_report(setups, export_path="export_full_report.html"):
         # === 4) Canales de salida del postprocesado =================================
         # (Todos tienen forma (4,N) salvo los listados como escalares/1D)
         trv     = post['travel']            # (4,N) m (neg = compresión)
-        dmp_trv = post['damper_travel']     # (4,N) m
+        dmp_trv = post['travel_rel']     # (4,N) m
         mext    = post['margen_ext']        # (4,N) m
         mcomp   = post['margen_comp']       # (4,N) m
         Fspr    = post['f_spring']          # (4,N) N
