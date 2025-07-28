@@ -156,18 +156,19 @@ def parse_json_setup(json_data):
         'zCoG': zCoG
     }
 
+
     global_setup.update({
-    "gap_bumpstop_FL": params[0]["bump_gap"],
-    "gap_bumpstop_FR": params[1]["bump_gap"],
-    "gap_bumpstop_RL": params[2]["bump_gap"],
-    "gap_bumpstop_RR": params[3]["bump_gap"]
+        "gap_bumpstop_FL": params[0]["bump_gap"] ,
+        "gap_bumpstop_FR": params[1]["bump_gap"] ,
+        "gap_bumpstop_RL": params[2]["bump_gap"] ,
+        "gap_bumpstop_RR": params[3]["bump_gap"] 
     })
 
-    mr_f_wd = 1.491587949 #1.43456 
+
+    mr_f_wd = 1.7#1.491587949 
     mr_r_wd = 1.32579 
 
     mr_f_rd = (1.491587949 * (np.pi / 180.0))/1000  #mr_wd * mr_rd para sacar el mr_rw, es decir, el paso directo
-    mr_r_rd = 1
 
     #  Motion ratios principales
     global_setup["MR_FL"]      = mr_f_wd
@@ -499,7 +500,8 @@ def load_track_channels(track_path):
     }
 
     # Conversión vienen en mm
-    data['z_tracks'] = [z / 1000.0 for z in data['z_tracks']]
+    data['z_tracks'] = [(-1*(z / 1000.0)) for z in data['z_tracks']]
+    data['z_tracks'] = [z - z[0] for z in data['z_tracks']]
     data['ax'] = [ax * 9.81 for ax in data['ax']]
     data['ay'] = [ay * 9.81 for ay in data['ay']]
     return data

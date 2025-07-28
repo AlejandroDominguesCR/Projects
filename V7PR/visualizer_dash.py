@@ -40,9 +40,11 @@ def launch_dash(sol, post, setup_name="Setup"):
 
         #v_damper = smooth_signal(post['v_damper'])
         travel_filtered = smooth_signal(travel)
-        # ── Heave en mm, centrado en el valor estático ─────────────────────────────
         h0_static = float(sol.y[0][0])               # primera muestra = equilibrio
         heave_mm  = (sol.y[0] - h0_static) * 1000    # pasa a mm
+        heave_ax_f = smooth_signal(post['heave_front'] * 1000)   # mm
+        heave_ax_r = smooth_signal(post['heave_rear']  * 1000)   # mm
+        rh = smooth_signal(post['RH']*1000)   # mm
         heave_filtered = smooth_signal(heave_mm)
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
@@ -62,15 +64,21 @@ def launch_dash(sol, post, setup_name="Setup"):
         )))
         # travels (filtrado)
         graphs.append(dcc.Graph(figure=go.Figure([
-            go.Scatter(x=distance, y=travel_filtered[0], name="Heave FL [mm]"),
-            go.Scatter(x=distance, y=travel_filtered[1], name="Heave FR [mm]"),
-            go.Scatter(x=distance, y=travel_filtered[2], name="Heave RL [mm]"),
-            go.Scatter(x=distance, y=travel_filtered[3], name="Heave RR [mm]"),
-        ]).update_layout(title="Heave R", xaxis_title="Distance [m]", yaxis_title="Heave R [mm]")))
-        # Heave (filtrado)
+            go.Scatter(x=distance, y=rh[0], name="Ride Height FL [mm]"),
+            go.Scatter(x=distance, y=rh[1], name="Ride Height FR [mm]"),
+            go.Scatter(x=distance, y=rh[2], name="Ride Height RL [mm]"),
+            go.Scatter(x=distance, y=rh[3], name="Ride Height RR [mm]"),
+        ]).update_layout(
+            title="RH [mm]", xaxis_title="Distance [m]", yaxis_title="RH [mm]"
+        )))
         graphs.append(dcc.Graph(figure=go.Figure([
-            go.Scatter(x=distance, y=heave_filtered , name="Heave [mm]")
-        ]).update_layout(title="Heave Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Heave [mm]")))
+            go.Scatter(x=distance, y=heave_ax_f, name="Heave Front [mm]"),
+            go.Scatter(x=distance, y=heave_ax_r, name="Heave Rear [mm]")
+        ]).update_layout(
+            title="Heave per Axle (ΔRH) [mm]",
+            xaxis_title="Distance [m]",
+            yaxis_title="Heave [mm]"
+        )))
 
         # Pitch (filtrado)
         graphs.append(dcc.Graph(figure=go.Figure([
@@ -1019,6 +1027,8 @@ def export_full_report(setups, export_path="export_full_report.html"):
 
         # === 3) Estados del solver ==================================================
         heave      = sol.y[0]                 # m
+        heave_front = post['heave_front']*1000
+        heave_rear  = post['heave_rear']*1000
         heave_rate = sol.y[1]
         pitch      = sol.y[2]                 # rad
         pitch_rate = sol.y[3]
@@ -1050,8 +1060,8 @@ def export_full_report(setups, export_path="export_full_report.html"):
         FzAeroR = post.get('Fz_aero_rear',  np.zeros_like(t))
         
         # heave por eje ya viene en mm en post:
-        RH_F_mm = post.get('f_rh', np.zeros_like(t))     # mm
-        RH_R_mm = post.get('r_rh',  np.zeros_like(t))     # mm
+        RH_F_mm = np.mean(post['RH'][0:2], axis=0) * 1000  # Front axle
+        RH_R_mm = np.mean(post['RH'][2:4], axis=0) * 1000  # Rear  axle
 
         # Máscaras grip
         gl_lat   = post.get('grip_limited_lateral_mask', np.zeros_like(t, dtype=bool))
@@ -1074,6 +1084,8 @@ def export_full_report(setups, export_path="export_full_report.html"):
             # ----- Estados chasis -----
             "heave_mm": heave*1000,
             "heave_rate_mps": heave_rate,
+            "heave_front_mm": heave_front,
+            "heave_rear_mm": heave_rear,
             "pitch_rad": pitch, "pitch_deg": np.degrees(pitch),
             "pitch_rate_rps": pitch_rate,
             "roll_rad": roll, "roll_deg": np.degrees(roll),
