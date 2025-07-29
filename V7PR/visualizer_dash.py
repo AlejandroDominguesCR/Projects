@@ -219,30 +219,56 @@ def launch_dash_kpis(kpi_data, setup_names):
     kpi_labels = ['FL', 'FR', 'RL', 'RR']
     kpi_labels_axes = ['Front', 'Rear']
 
-    def kpi_bar(title, unit, values_list):
+    def kpi_point_with_var(title, unit,
+                           mean_values_list,
+                           var_values_list):
         fig = go.Figure()
-        for values, name in zip(values_list, setup_names):
-            fig.add_trace(go.Bar(name=name, x=kpi_labels, y=values))
+        for mean_vals, var_vals, name in zip(mean_values_list,
+                                             var_values_list,
+                                             setup_names):
+            fig.add_trace(go.Scatter(
+                x=kpi_labels,
+                y=mean_vals,
+                mode='markers',
+                name=name,
+                marker=dict(size=10, symbol='circle'),
+                error_y=dict(type='data', array=var_vals,
+                             visible=True, thickness=1.5, width=3)
+            ))
         fig.update_layout(
             title=title,
             yaxis_title=unit,
-            barmode='group'
+            xaxis_title="Wheel",
+            yaxis=dict(zeroline=False, gridcolor='lightgrey'),
+            legend_title="Setup"
         )
         return dcc.Graph(figure=fig)
 
     # --- DEFINICIÓN CENTRALIZADA DE LOS KPIs --- 
     kpi_definitions = [
-        ("Wheel Load Max [Kg]", "Kg", "wheel_load_max", 1),
+        (
+            "Wheel Load Max [Kg]",
+            "Kg",
+            "wheel_load_max",
+            "wheel_load_std",
+            1,
+        ),
     ]
 
     # --- ARRANCAR LAYOUT CON UN TÍTULO PRINCIPAL ---
     layout = [html.H1("Comparativa de KPIs entre Setups")]
 
-    # ── Gráficas de barras genéricas (Tire Load Grip-Limited Max/Min) ──
-    for title, unit, key, factor in kpi_definitions:
+    # ── KPIs por rueda (puntos con barra de desviación) ──
+    for title, unit, key_mean, key_std, factor in kpi_definitions:
         try:
-            values_list = [k[key] * factor for k in kpi_data]
-            layout.append(kpi_bar(title, unit, values_list))
+            mean_values_list = [k[key_mean] * factor for k in kpi_data]
+            try:
+                std_values_list = [k[key_std] * factor for k in kpi_data]
+            except KeyError:
+                std_values_list = [np.std(vals) * np.ones_like(vals)
+                                   for vals in mean_values_list]
+            layout.append(kpi_point_with_var(title, unit,
+                                             mean_values_list, std_values_list))
         except KeyError:
             continue
 
@@ -670,6 +696,33 @@ def get_kpi_figures(setups, save_dir=None):
     setup_names = [os.path.splitext(os.path.basename(p))[0] for _, _, p, _ in setups]
     kpi_labels  = ['FL', 'FR', 'RL', 'RR']
 
+    def kpi_point_with_var(title, unit,
+                           mean_values_list,
+                           var_values_list):
+        fig = go.Figure()
+        for mean_vals, var_vals, name in zip(mean_values_list,
+                                             var_values_list,
+                                             setup_names):
+            fig.add_trace(go.Scatter(
+                x=kpi_labels,
+                y=mean_vals,
+                mode='markers',
+                name=name,
+                marker=dict(size=10, symbol='circle'),
+                error_y=dict(type='data', array=var_vals,
+                             visible=True, thickness=1.5, width=3)
+            ))
+        fig.update_layout(
+            title=title,
+            yaxis_title=unit,
+            xaxis_title="Wheel",
+            yaxis=dict(zeroline=False, gridcolor='lightgrey'),
+            legend_title="Setup",
+            width=NEW_WIDTH,
+            height=NEW_HEIGHT,
+        )
+        return fig
+
     figures = []
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
@@ -677,22 +730,33 @@ def get_kpi_figures(setups, save_dir=None):
     NEW_WIDTH  = int(1122 * 1.5)  # ≈ 1346
     NEW_HEIGHT = int(529  * 1.5)  # ≈ 634
 
-    # === 1) Barras de KPIs centrales (Grip-Limited) ===
+    # === 1) KPIs centrales por rueda ===
     kpi_definitions = [
-        ("Wheel Load Max [N]", "N", "wheel_load_max", 1),
-        ("Wheel Load Min [N]", "N", "wheel_load_min", 1),
+        (
+            "Wheel Load Max [N]",
+            "N",
+            "wheel_load_max",
+            "wheel_load_std",
+            1,
+        ),
+        (
+            "Wheel Load Min [N]",
+            "N",
+            "wheel_load_min",
+            "wheel_load_std",
+            1,
+        ),
     ]
-    for title, unit, key, factor in kpi_definitions:
+    for title, unit, key_mean, key_std, factor in kpi_definitions:
         try:
-            # Cada post[key] debe ser un array de 4 valores [FL, FR, RL, RR]
-            values_list = [post[key] * factor for _, post, _, _ in setups]
-            fig = go.Figure()
-            for values, name in zip(values_list, setup_names):
-                fig.add_trace(go.Bar(name=name, x=kpi_labels, y=values))
-            fig.update_layout(
-                title=title, yaxis_title=unit, barmode='group',
-                width=NEW_WIDTH, height=NEW_HEIGHT
-            )
+            mean_values_list = [post[key_mean] * factor for _, post, _, _ in setups]
+            try:
+                std_values_list = [post[key_std] * factor for _, post, _, _ in setups]
+            except KeyError:
+                std_values_list = [np.std(vals) * np.ones_like(vals)
+                                   for vals in mean_values_list]
+            fig = kpi_point_with_var(title, unit,
+                                     mean_values_list, std_values_list)
             figures.append(fig)
         except KeyError:
             continue
