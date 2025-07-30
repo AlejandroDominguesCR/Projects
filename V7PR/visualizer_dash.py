@@ -323,18 +323,6 @@ def launch_dash_kpis(kpi_data, setup_names):
     except KeyError:
         pass
 
-    # ── 5) Ride Height RMS (FRH, RRH) en GLS [mm] (barras) ─────────────────────
-    try:
-        frh_vals = [k['frh_rms'] * 1000 for k in kpi_data]
-        rrh_vals = [k['rrh_rms'] * 1000 for k in kpi_data]
-        fig_rh_bar = go.Figure(data=[
-            go.Bar(name=name, x=["Front", "Rear"], y=[float(frh), float(rrh)])
-            for name, frh, rrh in zip(setup_names, frh_vals, rrh_vals)
-        ])
-        fig_rh_bar.update_layout(title="Ride Height RMS en GLS [mm]")
-        layout.append(dcc.Graph(figure=fig_rh_bar))
-    except KeyError:
-        pass
 
     # ── 6) FRH RMS vs Contact Patch Load RMS (dispersograma etiquetado) ────────
     try:
@@ -418,8 +406,8 @@ def launch_dash_kpis(kpi_data, setup_names):
         try:
             vals_gls   = np.array([k[key_rms]       for k in kpi_data]) * 1e3
             vals_ngls  = np.array([k[key_ngls]      for k in kpi_data]) * 1e3
-            std_gls    = np.array([k.get(key_rms+'_std', 0)   for k in kpi_data]) * 1e3
-            std_ngls   = np.array([k.get(key_ngls+'_std', 0)  for k in kpi_data]) * 1e3
+            std_gls    = np.array([k[key_rms + '_std']      for k in kpi_data]) * 1e3
+            std_ngls   = np.array([k[key_ngls + '_std']     for k in kpi_data]) * 1e3
 
             fig_cmp = go.Figure()
             x_base  = np.arange(len(setup_names))
@@ -453,8 +441,8 @@ def launch_dash_kpis(kpi_data, setup_names):
         try:
             brake_vals = np.array([k[key_brake] for k in kpi_data])
             trac_vals  = np.array([k[key_trac]  for k in kpi_data])
-            std_brake  = np.array([k.get(key_brake+'_std', 0) for k in kpi_data])
-            std_trac   = np.array([k.get(key_trac+'_std', 0)  for k in kpi_data])
+            std_brake  = np.array([k[key_brake + '_std'] for k in kpi_data])
+            std_trac   = np.array([k[key_trac + '_std']  for k in kpi_data])
 
             fig_bt = go.Figure()
             x_base = np.arange(len(setup_names))
@@ -581,7 +569,6 @@ def launch_dash_kpis(kpi_data, setup_names):
     except Exception as e:
         print(f"[WARNING] Error al generar el PSD de pitch por eje: {e}")
 
-
     # 14a) Magnitud (dB) con smoothing
     fig_psd_load_mag = go.Figure()
     for k, name in zip(kpi_data, setup_names):
@@ -614,39 +601,7 @@ def launch_dash_kpis(kpi_data, setup_names):
     )
     layout.append(dcc.Graph(figure=fig_psd_load_mag))
 
-    # 14b) Fase (grados) con smoothing
-    fig_psd_load_phase = go.Figure()
-    for k, name in zip(kpi_data, setup_names):
-        if ('f_psd_load' in k and 'psd_load_phase_front' in k and 'psd_load_phase_rear' in k):
-            f_load   = np.array(k['f_psd_load'])
-            # Suavizado de la fase
-            phase_f_raw = np.array(k['psd_load_phase_front'])
-            phase_r_raw = np.array(k['psd_load_phase_rear'])
-            phase_f = smooth_signal(phase_f_raw, window=51, polyorder=3)
-            phase_r = smooth_signal(phase_r_raw, window=51, polyorder=3)
-
-            fig_psd_load_phase.add_trace(go.Scatter(
-                x=f_load,
-                y=phase_f,
-                mode='lines',
-                name=f"{name} – Phase Front [°] (suavizado)",
-            ))
-            fig_psd_load_phase.add_trace(go.Scatter(
-                x=f_load,
-                y=phase_r,
-                mode='lines',
-                name=f"{name} – Phase Rear  [°] (suavizado)",
-            ))
-
-    fig_psd_load_phase.update_layout(
-        title="PSD de Carga – Fase (Front vs Rear, Suavizado)",
-        xaxis=dict(title="Frecuencia [Hz]", type="log"),
-        yaxis=dict(title="Fase [°]"),
-        legend=dict(x=0.01, y=0.99)
-    )
-    layout.append(dcc.Graph(figure=fig_psd_load_phase))
-
-    # ────────────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────────────
     app_kpi.layout = html.Div(layout)
     app_kpi.run(port=8051, debug=False)
 
@@ -755,13 +710,7 @@ def get_kpi_figures(setups, save_dir=None):
             "wheel_load_std",
             1,
         ),
-        (
-            "Wheel Load Min [N]",
-            "N",
-            "wheel_load_min",
-            "wheel_load_std",
-            1,
-        ),
+
     ]
     for title, unit, key_mean, key_std, factor in kpi_definitions:
         try:
@@ -840,35 +789,6 @@ def get_kpi_figures(setups, save_dir=None):
             width=NEW_WIDTH, height=NEW_HEIGHT
         )
         figures.append(fig_pitch_table)
-    except KeyError:
-        pass
-
-    # === 5) FRH vs RRH RMS (por setup) ===
-    try:
-        frh_vals = [float(p['frh_rms']) * 1000 for _, p, _, _ in setups]
-        rrh_vals = [float(p['rrh_rms']) * 1000 for _, p, _, _ in setups]
-        frh_std_vals = [float(p.get('frh_rms_std', 0)) * 1000 for _, p, _, _ in setups]
-        rrh_std_vals = [float(p.get('rrh_rms_std', 0)) * 1000 for _, p, _, _ in setups]
-        fig_frh_rrh = go.Figure()
-        for name, frh, rrh, frh_std, rrh_std in zip(setup_names, frh_vals, rrh_vals, frh_std_vals, rrh_std_vals):
-            fig_frh_rrh.add_trace(go.Scatter(
-                name=name,
-                x=["Front", "Rear"],
-                y=[frh, rrh],
-                mode='markers',
-                marker=dict(size=12, symbol='circle'),
-                error_y=dict(
-                    type='data',
-                    array=[frh_std, rrh_std],
-                    visible=any(val != 0 for val in [frh_std, rrh_std])
-                )
-            ))
-        fig_frh_rrh.update_layout(
-            title="Ride Height RMS en GLS [mm]",
-            xaxis_title="Axle",
-            width=NEW_WIDTH, height=NEW_HEIGHT
-        )
-        figures.append(fig_frh_rrh)
     except KeyError:
         pass
 

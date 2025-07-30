@@ -912,33 +912,42 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     # ──────────────────────────────────────────────────────────────────────────────
     # 6) Condiciones Grip-Limited (lateral, frenada y tracción)
     # ──────────────────────────────────────────────────────────────────────────────
-    throttle_signal = np.interp(t, t_vec, throttle)
-    brake_signal    = np.interp(t, t_vec, brake)
-    ax_signal = np.interp(t, t_vec, ax)    
-    ay_signal = np.interp(t, t_vec, ay)   
-    g              = 9.81          # gravedad para pasar a “g”  
-    threshold       = 0.05
-    ax_long_limit  = 0.20 * g      # ±0.20 g ⇒ casi sin long. (lateral puro)
-    ay_lat_limit   = 0.25 * g      # >0.25 g ⇒ curva con grip mecánico
+    throttle_signal = np.interp(t, t_vec, throttle)   # rPedal  (0‑100 %)
+    brake_signal    = np.interp(t, t_vec, brake)      # pBrake  (0‑100 %)
+    ax_signal       = np.interp(t, t_vec, ax)         # m/s²  (+ acel / – frena)
+    ay_signal       = np.interp(t, t_vec, ay)         # m/s²  (+ izq  / – dcha)
 
-    # 1) Grip‑limited LATERAL  → sin pedales, lat >> long
-    grip_lateral_mask = (
-        (throttle_signal < threshold) & (brake_signal    < threshold) &
-        (np.abs(ax_signal) <  ax_long_limit) & (np.abs(ay_signal) >  ay_lat_limit)
+    g = 9.81
+
+    # — umbrales algo más laxos —
+    thr_throttle   = 10.0          # gas < 10 %   (antes 5 %)
+    thr_brake      = 10.0          # freno < 10 % (antes 5 %)
+    ax_long_limit  = 2.0           # |Ax| < 2.0 m/s²  ≈ 0.20 g   (antes 1.5)
+    ay_lat_limit   = 0.9           # |Ay| > 0.9 m/s²  ≈ 0.09 g   (antes 1.2)
+    lat_over_long  = 1.1           # Ay al menos 10 % mayor que Ax (antes 20 %)
+
+    # 1) Grip‑limited LATERAL
+    mask_no_pedals = (throttle_signal < thr_throttle) & (brake_signal < thr_brake)
+    mask_lat       = (
+        (np.abs(ax_signal) < ax_long_limit) &
+        (np.abs(ay_signal) > ay_lat_limit)  &
+        (np.abs(ay_signal) > lat_over_long * np.abs(ax_signal))
     )
+    grip_lateral_mask = mask_no_pedals & mask_lat
 
-    # 2) Grip‑limited FRENO    → pedal de freno > threshold y decelerando
+    # 2) Grip‑limited FRENO
     grip_brake_mask = (
-        (brake_signal    > threshold) & (np.abs(ax_signal) > ax_long_limit) &
-        (ax_signal < 0)       # deceleración
+        (brake_signal > 30.0) &
+        (ax_signal    < -ax_long_limit)    # decel > 2.0 m/s²
     )
 
-    # 3) Grip‑limited TRACCIÓN → pedal gas > threshold y aceleración
+    # 3) Grip‑limited TRACCIÓN
     grip_traction_mask = (
-        (throttle_signal > threshold) & (np.abs(ax_signal) > ax_long_limit) &
-        (ax_signal > 0)       # aceleración
+        (throttle_signal > 30.0) &
+        (ax_signal       >  ax_long_limit) # acel  > 2.0 m/s²
     )
-    grip_limited_pct     = 100 * np.sum(grip_lateral_mask) / N
+
+    grip_limited_pct = 100.0 * np.sum(grip_lateral_mask) / N
 
     # Fuerza tire grip-limited (max y min) en condición lateral
     if np.any(grip_lateral_mask):
@@ -954,9 +963,13 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         rl_brake = np.mean(f_tire[2:4, grip_brake_mask], axis=0)
         front_load_rms_brake = np.sqrt(np.mean(fl_brake**2))
         rear_load_rms_brake  = np.sqrt(np.mean(rl_brake**2))
+        front_load_rms_brake_std = np.std(fl_brake)
+        rear_load_rms_brake_std  = np.std(rl_brake)
     else:
         front_load_rms_brake = 0.0
         rear_load_rms_brake  = 0.0
+        front_load_rms_brake_std = 0.0
+        rear_load_rms_brake_std  = 0.0
 
     # ── Grip-Limited en tracción ──
     if np.any(grip_traction_mask):
@@ -964,9 +977,13 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         rl_trac = np.mean(f_tire[2:4, grip_traction_mask], axis=0)
         front_load_rms_traction = np.sqrt(np.mean(fl_trac**2))
         rear_load_rms_traction  = np.sqrt(np.mean(rl_trac**2))
+        front_load_rms_traction_std = np.std(fl_trac)
+        rear_load_rms_traction_std  = np.std(rl_trac)
     else:
         front_load_rms_traction = 0.0
         rear_load_rms_traction  = 0.0
+        front_load_rms_traction_std = 0.0
+        rear_load_rms_traction_std  = 0.0
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 7) Road-noise: wheel vertical-speed RMS [mm/s] para cada rueda
@@ -979,10 +996,10 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     front_noise_vals = 0.5 * (rms_per_wheel[0] + rms_per_wheel[1])
     rear_noise_vals  = 0.5 * (rms_per_wheel[2] + rms_per_wheel[3])
 
-    frh_std = (np.std(heave_front[grip_lateral_mask])
-           if np.any(grip_lateral_mask) else 0.0)    # escalar
-    rrh_std = (np.std(heave_rear [grip_lateral_mask])
-            if np.any(grip_lateral_mask) else 0.0)    # escalar
+    frh_rms_std = (np.std(heave_front[grip_lateral_mask])
+                   if np.any(grip_lateral_mask) else 0.0)
+    rrh_rms_std = (np.std(heave_rear[grip_lateral_mask])
+                   if np.any(grip_lateral_mask) else 0.0)
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 8) RMS en Grip-Limited (heave y carga) + no-grip
@@ -1011,13 +1028,16 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     if np.any(non_grip_mask):
         frh_rms_nongrip = np.sqrt(np.mean(heave_front[non_grip_mask]**2))
         rrh_rms_nongrip = np.sqrt(np.mean(heave_rear[non_grip_mask]**2))
-
         fl_ng = np.mean(f_tire[0:2, non_grip_mask], axis=0)
         front_load_rms_nongrip = np.sqrt(np.mean(fl_ng**2))
+        frh_rms_nongrip_std = np.std(heave_front[non_grip_mask])
+        rrh_rms_nongrip_std = np.std(heave_rear[non_grip_mask])
     else:
         frh_rms_nongrip = 0.0
         rrh_rms_nongrip = 0.0
         front_load_rms_nongrip = 0.0
+        frh_rms_nongrip_std = 0.0
+        rrh_rms_nongrip_std = 0.0
 
     # RMS de desplazamiento de pista (zt) en mask grip-lateral y no-grip
     if np.any(grip_lateral_mask):
@@ -1141,16 +1161,22 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         'rear_load_rms_brake':        rear_load_rms_brake,    # scalar
         'front_load_rms_traction':    front_load_rms_traction,# scalar
         'rear_load_rms_traction':     rear_load_rms_traction, # scalar
+        'front_load_rms_brake_std':    front_load_rms_brake_std,
+        'rear_load_rms_brake_std':     rear_load_rms_brake_std,
+        'front_load_rms_traction_std': front_load_rms_traction_std,
+        'rear_load_rms_traction_std':  rear_load_rms_traction_std,
 
         # --- RMS de heave / carga en grip-limited vs no-grip ---
         'frh_rms':            frh_rms,                # heave front RMS [m]
         'rrh_rms':            rrh_rms,                # heave rear RMS [m]
-        'frh_rms_std':         frh_std,
-        'rrh_rms_std':         rrh_std,
+        'frh_rms_std':         frh_rms_std,
+        'rrh_rms_std':         rrh_rms_std,
         'front_load_rms':     front_load_rms,         # tire load front RMS [N]
         'rear_load_rms':      rear_load_rms,          # tire load rear RMS [N]
         'frh_rms_nongrip':    frh_rms_nongrip,        # heave front RMS no-grip [m]
         'rrh_rms_nongrip':    rrh_rms_nongrip,        # heave rear RMS no-grip [m]
+        'frh_rms_nongrip_std': frh_rms_nongrip_std,
+        'rrh_rms_nongrip_std': rrh_rms_nongrip_std,
         'front_load_rms_nongrip': front_load_rms_nongrip,
         'ztrack_rms_grip':    ztrack_rms_grip,        # (scalar)
         'ztrack_rms_nongrip': ztrack_rms_nongrip,     # (scalar)

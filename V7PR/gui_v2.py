@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import Qt,QUrl
 from PyQt5.QtGui import QPalette, QColor, QIcon, QDoubleValidator
+from scipy.interpolate import interp1d
 
 
 def set_dark_theme(app):
@@ -26,6 +27,29 @@ def set_dark_theme(app):
     palette.setColor(QPalette.Highlight, QColor(38, 79, 120))
     palette.setColor(QPalette.HighlightedText, Qt.white)
     app.setPalette(palette)
+
+def make_drs_func(t, raw, *, open_pct=95, close_pct=5, tau=0.05):
+    """
+    Convierte el canal bruto DRS_Position (%‑PWM) en una fracción 0‑1
+    con histéresis y retardo 1er‑orden (tau) para evitar rebotes.
+    • open_pct  – umbral “flap completamente abierto”
+    • close_pct – umbral “flap completamente cerrado”
+    """
+    frac  = np.zeros_like(raw, dtype=float)
+    state = 0.0                     # valor filtrado anterior
+    for i, x in enumerate(raw):
+        # 1) objetivo ideal según histéresis
+        if   x >= open_pct:         target = 1.0          # abierto
+        elif x <= close_pct:        target = 0.0          # cerrado
+        else:                       target = (x-close_pct)/(open_pct-close_pct)
+        # 2) 1er‑orden: d(state)/dt = (target‑state)/tau
+        if i:                       state += (target-state)*(t[i]-t[i-1])/tau
+        else:                       state  = target
+        frac[i] = state
+    # 3) devuelve un interpolador tiempo‑continuo
+    return interp1d(t, frac, kind='linear',
+                    bounds_error=False,
+                    fill_value=(frac[0], frac[-1]))
 
 def parse_json_setup(json_data):
     import numpy as np
@@ -61,7 +85,7 @@ def parse_json_setup(json_data):
 
     # Neumático (ejemplo)
     kt_f = 373100 #276500
-    kt_r = 397900 #295000 #282100, 269000, 397900
+    kt_r = 397900 #397900 #295000 #282100, 269000, 
 
     hRideF = json_data["config"]["chassis"].get("hRideFSetup")
     hRideR = json_data["config"]["chassis"].get("hRideRSetup")
@@ -70,15 +94,15 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    #stroke_FL = 0.029 #
-    #stroke_FR = 0.029 #
-    #stroke_RL = 0.059 #
-    #stroke_RR = 0.059 #
+    stroke_FL = 0.029 #
+    stroke_FR = 0.029 #
+    stroke_RL = 0.059 #
+    stroke_RR = 0.059 #
 
-    stroke_FL = 0.01965
-    stroke_FR = 0.01965
-    stroke_RL = 0.0305
-    stroke_RR = 0.0305
+    #stroke_FL = 0.01965
+    #stroke_FR = 0.01965
+    #stroke_RL = 0.0305
+    #stroke_RR = 0.0305
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -165,7 +189,7 @@ def parse_json_setup(json_data):
     })
 
 
-    mr_f_wd = 1.7#1.491587949 
+    mr_f_wd = 2.1 #1.491587949 
     mr_r_wd = 1.32579 
 
     mr_f_rd = (1.491587949 * (np.pi / 180.0))/1000  #mr_wd * mr_rd para sacar el mr_rw, es decir, el paso directo
@@ -439,8 +463,13 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
     ay      = track_data['ay']
     rpedal  = track_data['rpedal']
     pbrake  = track_data['brake']
+    drs_signal = track_data['drs_signal'] 
 
-    sol = run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, simple_params)
+    drs_frac_func = make_drs_func(t_vec, drs_signal)
+
+    sol = run_vehicle_model_simple(
+        t_vec, z_tracks, vx, ax, ay, rpedal, pbrake,
+        simple_params, drs_func=drs_frac_func)
     simple_params['track_name'] = Path(track_path).stem
     post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx, ax, ay)
 
@@ -468,8 +497,12 @@ def simulate_dict_combo(setup_data_raw, track_path, setup_label, kt_overrides=No
     ay      = track_data['ay']
     rpedal  = track_data['rpedal']
     pbrake  = track_data['brake']
+    drs_signal = track_data['drs_signal'] 
 
-    sol = run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, simple_params)
+    drs_frac_func = make_drs_func(t_vec, drs_signal)
+    sol = run_vehicle_model_simple(
+        t_vec, z_tracks, vx, ax, ay, rpedal, pbrake,
+        simple_params, drs_func=drs_frac_func)
     simple_params['track_name'] = Path(track_path).stem
     post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx, ax, ay)
 
@@ -479,7 +512,7 @@ def load_track_channels(track_path):
     import pandas as pd
 
     df = pd.read_csv(track_path)
-    columns_required = ['Times', 'Car_Speed', 'Ax', 'Ay', 'rPedal', 'pBrake', 'Zp_FL', 'Zp_FR', 'Zp_RL', 'Zp_RR']
+    columns_required = ['Times', 'Car_Speed', 'Ax', 'Ay', 'rPedal', 'pBrake', 'Zp_FL', 'Zp_FR', 'Zp_RL', 'Zp_RR', 'DRS_Position']
     missing = [col for col in columns_required if col not in df.columns]
     if missing:
         raise ValueError(f"Faltan columnas en el track: {', '.join(missing)}")
@@ -496,7 +529,8 @@ def load_track_channels(track_path):
             df['Zp_FR'].values,
             df['Zp_RL'].values,
             df['Zp_RR'].values
-        ]
+        ],
+        'drs_signal': df['DRS_Position'].values 
     }
 
     # Conversión vienen en mm
@@ -1222,16 +1256,12 @@ class SevenPostRigGUI(QWidget):
                     # === LOG DE RESULTADO ===
                     print(f"\n[DEBUG] Simulación: {name}")
                     print(f"  Tiempo final: {sol.t[-1]:.3f} s, pasos: {len(sol.t)}")
-                    print(f"  Travel FL final: {post['travel'][0][-1]*1000:.2f} mm")
-                    print(f"  Travel RL final: {post['travel'][2][-1]*1000:.2f} mm")
+                    print(f"  Travel FL final: {post['travel_rel'][0][-1]*1000:.2f} mm")
+                    print(f"  Travel RL final: {post['travel_rel'][2][-1]*1000:.2f} mm")
                     print(f"  Fuerza muelle FL (inicio): {post['f_spring'][0][:5]}")
                     print(f"  Fuerza neumático FL (inicio): {post['f_tire'][0][:5]}")
                     print(f"  Fuerza amortiguador FL (inicio): {post['f_damper'][0][:5]}")
-                    print("[DEBUG] Topes físicos por esquina (topout / bottomout):")
-                    for wheel in ["FL", "FR", "RL", "RR"]:
-                        zt = post[f'z_topout_{wheel}']   # valor escalar [m]
-                        zb = post[f'z_bottomout_{wheel}']
-                        print(f"  {wheel}: {zt*1000:.2f} mm / {zb*1000:.2f} mm")
+
                     # ───────────────────────────────────────────────────────────
 
                     for eje, idxs in zip(['Front', 'Rear'], [(0,1),(2,3)]):
