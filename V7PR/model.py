@@ -16,7 +16,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     # Estados: h, hdot, phi, phi_dot, theta, theta_dot,
     # zFR, zFRdot, zFL, zFLdot, zRL, zRLdot, zRR, zRRdot = z
     h, hdot, phi, phi_dot, theta, theta_dot,zFR, zFRdot, zFL, zFLdot, zRL, zRLdot, zRR, zRRdot = z
-
+    drs = params['drs_func'](t) if params.get('drs_func') else 0.0
     # Interpolación de inputs de pista
     ztrack_FL, ztrack_FR, ztrack_RL, ztrack_RR = [f(t) for f in ztrack_funcs]
 
@@ -90,7 +90,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
 
         # 4) resortes en serie + preload
         k_total = 1.0/(1.0/k_spring + 1.0/k_inst)
-        f_spring = (k_total * x_clipped) + spring_preload
+        f_spring = k_total * x_clipped + spring_preload
 
         # 5) amortiguador (ya escala internamente con MR)
         rel_vel  = z_w_dot - (phi_dot_off + theta_dot_off + hdot)
@@ -177,7 +177,8 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         vx=params.get('vx'),
         hRideF=dyn_hF,
         hRideR=dyn_hR,
-        aero_poly=params.get('aero_polynomials', {})
+        aero_poly=params.get('aero_polynomials', {}),
+        drs_frac=drs
     )
     F_FL += 0.5 * Fz_aero_front
     F_FR += 0.5 * Fz_aero_front
@@ -244,7 +245,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         zRRdot,   zRR_ddot
     ]
 
-def compute_aero_forces(vx, hRideF, hRideR, aero_poly, rho_air=1.225, area_ref=1):
+def compute_aero_forces(vx, hRideF, hRideR, aero_poly, drs_frac=0.0, rho_air=1.225, area_ref=1):
     """
     Calcula las fuerzas aerodinámicas verticales y de arrastre (drag).
     """
@@ -253,7 +254,7 @@ def compute_aero_forces(vx, hRideF, hRideR, aero_poly, rho_air=1.225, area_ref=1
     aFlapR = fa.get('aFlapR', 0.0)
 
     def evaluate_poly(poly_dict, hF, hR, aFlapF, aFlapR):
-        variables = {
+        vars = {
             "Const":                         1.0,
             "hRideF":                        hF,
             "hRideR":                        hR,
@@ -273,26 +274,24 @@ def compute_aero_forces(vx, hRideF, hRideR, aero_poly, rho_air=1.225, area_ref=1
             "aFlapR*aFlapR":                 aFlapR**2,
         }
         # suma coef * valor_monomio para cada término del polinomio
-        return sum(coef * variables.get(expr, 0.0)
-                for expr, coef in poly_dict.items())
+        return sum(k*vars.get(expr,0.0) for expr,k in poly_dict.items())
 
 
-    # aplicamos factor de usuario y offset
-    # factores y offsets de usuario
-    fF   = aero_poly.get('rCLiftBodyFFactor', 1.0)
-    fR   = aero_poly.get('rCLiftBodyRFactor', 1.0)
-    offF = aero_poly.get('coefficientOffsets', {}).get('CLiftBodyFUserOffset', 0.0)
-    offR = aero_poly.get('coefficientOffsets', {}).get('CLiftBodyRUserOffset', 0.0)
-    fD   = aero_poly.get('rCDragBodyFactor', 1.0)
+    # --- mapa base (flap cerrado) ---
+    Clf0 = evaluate_poly(aero_poly['CLiftBodyF'], hRideF, hRideR, aFlapF, aFlapR)
+    Clr0 = evaluate_poly(aero_poly['CLiftBodyR'], hRideF, hRideR, aFlapF, aFlapR)
+    Cd0  = evaluate_poly(aero_poly['CDragBody' ], hRideF, hRideR, aFlapF, aFlapR)
 
-    # evaluamos los polinomios según los dicts generados en parse_json_setup
-    Clf = evaluate_poly(aero_poly.get('CLiftBodyF', {}),
-                        hRideF, hRideR, aFlapF, aFlapR) * fF + offF
-    Clr = evaluate_poly(aero_poly.get('CLiftBodyR', {}),
-                        hRideF, hRideR, aFlapF, aFlapR) * fR + offR
-    Cd  = evaluate_poly(aero_poly.get('CDragBody',  {}),
-                        hRideF, hRideR, aFlapF, aFlapR) * fD
+    # --- ∆ mapa DRS --------------
+    dClf = drs_frac * evaluate_poly(aero_poly['DRS_CLiftF'], hRideF, hRideR, aFlapF, aFlapR)
+    dClr = drs_frac * evaluate_poly(aero_poly['DRS_CLiftR'], hRideF, hRideR, aFlapF, aFlapR)
+    dCd  = drs_frac * evaluate_poly(aero_poly['DRS_CDrag' ], hRideF, hRideR, aFlapF, aFlapR)
 
+    Clf = (Clf0 + dClf) * aero_poly['rCLiftBodyFFactor'] + \
+          aero_poly['coefficientOffsets'].get('CLiftBodyFUserOffset',0)
+    Clr = (Clr0 + dClr) * aero_poly['rCLiftBodyRFactor'] + \
+          aero_poly['coefficientOffsets'].get('CLiftBodyRUserOffset',0)
+    Cd  = (Cd0  + dCd ) * aero_poly['rCDragBodyFactor']
     # --- Fuerzas ---
     q = 0.5 * rho_air * vx**2  # presión dinámica
 
@@ -492,9 +491,9 @@ def compute_static_equilibrium(params, vx=0):
 
     return sol
 
-def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, throttle, brake, params):
+def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, params, drs_func=None):
     ztrack_funcs = [interp1d(t_vec, z_tracks[i], bounds_error=False, fill_value="extrapolate") for i in range(4)]
-
+    params['drs_func'] = drs_func 
     # --- Parámetros ---
     lf = params['lf']
     lr = params['lr']
@@ -609,6 +608,8 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     zu_idx    = [8,  6, 10, 12]
     zudot_idx = [9,  7, 11, 13]
 
+
+
     # ──────────────────────────────────────────────────────────────────────────────
     # 2) Extraer estados principales de sol.y
     # ──────────────────────────────────────────────────────────────────────────────
@@ -665,16 +666,20 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     x_spring_front = x_spring[0:2,:]
     x_spring_rear  = x_spring[2:4,:]
 
+    drs_vec = params['drs_func'](t) if params.get('drs_func') else np.zeros_like(t)
+
     ae_front = np.zeros_like(h)
     ae_rear  = np.zeros_like(h)
-    for i, (v_i, h_i, phi_i) in enumerate(zip(vx, h, phi)):
+
+    for i, (v_i, h_i, phi_i, drs_i) in enumerate(zip(vx, h, phi, drs_vec)):
         dyn_hF = h_i - lf * phi_i + params.get('hRideF', 0.0)
         dyn_hR = h_i + lr * phi_i + params.get('hRideR', 0.0)
         Ff, Fr, _ = compute_aero_forces(
             vx=v_i,
             hRideF=dyn_hF,
             hRideR=dyn_hR,
-            aero_poly=params.get('aero_polynomials', {})
+            aero_poly=params.get('aero_polynomials', {}),
+            drs_frac=float(drs_i)          # ← ahora es escalar
         )
         ae_front[i] = Ff
         ae_rear[i]  = Fr
@@ -746,7 +751,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     # 4) Fuerzas suspensión: muelle, bumpstop y damper
     # ──────────────────────────────────────────────────────────────────────────────
 
-    f_spring = -k_spring * (x_spring_raw) + preload   # signo y precarga
+    f_spring = k_spring * (x_spring_raw) + preload   # signo y precarga
 
     # --- bump-stop dinámico (sag-aware, coherente con solver) -------------------
     bump_funcs = [
@@ -769,7 +774,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
 
     # coordenada chasis → ride‑height (positivo = holgura)
     
-    RH = RH_setup - sag_wheel + travel_rel
+    RH = RH_setup - sag_wheel - travel_rel
 
     RH_front_static = params['hRideF']
     RH_rear_static  = params['hRideR']
@@ -882,12 +887,13 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     # (si quieres el par de balanceo por muelles, incluye también dF_el_f/r)
     f_dyn = dF_lat + dF_long              #  (+ dF_el si procede)
 
-        # 4d) Fuerza neta en rueda (nunca negativa)
+    # 4d) Fuerza neta en rueda (nunca negativa)
     wheel_load = (static - aero - f_arb + f_dyn) / 9.81
+    wheel_load_std = np.std(wheel_load, axis=1)          # (4,)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
     f_wheel = (static - aero - f_arb + f_dyn)    # (4, N)
-    #f_wheel[f_wheel < 0] = 0                  # clamp por si acaso
+    
 
     f_damp_FL, Pxx_damp_FL = welch(f_damper[0], fs=fs, nperseg=nperseg, noverlap=noverlap)
     f_damp_RL, Pxx_damp_RL = welch(f_damper[2], fs=fs, nperseg=nperseg, noverlap=noverlap)
@@ -908,11 +914,30 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     # ──────────────────────────────────────────────────────────────────────────────
     throttle_signal = np.interp(t, t_vec, throttle)
     brake_signal    = np.interp(t, t_vec, brake)
-    threshold       = 0.5
+    ax_signal = np.interp(t, t_vec, ax)    
+    ay_signal = np.interp(t, t_vec, ay)   
+    g              = 9.81          # gravedad para pasar a “g”  
+    threshold       = 0.05
+    ax_long_limit  = 0.20 * g      # ±0.20 g ⇒ casi sin long. (lateral puro)
+    ay_lat_limit   = 0.25 * g      # >0.25 g ⇒ curva con grip mecánico
 
-    grip_lateral_mask    = (throttle_signal < threshold) & (brake_signal < threshold)
-    grip_brake_mask      = (brake_signal > threshold)    & (throttle_signal < threshold)
-    grip_traction_mask   = (throttle_signal > threshold) & (brake_signal < threshold)
+    # 1) Grip‑limited LATERAL  → sin pedales, lat >> long
+    grip_lateral_mask = (
+        (throttle_signal < threshold) & (brake_signal    < threshold) &
+        (np.abs(ax_signal) <  ax_long_limit) & (np.abs(ay_signal) >  ay_lat_limit)
+    )
+
+    # 2) Grip‑limited FRENO    → pedal de freno > threshold y decelerando
+    grip_brake_mask = (
+        (brake_signal    > threshold) & (np.abs(ax_signal) > ax_long_limit) &
+        (ax_signal < 0)       # deceleración
+    )
+
+    # 3) Grip‑limited TRACCIÓN → pedal gas > threshold y aceleración
+    grip_traction_mask = (
+        (throttle_signal > threshold) & (np.abs(ax_signal) > ax_long_limit) &
+        (ax_signal > 0)       # aceleración
+    )
     grip_limited_pct     = 100 * np.sum(grip_lateral_mask) / N
 
     # Fuerza tire grip-limited (max y min) en condición lateral
@@ -953,6 +978,11 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     # Promedio por eje (front / rear)
     front_noise_vals = 0.5 * (rms_per_wheel[0] + rms_per_wheel[1])
     rear_noise_vals  = 0.5 * (rms_per_wheel[2] + rms_per_wheel[3])
+
+    frh_std = (np.std(heave_front[grip_lateral_mask])
+           if np.any(grip_lateral_mask) else 0.0)    # escalar
+    rrh_std = (np.std(heave_rear [grip_lateral_mask])
+            if np.any(grip_lateral_mask) else 0.0)    # escalar
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 8) RMS en Grip-Limited (heave y carga) + no-grip
@@ -1097,6 +1127,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         'wheel_load':  wheel_load, 
         'wheel_load_max':    wheel_load_max,        # (4,)
         'wheel_load_min':    wheel_load_min,        # (4,)
+        'wheel_load_std':      wheel_load_std,
         'f_wheel':      f_wheel,
 
         # --- Grip-limited (lateral, brake, traction) ---
@@ -1114,6 +1145,8 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         # --- RMS de heave / carga en grip-limited vs no-grip ---
         'frh_rms':            frh_rms,                # heave front RMS [m]
         'rrh_rms':            rrh_rms,                # heave rear RMS [m]
+        'frh_rms_std':         frh_std,
+        'rrh_rms_std':         rrh_std,
         'front_load_rms':     front_load_rms,         # tire load front RMS [N]
         'rear_load_rms':      rear_load_rms,          # tire load rear RMS [N]
         'frh_rms_nongrip':    frh_rms_nongrip,        # heave front RMS no-grip [m]
