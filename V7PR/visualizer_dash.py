@@ -1,16 +1,21 @@
-# visualizer_dash.py
 import plotly.graph_objects as go
 import dash
 from dash import dcc, html
 from threading import Thread
 import numpy as np
-import os 
+import os
 import pandas as pd
 from plotly.offline import plot
 from scipy.signal import savgol_filter
 from datetime import datetime
 import plotly.graph_objects as go
-from gui_v2 import load_track_channels  
+from gui_v2 import load_track_channels
+
+# ── Estilos reutilizables para dashboards y reportes ──────────────────────────
+GRID_STYLE = {"display": "flex", "flexWrap": "wrap", "gap": "12px"}
+CARD_STYLE = {"flex": "1 1 32%", "minWidth": "320px"}
+GRAPH_CFG = {"displayModeBar": False}
+STANDARD_HEIGHT = "320px"
 
 app = dash.Dash(__name__)
 app.layout = html.Div([html.H3("Resultados no cargados")])
@@ -53,43 +58,58 @@ def launch_dash(sol, post, setup_name="Setup"):
         damper_force_filtered = smooth_signal(post['f_damper'])
         arb_force_filtered = smooth_signal(post['f_arb'])
 
-        # Travel absoluto por rueda 
-        graphs.append(dcc.Graph(figure=go.Figure([
+        # Travel absoluto por rueda
+        fig = go.Figure([
             go.Scatter(x=distance, y=spring_travel[0], name="Spring Travel FL"),
             go.Scatter(x=distance, y=spring_travel[1], name="Spring Travel FR"),
             go.Scatter(x=distance, y=spring_travel[2], name="Spring Travel RL"),
             go.Scatter(x=distance, y=spring_travel[3], name="Spring Travel RR"),
-        ]).update_layout(
-            title="Travel [mm]", xaxis_title="Distance [m]", yaxis_title="Travel [mm]"
-        )))
+        ])
+        fig.update_layout(title="Travel [mm]", xaxis_title="Distance [m]", yaxis_title="Travel [mm]")
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
+        
         # travels (filtrado)
-        graphs.append(dcc.Graph(figure=go.Figure([
+        fig = go.Figure([
             go.Scatter(x=distance, y=rh[0], name="Ride Height FL [mm]"),
             go.Scatter(x=distance, y=rh[1], name="Ride Height FR [mm]"),
             go.Scatter(x=distance, y=rh[2], name="Ride Height RL [mm]"),
             go.Scatter(x=distance, y=rh[3], name="Ride Height RR [mm]"),
-        ]).update_layout(
-            title="RH [mm]", xaxis_title="Distance [m]", yaxis_title="RH [mm]"
-        )))
-        graphs.append(dcc.Graph(figure=go.Figure([
+        ])
+        fig.update_layout(title="RH [mm]", xaxis_title="Distance [m]", yaxis_title="RH [mm]")
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
+        fig = go.Figure([
             go.Scatter(x=distance, y=heave_ax_f, name="Heave Front [mm]"),
             go.Scatter(x=distance, y=heave_ax_r, name="Heave Rear [mm]")
-        ]).update_layout(
-            title="Heave per Axle (ΔRH) [mm]",
-            xaxis_title="Distance [m]",
-            yaxis_title="Heave [mm]"
-        )))
+        ])
+        fig.update_layout(title="Heave per Axle (ΔRH) [mm]",
+                          xaxis_title="Distance [m]",
+                          yaxis_title="Heave [mm]")
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
         # Pitch (filtrado)
-        graphs.append(dcc.Graph(figure=go.Figure([
+        fig = go.Figure([
             go.Scatter(x=distance, y=pitch_filtered, name="Pitch [°]")
-        ]).update_layout(title="Pitch Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Pitch [°]")))
-
+        ])
+        fig.update_layout(title="Pitch Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Pitch [°]")
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
+        
         # Roll (filtrado)
-        graphs.append(dcc.Graph(figure=go.Figure([
+        fig = go.Figure([
             go.Scatter(x=distance, y=roll_filtered, name="Roll [°]")
-        ]).update_layout(title="Roll Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Roll [°]")))
-
+        ])
+        fig.update_layout(title="Roll Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Roll [°]")
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
+        
         # === Zona de grip limitado lateral ===
         grip_limited_trace = None
         if 'grip_limited_lateral_mask' in post:
@@ -104,13 +124,16 @@ def launch_dash(sol, post, setup_name="Setup"):
         # === Aerodynamic Downforce per Axle [N] ===
         ae_front = post.get('Fz_aero_front', np.zeros_like(post['vx']))
         ae_rear  = post.get('Fz_aero_rear',  np.zeros_like(post['vx']))
-        fig_aero = go.Figure([
+
+        fig = go.Figure([
             go.Scatter(x=distance, y=-ae_front, name="Downforce Front"),
             go.Scatter(x=distance, y=-ae_rear,  name="Downforce Rear"),
         ])
-        fig_aero.update_layout(
+        fig.update_layout(
             title="Aerodynamic Downforce per Axle [N]", xaxis_title="Distance [m]", yaxis_title="Force [N]")
-        graphs.append(dcc.Graph(figure=fig_aero))
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
         # Tire load
         fig_load = go.Figure()
@@ -131,70 +154,80 @@ def launch_dash(sol, post, setup_name="Setup"):
 
         fig_load.update_layout(
             title="Tire Load per Wheel [N]", xaxis_title="Distance [m]", yaxis_title="Load [N]")
-        graphs.append(dcc.Graph(figure=fig_load))
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig_load, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
         
         # === Bumpstop Forces por rueda ===
-        graphs.append(dcc.Graph(
-            figure=go.Figure([
-                go.Scatter(x=distance, y=post['f_bump'][0], name="Bumpstop FL"), go.Scatter(x=distance, y=post['f_bump'][1], name="Bumpstop FR"),
-                go.Scatter(x=distance, y=post['f_bump'][2], name="Bumpstop RL"), go.Scatter(x=distance, y=post['f_bump'][3], name="Bumpstop RR"),
-            ]).update_layout(
-                title="Bumpstop Force per Wheel [N]", xaxis_title="Distance [m]", yaxis_title="Force [N]"
-            ),
-            id='bumpstop-forces', style={'height': '300px'}, config={'displayModeBar': False}
-        ))
+        fig = go.Figure([
+            go.Scatter(x=distance, y=post['f_bump'][0], name="Bumpstop FL"),
+            go.Scatter(x=distance, y=post['f_bump'][1], name="Bumpstop FR"),
+            go.Scatter(x=distance, y=post['f_bump'][2], name="Bumpstop RL"),
+            go.Scatter(x=distance, y=post['f_bump'][3], name="Bumpstop RR"),
+        ])
+        fig.update_layout(title="Bumpstop Force per Wheel [N]", xaxis_title="Distance [m]", yaxis_title="Force [N]")
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
-        graphs.append(dcc.Graph(
-            figure=go.Figure([
-                go.Scatter(x=distance, y=spring_force_filtered[0], name="Spring FL"),
-                go.Scatter(x=distance, y=spring_force_filtered[1], name="Spring FR"),
-                go.Scatter(x=distance, y=spring_force_filtered[2], name="Spring RL"),
-                go.Scatter(x=distance, y=spring_force_filtered[3], name="Spring RR"),
-            ]).update_layout(
-                title="Spring Force per Wheel [N]",
-                xaxis_title="Distance [m]",
-                yaxis_title="Force [N]"
-            )),
+        fig = go.Figure([
+            go.Scatter(x=distance, y=spring_force_filtered[0], name="Spring FL"),
+            go.Scatter(x=distance, y=spring_force_filtered[1], name="Spring FR"),
+            go.Scatter(x=distance, y=spring_force_filtered[2], name="Spring RL"),
+            go.Scatter(x=distance, y=spring_force_filtered[3], name="Spring RR"),
+        ])
+        fig.update_layout(
+            title="Spring Force per Wheel [N]",
+            xaxis_title="Distance [m]",
+            yaxis_title="Force [N]"
         )
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
-        graphs.append(dcc.Graph(
-            figure=go.Figure([
-                go.Scatter(x=distance, y=damper_force_filtered[0], name="Damper FL"),
-                go.Scatter(x=distance, y=damper_force_filtered[1], name="Damper FR"),
-                go.Scatter(x=distance, y=damper_force_filtered[2], name="Damper RL"),
-                go.Scatter(x=distance, y=damper_force_filtered[3], name="Damper RR"),
-            ]).update_layout(
-                title="Damper Force per Wheel [N]",
-                xaxis_title="Distance [m]",
-                yaxis_title="Force [N]"
-            )),
+        fig = go.Figure([
+            go.Scatter(x=distance, y=damper_force_filtered[0], name="Damper FL"),
+            go.Scatter(x=distance, y=damper_force_filtered[1], name="Damper FR"),
+            go.Scatter(x=distance, y=damper_force_filtered[2], name="Damper RL"),
+            go.Scatter(x=distance, y=damper_force_filtered[3], name="Damper RR"),
+        ])
+        fig.update_layout(
+            title="Damper Force per Wheel [N]",
+            xaxis_title="Distance [m]",
+            yaxis_title="Force [N]"
         )
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
-        graphs.append(dcc.Graph(
-            figure=go.Figure([
-                go.Scatter(x=distance, y=arb_force_filtered[0], name="ARB FL"),
-                go.Scatter(x=distance, y=arb_force_filtered[1], name="ARB FR"),
-                go.Scatter(x=distance, y=arb_force_filtered[2], name="ARB RL"),
-                go.Scatter(x=distance, y=arb_force_filtered[3], name="ARB RR"),
-            ]).update_layout(
-                title="ARB Force per Wheel [N]",
-                xaxis_title="Distance [m]",
-                yaxis_title="Force [N]"
-            )),
+        fig = go.Figure([
+            go.Scatter(x=distance, y=arb_force_filtered[0], name="ARB FL"),
+            go.Scatter(x=distance, y=arb_force_filtered[1], name="ARB FR"),
+            go.Scatter(x=distance, y=arb_force_filtered[2], name="ARB RL"),
+            go.Scatter(x=distance, y=arb_force_filtered[3], name="ARB RR"),
+        ])
+        fig.update_layout(
+            title="ARB Force per Wheel [N]",
+            xaxis_title="Distance [m]",
+            yaxis_title="Force [N]"
         )
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
         if "arb_torque_front" in post:
             fig_arb = go.Figure([
                 go.Scatter(x=distance, y=post["arb_torque_front"], name="Front ARB"),
                 go.Scatter(x=distance, y=post["arb_torque_rear"],  name="Rear ARB")
             ])
             fig_arb.update_layout(title="Anti-roll Bar Torque [Nm]", xaxis_title="Distance [m]", yaxis_title="Torque [Nm]")
-            graphs.append(dcc.Graph(figure=fig_arb))
+            graphs.append(html.Div(
+                dcc.Graph(figure=fig_arb, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+                style=CARD_STYLE))
 
         
         app.layout = html.Div([
             html.H1(f"Resultados 7-Post Rig: {setup_name}"),
-            html.H2("Señales dinámicas"),
-            *graphs
+            html.Div(graphs, style=GRID_STYLE)
         ])
 
     plot_data()
@@ -240,10 +273,15 @@ def launch_dash_kpis(kpi_data, setup_names):
             yaxis_title=unit,
             xaxis_title="Wheel",
             yaxis=dict(zeroline=False, gridcolor='lightgrey'),
-            legend_title="Setup"
+            legend_title="Setup",
+            width=450,
+            height=300,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
-        return dcc.Graph(figure=fig)
-
+        return html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE)
+    
     # --- DEFINICIÓN CENTRALIZADA DE LOS KPIs --- 
     kpi_definitions = [
         ("Wheel Load Max [Kg]", "Kg",
@@ -251,7 +289,7 @@ def launch_dash_kpis(kpi_data, setup_names):
     ]
 
     # --- ARRANCAR LAYOUT CON UN TÍTULO PRINCIPAL ---
-    layout = [html.H1("Comparativa de KPIs entre Setups")]
+    layout = []
 
     # ── KPIs por rueda (puntos con barra de desviación) ──
     for title, unit, key_mean, key_std, factor in kpi_definitions:
@@ -268,7 +306,6 @@ def launch_dash_kpis(kpi_data, setup_names):
             continue
 
     # --- KPIs PERSONALIZADOS: Road Noise, Pitch vs Distance, Pitch RMS, Ride Height RMS, Scatter, etc. ---
-
     # ── 2) Accumulated Road‐Noise Normalised by Lap Time ─────────────────────────
     try:
         noise_by_track = {}
@@ -304,7 +341,11 @@ def launch_dash_kpis(kpi_data, setup_names):
             yaxis_title="Normalised Accu. Track-noise [mm/s]",
             barmode="group"
         )
-        layout.append(dcc.Graph(figure=fig_accu))
+        
+        fig_accu.update_layout(width=450, height=300, margin=dict(t=40, b=40, l=40, r=10))
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_accu, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
     except KeyError:
         print("[DEBUG] No se encontró 'tracknoise_accu_*' en algún KPI")
@@ -318,8 +359,12 @@ def launch_dash_kpis(kpi_data, setup_names):
             cells=dict(values=[setup_names, pitch_rms_vals],
                        fill_color='lavender', align='left'))
         ])
-        fig_pitch_table.update_layout(title="Pitch RMS por Setup (Resumen Numérico)")
-        layout.append(dcc.Graph(figure=fig_pitch_table))
+        fig_pitch_table.update_layout(title="Pitch RMS por Setup (Resumen Numérico)",
+                                     width=450, height=300,
+                                     margin=dict(t=40, b=40, l=40, r=10))
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_pitch_table, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
     except KeyError:
         pass
 
@@ -340,9 +385,12 @@ def launch_dash_kpis(kpi_data, setup_names):
         fig_scatter_frh.update_layout(
             title="FRH RMS vs Contact Patch Load RMS",
             xaxis_title="Front Ride Height RMS [mm]",
-            yaxis_title="Contact Patch Load RMS [N]"
+            yaxis_title="Contact Patch Load RMS [N]",
+            width=450, height=300, margin=dict(t=40, b=40, l=40, r=10)
         )
-        layout.append(dcc.Graph(figure=fig_scatter_frh))
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_scatter_frh, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
     except KeyError:
         pass
 
@@ -362,9 +410,12 @@ def launch_dash_kpis(kpi_data, setup_names):
         fig_scatter_rrh.update_layout(
             title="RRH RMS vs Contact Patch Load RMS",
             xaxis_title="Rear Ride Height RMS [mm]",
-            yaxis_title="Contact Patch Load RMS [N]"
+            yaxis_title="Contact Patch Load RMS [N]",
+            width=450, height=300, margin=dict(t=40, b=40, l=40, r=10)
         )
-        layout.append(dcc.Graph(figure=fig_scatter_rrh))
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_scatter_rrh, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
     except KeyError:
         pass
 
@@ -394,9 +445,12 @@ def launch_dash_kpis(kpi_data, setup_names):
             xaxis=dict(tickvals=x_base,
                     ticktext=setup_names,
                     title="Setup"),
-            yaxis_title="RMS Ride‑Height [mm]"
+            yaxis_title="RMS Ride‑Height [mm]",
+            width=450, height=300, margin=dict(t=40, b=40, l=40, r=10)
         )
-        layout.append(dcc.Graph(figure=fig_rh_scatter))
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_rh_scatter, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
     except KeyError:
         pass
 
@@ -424,9 +478,12 @@ def launch_dash_kpis(kpi_data, setup_names):
             fig_cmp.update_layout(
                 title=title,
                 xaxis=dict(tickvals=x_base, ticktext=setup_names, title="Setup"),
-                yaxis_title="RMS [mm]"
+                yaxis_title="RMS [mm]",
+                width=450, height=300, margin=dict(t=40, b=40, l=40, r=10)
             )
-            layout.append(dcc.Graph(figure=fig_cmp))
+            layout.append(html.Div(
+                dcc.Graph(figure=fig_cmp, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+                style=CARD_STYLE))
         except KeyError:
             pass
 
@@ -459,9 +516,12 @@ def launch_dash_kpis(kpi_data, setup_names):
             fig_bt.update_layout(
                 title=title,
                 xaxis=dict(tickvals=x_base, ticktext=setup_names, title="Setup"),
-                yaxis_title=ytitle
+                yaxis_title=ytitle,
+                width=450, height=300, margin=dict(t=40, b=40, l=40, r=10)
             )
-            layout.append(dcc.Graph(figure=fig_bt))
+            layout.append(html.Div(
+                dcc.Graph(figure=fig_bt, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+                style=CARD_STYLE))
         except KeyError:
             pass
 
@@ -483,9 +543,12 @@ def launch_dash_kpis(kpi_data, setup_names):
         fig.update_layout(
             title=title,
             xaxis_title="Setup",
-            yaxis_title="CPL RMS [N]"
+            yaxis_title="CPL RMS [N]",
+            width=450, height=300, margin=dict(t=40, b=40, l=40, r=10)
         )
-        layout.append(dcc.Graph(figure=fig))
+        layout.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
     try:
         fv_brake = np.array([k['front_load_rms_brake'] for k in kpi_data])
@@ -529,9 +592,12 @@ def launch_dash_kpis(kpi_data, setup_names):
             title="PSD of Heave Motion by Axle (Front vs Rear)",
             xaxis_title="Frequency (Hz)",
             yaxis_title="PSD Heave (mm²/Hz)",
-            yaxis_type="log"
+            yaxis_type="log",
+            width=450, height=300, margin=dict(t=40, b=40, l=40, r=10)
         )
-        layout.append(dcc.Graph(figure=fig_psd_axes))
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_psd_axes, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
     except Exception as e:
         print(f"[WARNING] Error al generar el PSD de heave por eje: {e}")
@@ -562,9 +628,12 @@ def launch_dash_kpis(kpi_data, setup_names):
             title="PSD of Pitch‐Induced Vertical by Axle (Front vs Rear)",
             xaxis_title="Frequency (Hz)",
             yaxis_title="PSD Pitch→Vertical (mm²/Hz)",
-            yaxis_type="log"
+            yaxis_type="log",
+            width=450, height=300, margin=dict(t=40, b=40, l=40, r=10)
         )
-        layout.append(dcc.Graph(figure=fig_psd_pitch_axes))
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_psd_pitch_axes, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
 
     except Exception as e:
         print(f"[WARNING] Error al generar el PSD de pitch por eje: {e}")
@@ -597,12 +666,20 @@ def launch_dash_kpis(kpi_data, setup_names):
         title="PSD de Carga – Magnitud (Front vs Rear, Suavizado)",
         xaxis=dict(title="Frecuencia [Hz]", type="log"),
         yaxis=dict(title="Magnitud [dB]"),
-        legend=dict(x=0.01, y=0.99)
+        legend=dict(x=0.01, y=0.99),
+        width=450,
+        height=300,
+        margin=dict(t=40, b=40, l=40, r=10)
     )
-    layout.append(dcc.Graph(figure=fig_psd_load_mag))
+    layout.append(html.Div(
+        dcc.Graph(figure=fig_psd_load_mag, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+        style=CARD_STYLE))
 
     # ──────────────────────────────────────────────────────────────────────────
-    app_kpi.layout = html.Div(layout)
+    app_kpi.layout = html.Div([
+        html.H1("Comparativa de KPIs entre Setups"),
+        html.Div(layout, style=GRID_STYLE)
+    ])
     app_kpi.run(port=8051, debug=False)
 
 def get_results_figures(sol, post, save_dir=None):
@@ -667,6 +744,8 @@ def get_kpi_figures(setups, save_dir=None):
     setup_names = [os.path.splitext(os.path.basename(p))[0] for _, _, p, _ in setups]
     kpi_labels  = ['FL', 'FR', 'RL', 'RR']
 
+    FIG_W, FIG_H = 450, 300
+
     def kpi_point_with_var(title, unit,
                            mean_values_list,
                            var_values_list):
@@ -689,17 +768,15 @@ def get_kpi_figures(setups, save_dir=None):
             xaxis_title="Wheel",
             yaxis=dict(zeroline=False, gridcolor='lightgrey'),
             legend_title="Setup",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT,
+            width=FIG_W,
+            height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         return fig
 
     figures = []
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
-    # Definimos el nuevo tamaño (20 % más que 1122×529)
-    NEW_WIDTH  = int(1122 * 1.5)  # ≈ 1346
-    NEW_HEIGHT = int(529  * 1.5)  # ≈ 634
 
     # === 1) KPIs centrales por rueda ===
     kpi_definitions = [
@@ -747,7 +824,8 @@ def get_kpi_figures(setups, save_dir=None):
         fig_accu.update_layout(
             title="Accumulated Road Track-Noise Normalized by Lap Time",
             xaxis_title="Track", yaxis_title="Normalized Accu. Track-Noise [mm/s]",
-            barmode="group", width=NEW_WIDTH, height=NEW_HEIGHT
+            barmode="group", width=FIG_W, height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
 
         figures.append(fig_accu)
@@ -767,7 +845,8 @@ def get_kpi_figures(setups, save_dir=None):
         fig_pitch_vs_distance.update_layout(
             title="Pitch vs Distance [°]",
             xaxis_title="Distance [m]", yaxis_title="Pitch [°]",
-            width=NEW_WIDTH, height=NEW_HEIGHT
+            width=FIG_W, height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         figures.append(fig_pitch_vs_distance)
     except Exception:
@@ -786,7 +865,8 @@ def get_kpi_figures(setups, save_dir=None):
         )])
         fig_pitch_table.update_layout(
             title="Pitch RMS por Setup (Resumen Numérico)",
-            width=NEW_WIDTH, height=NEW_HEIGHT
+            width=FIG_W, height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         figures.append(fig_pitch_table)
     except KeyError:
@@ -806,7 +886,8 @@ def get_kpi_figures(setups, save_dir=None):
         fig_h_vs_f.update_layout(
             title="Front Ride Height RMS vs Contact Patch Load RMS",
             xaxis_title="Front Ride Height RMS [mm]", yaxis_title="Contact Patch Load RMS [N]",
-            width=NEW_WIDTH, height=NEW_HEIGHT
+            width=FIG_W, height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         figures.append(fig_h_vs_f)
     except KeyError:
@@ -826,7 +907,8 @@ def get_kpi_figures(setups, save_dir=None):
         fig_rrh_vs_f.update_layout(
             title="Rear Ride Height RMS vs Contact Patch Load RMS",
             xaxis_title="Rear Ride Height RMS [mm]", yaxis_title="Contact Patch Load RMS [N]",
-            width=NEW_WIDTH, height=NEW_HEIGHT
+            width=FIG_W, height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         figures.append(fig_rrh_vs_f)
     except KeyError:
@@ -857,7 +939,8 @@ def get_kpi_figures(setups, save_dir=None):
             trace.name = setup_names[idx]
         fig_rh.update_layout(
             title="Ride Height RMS [mm]", xaxis_title="Axle",
-            width=NEW_WIDTH, height=NEW_HEIGHT
+            width=FIG_W, height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         figures.append(fig_rh)
     except Exception:
@@ -885,8 +968,10 @@ def get_kpi_figures(setups, save_dir=None):
         fig_brake.update_layout(
             title="Contact Patch Load RMS en Frenada [N]",
             xaxis_title="Setup", yaxis_title="CPL RMS [N]",
-            width=NEW_WIDTH, height=NEW_HEIGHT
+            width=FIG_W, height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
+        figures.append(fig_brake)
         figures.append(fig_brake)
     except KeyError:
         pass
@@ -912,7 +997,8 @@ def get_kpi_figures(setups, save_dir=None):
         fig_traction.update_layout(
             title="Contact Patch Load RMS en Tracción [N]",
             xaxis_title="Setup", yaxis_title="CPL RMS [N]",
-            width=NEW_WIDTH, height=NEW_HEIGHT
+            width=FIG_W, height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         figures.append(fig_traction)
     except KeyError:
@@ -945,8 +1031,9 @@ def get_kpi_figures(setups, save_dir=None):
             xaxis_title="Frequency [Hz]",
             yaxis_title="PSD Heave (mm²/Hz)",
             yaxis_type="log",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            width=FIG_W,
+            height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         figures.append(fig_psd_heave_axes)
     except Exception:
@@ -979,8 +1066,9 @@ def get_kpi_figures(setups, save_dir=None):
             xaxis_title="Frequency [Hz]",
             yaxis_title="PSD Pitch→Vertical (mm²/Hz)",
             yaxis_type="log",
-            width=NEW_WIDTH,
-            height=NEW_HEIGHT
+            width=FIG_W,
+            height=FIG_H,
+            margin=dict(t=40, b=40, l=40, r=10)
         )
         figures.append(fig_psd_pitch_axes)
     except Exception:
@@ -1002,31 +1090,15 @@ def run_kpi_comparison_in_thread(sim_results):
 def export_full_report(setups, export_path="export_full_report.html"):
     html_sections = []
 
-    html_sections.append("<h1>Reporte de Simulación - 4-Post Rig</h1>")
-    html_sections.append('<ul>')
-    html_sections.append('<li><a href="#kpis">📊 Ver Comparativa de KPIs</a></li>')
-    for idx, (_, _, setup_path, _) in enumerate(setups):
-        setup_name = os.path.basename(setup_path).replace(".json", "")
-        anchor = f"setup_{idx}"
-        html_sections.append(f'<li><a href="#{anchor}">📁 {setup_name}</a></li>')
-    html_sections.append('</ul>')
-
-    # Resultados por setup
-    for idx, (sol, post, setup_path, _) in enumerate(setups):
-        setup_name = os.path.basename(setup_path).replace(".json", "")
-        anchor = f"setup_{idx}"
-        html_sections.append(f'<div id="{anchor}"><h2>Resultados - {setup_name}</h2>')
-        figures = get_results_figures(sol, post)
-        for i, fig in enumerate(figures):
-            html_sections.append(plot(fig, include_plotlyjs=(idx == 0 and i == 0), output_type='div'))
-        html_sections.append('</div><hr>')
-
+    html_sections.append("<h1>Reporte de Simulación - Post Rig</h1>")
+ 
     # KPIs comparativos (siempre incluir, incluso con un solo setup)
-    html_sections.append('<div id="kpis"><h2>📊 KPIs Comparativos</h2>')
+    html_sections.append('<h2>📊 KPIs Comparativos</h2>')
+    html_sections.append('<div id="kpis" style="display:flex; flex-wrap:wrap; gap:12px;">')
     kpi_figs = get_kpi_figures(setups)
     for fig in kpi_figs:
         html_sections.append(plot(fig, include_plotlyjs=False, output_type='div'))
-    html_sections.append('</div><hr>')
+    html_sections.append('</div>')
 
     # Exporta a HTML
     with open(export_path, "w", encoding="utf-8") as f:
