@@ -10,8 +10,8 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import Qt,QUrl
 from PyQt5.QtGui import QPalette, QColor, QIcon, QDoubleValidator
 from scipy.interpolate import interp1d
-
 from plotly.offline import plot
+import math
 
 
 def set_dark_theme(app):
@@ -1248,20 +1248,26 @@ class SevenPostRigGUI(QWidget):
 
             # ① setup base
             base_label = os.path.basename(setup_path)
-            variations = [(base_setup, base_label)]
+            variations = []
 
             # ② sweep paramétrico
             if getattr(self, 'sweep_config', None):
-                param = self.sweep_config['param']
+                param  = self.sweep_config['param']
                 s_type = self.sweep_config['type']
-                for val in self.sweep_config['values']:
+                for val in sorted(self.sweep_config['values']):
+                    if math.isclose(val, 1.0):
+                        continue  # descarta 100 %
                     mod_setup = copy.deepcopy(base_setup)
                     self.apply_sweep_value(mod_setup, param, val, s_type)
                     label = make_short_label(param, val, s_type)
-                    variations.append((mod_setup, label))
+                    variations.append((val, mod_setup, label))
 
-            # → asocia cada variación con todos los tracks
-            for setup_dict, label in variations:
+            # añade el setup base y ordena
+            variations.append((1.0, base_setup, base_label))
+            variations.sort(key=lambda tup: tup[0])      # 0.88 → … → 1.12
+
+            # → asocia cada variación con todos los tracks
+            for _, setup_dict, label in variations:      # ← 3-campos
                 for j in range(self.track_list.count()):
                     track_path = self.track_list.item(j).text()
                     combo_list.append((setup_dict, track_path, label))
@@ -1379,25 +1385,34 @@ class SevenPostRigGUI(QWidget):
         self.web_view.load(QUrl("http://127.0.0.1:8050"))
 
     def export_report(self):
-        from visualizer_dash import build_kpi_figs_from_data
-        if not hasattr(self, 'sim_results') or not self.sim_results:
+        from visualizer_dash import save_kpi_report
+        if not getattr(self, "kpi_data", None):
             self.feedback("⚠️ No hay resultados para exportar.", "warning")
             return
-        from visualizer_dash import export_full_report
-        export_path, _ = QFileDialog.getSaveFileName(self, "Guardar Reporte HTML", "", "HTML Files (*.html)")
-        if export_path:
-            # generar las figuras con los datos que usó el dash
-            figs = build_kpi_figs_from_data(self.kpi_data, self.setup_names)
-            with open(export_path, "w", encoding="utf-8") as f:
-                f.write("<html><head>")
-                f.write('<meta charset="utf-8">')
-                f.write('<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>')
-                f.write("<title>Reporte KPIs</title></head><body>")
-                f.write("<h1>Comparativa de KPIs entre Setups</h1>")
-                for fig in figs:
-                    f.write(plot(fig, include_plotlyjs=False, output_type='div'))
-                f.write("</body></html>")
-            self.feedback(f"✅ Reporte exportado en {export_path}", "success")
+
+        # eliges DÓNDE guardar el HTML único
+        export_path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar reporte HTML", "", "HTML Files (*.html)"
+        )
+        if not export_path:
+            return
+
+        # carpeta destino = lugar donde el usuario grabó el archivo
+        out_dir = os.path.dirname(export_path)
+
+        # genera un único dashboard estático con 2 columnas
+        save_kpi_report(
+            data=self.kpi_data,
+            out_dir=out_dir,
+            mode="single",          # 'separate' si quieres 1 HTML por figura
+            title="Comparativa de KPIs entre Setups",
+        )
+
+        # el helper crea «kpis_report.html»; lo renombras al nombre elegido
+        os.replace(os.path.join(out_dir, "kpis_report.html"), export_path)
+
+        self.feedback(f"✅ Reporte exportado en {export_path}", "success")
+
     def feedback(self, msg, level):
         color = {"success": "#4e9a06", "warning": "#f6c700", "error": "#d7263d"}.get(level, "#aaa")
         self.feedback_label.setText(msg)
