@@ -1385,33 +1385,20 @@ class SevenPostRigGUI(QWidget):
         self.web_view.load(QUrl("http://127.0.0.1:8050"))
 
     def export_report(self):
-        from visualizer_dash import save_kpi_report
-        if not getattr(self, "kpi_data", None):
+        if not self.sim_results:
             self.feedback("⚠️ No hay resultados para exportar.", "warning")
             return
 
-        # eliges DÓNDE guardar el HTML único
         export_path, _ = QFileDialog.getSaveFileName(
             self, "Guardar reporte HTML", "", "HTML Files (*.html)"
         )
         if not export_path:
             return
 
-        # carpeta destino = lugar donde el usuario grabó el archivo
-        out_dir = os.path.dirname(export_path)
-
-        # genera un único dashboard estático con 2 columnas
-        save_kpi_report(
-            data=self.kpi_data,
-            out_dir=out_dir,
-            mode="single",          # 'separate' si quieres 1 HTML por figura
-            title="Comparativa de KPIs entre Setups",
-        )
-
-        # el helper crea «kpis_report.html»; lo renombras al nombre elegido
-        os.replace(os.path.join(out_dir, "kpis_report.html"), export_path)
-
+        from visualizer_dash import export_full_report
+        export_full_report(self.sim_results, export_path)
         self.feedback(f"✅ Reporte exportado en {export_path}", "success")
+
 
     def feedback(self, msg, level):
         color = {"success": "#4e9a06", "warning": "#f6c700", "error": "#d7263d"}.get(level, "#aaa")

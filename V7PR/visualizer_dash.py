@@ -1183,21 +1183,27 @@ def run_kpi_comparison_in_thread(sim_results):
 def save_kpi_report(
         data: Sequence[Union[dict, tuple]],
         out_dir: str = "report_kpis",
-        mode: str = "single",          # 'single' | 'separate'
+        mode: str = "single",
+        grid_cols: int = 2,
         title: str = "KPIs – 7-Post Rig"
 ) -> List[go.Figure]:
 
-    from visualizer_dash import get_kpi_figures, GRID_CSS, CARD_CSS, BODY_CSS
+    from visualizer_dash import get_kpi_figures, CARD_CSS, BODY_CSS
 
-    figs = get_kpi_figures(data)              # mismas figuras que en el Dash
-    out   = Path(out_dir)
+    figs = get_kpi_figures(data)
+    out  = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    if mode == "separate":                     # 1 HTML por figura
+    if mode == "separate":
         for i, fig in enumerate(figs, 1):
-            fig.write_html(out/f"kpi_{i:02d}.html",
+            fig.write_html(out / f"kpi_{i:02d}.html",
                            include_plotlyjs="cdn", full_html=True)
-    else:                                      # dashboard único
+    else:
+        # ── cuadrícula N columnas según grid_cols ───────────────────────────
+        grid_css = (f"display:grid;"
+                    f"grid-template-columns:repeat({grid_cols},minmax(0,1fr));"
+                    f"gap:20px")
+
         cards = [
             f'<div class="card">{plot(fig, include_plotlyjs=False, output_type="div")}</div>'
             for fig in figs
@@ -1209,7 +1215,7 @@ def save_kpi_report(
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
  body{{{BODY_CSS}}}
- .grid{{{GRID_CSS}}}
+ .grid{{{grid_css}}}          /* ← usa la variable correcta  */
  .card{{{CARD_CSS}}}
 </style></head><body>
 <h1 style="margin:16px 20px 0">{title}</h1>
@@ -1217,35 +1223,69 @@ def save_kpi_report(
 {''.join(cards)}
 </div></body></html>"""
 
-        (out/"kpis_report.html").write_text(html, encoding="utf-8")
+        (out / "kpis_report.html").write_text(html, encoding="utf-8")
 
     return figs
 
 def export_full_report(setups, export_path="export_full_report.html"):
-    html_sections = []
+    """
+    • Genera un HTML con:
+        1. Portada + sección de KPIs (producida por save_kpi_report)
+        2. Cualquier otra sección adicional que quieras añadir (opcional)
+    • Guarda un CSV extendido por cada setup.
+    """
+    out_dir = os.path.dirname(export_path) or "."
+    out_dir = Path(out_dir)
 
-    html_sections.append("<h1>Reporte de Simulación - Post Rig</h1>")
- 
-    # KPIs comparativos (siempre incluir, incluso con un solo setup)
-    html_sections.append('<h2>📊 KPIs Comparativos</h2>')
-    html_sections.append('<div style="display:flex;flex-wrap:wrap;gap:12px">')
+    # --------------------------------------------------------------------- #
+    # 1)  Dashboard de KPIs vía save_kpi_report
+    # --------------------------------------------------------------------- #
     posts = [post for (_, post, _, _) in setups]
-    kpi_figs = get_kpi_figures(posts)
-    for fig in kpi_figs:
-        html_sections.append(plot(fig, include_plotlyjs=False, output_type='div'))
-    html_sections.append('</div>')
 
-    # Exporta a HTML
+    # genera kpis_report.html en la misma carpeta
+    save_kpi_report(
+        data=posts,
+        out_dir=out_dir,
+        mode="single",           # un único dashboard
+        grid_cols=2,
+        title="KPIs – 7-Post Rig"
+    )
+
+    # leemos solo el <body> de ese mini-dashboard para incrustarlo
+    kpi_html_path = out_dir / "kpis_report.html"
+    with open(kpi_html_path, "r", encoding="utf-8") as fh:
+        kpi_html = fh.read()
+
+    # extraer lo que hay entre <body> … </body>
+    kpi_body = kpi_html.split("<body>")[1].split("</body>")[0]
+
+    # --------------------------------------------------------------------- #
+    # 2)  Montar el documento final
+    # --------------------------------------------------------------------- #
     with open(export_path, "w", encoding="utf-8") as f:
-        f.write("<html><head>")
-        f.write('<meta charset="utf-8">')
-        f.write('<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>')
-        f.write("<title>Reporte 4-Post Rig</title></head><body>")
-        for section in html_sections:
-            f.write(section)
+        f.write("""<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<title>Reporte de Simulación – 7-Post Rig</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap">
+<style>body{font-family:Inter,sans-serif;margin:0;padding:0 20px}</style>
+</head><body>
+<h1>Reporte de Simulación – 7-Post Rig</h1>
+""")
+        # 2.1  KPIs producidos con save_kpi_report
+        f.write(kpi_body)
+
+        # 2.2  (Opcional) aquí podrías añadir más secciones…
+        # f.write("<h2>Otra sección</h2> …")
+
         f.write("</body></html>")
 
-    # --- EXPORTAR CSV POR SETUP ---
+    print(f"[INFO] HTML combinado exportado en {export_path}")
+
+    # --------------------------------------------------------------------- #
+    # 3)  CSV extendido por setup (igual que antes)
+    # --------------------------------------------------------------------- #
     out_dir = os.path.dirname(export_path) or "."
     for sol, post, setup_path, track_path in setups:
         setup_name = os.path.basename(setup_path).replace(".json","")
