@@ -1007,16 +1007,16 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
 
     # RMS de heave en mask grip-lateral (m → convertir más tarde a mm)
     if np.any(grip_lateral_mask):
-        frh_rms = np.sqrt(np.mean(heave_front[grip_lateral_mask]**2))
-        rrh_rms = np.sqrt(np.mean(heave_rear[grip_lateral_mask]**2))
+        frh_rms = np.sqrt(np.mean(RH_front[grip_lateral_mask]**2))
+        rrh_rms = np.sqrt(np.mean(RH_rear[grip_lateral_mask]**2))
     else:
         frh_rms = 0.0
         rrh_rms = 0.0
 
     # Cargas front/rear  RMS en mask grip-lateral
     if np.any(grip_lateral_mask):
-        fl_gl = np.mean(f_tire[0:2, grip_lateral_mask], axis=0)
-        rl_gl = np.mean(f_tire[2:4, grip_lateral_mask], axis=0)
+        fl_gl = np.mean(wheel_load[0:2, grip_lateral_mask], axis=0)
+        rl_gl = np.mean(wheel_load[2:4, grip_lateral_mask], axis=0)
         front_load_rms = np.sqrt(np.mean(fl_gl**2))
         rear_load_rms  = np.sqrt(np.mean(rl_gl**2))
     else:
@@ -1026,12 +1026,12 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     # RMS no-grip (uso para comparación)
     non_grip_mask = ~grip_lateral_mask
     if np.any(non_grip_mask):
-        frh_rms_nongrip = np.sqrt(np.mean(heave_front[non_grip_mask]**2))
-        rrh_rms_nongrip = np.sqrt(np.mean(heave_rear[non_grip_mask]**2))
-        fl_ng = np.mean(f_tire[0:2, non_grip_mask], axis=0)
+        frh_rms_nongrip = np.sqrt(np.mean(RH_front[non_grip_mask]**2))
+        rrh_rms_nongrip = np.sqrt(np.mean(RH_rear[non_grip_mask]**2))
+        fl_ng = np.mean(wheel_load[0:2, non_grip_mask], axis=0)
         front_load_rms_nongrip = np.sqrt(np.mean(fl_ng**2))
-        frh_rms_nongrip_std = np.std(heave_front[non_grip_mask])
-        rrh_rms_nongrip_std = np.std(heave_rear[non_grip_mask])
+        frh_rms_nongrip_std = np.std(RH_front[non_grip_mask])
+        rrh_rms_nongrip_std = np.std(RH_rear[non_grip_mask])
     else:
         frh_rms_nongrip = 0.0
         rrh_rms_nongrip = 0.0

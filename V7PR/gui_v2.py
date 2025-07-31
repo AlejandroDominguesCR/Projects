@@ -11,6 +11,8 @@ from PyQt5.QtCore import Qt,QUrl
 from PyQt5.QtGui import QPalette, QColor, QIcon, QDoubleValidator
 from scipy.interpolate import interp1d
 
+from plotly.offline import plot
+
 
 def set_dark_theme(app):
     palette = QPalette()
@@ -475,36 +477,58 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
 
     return sol, post, setup_path, track_path
 
-def simulate_dict_combo(setup_data_raw, track_path, setup_label, kt_overrides=None):
-    from gui_v2 import parse_json_setup, prepare_simple_params, load_track_channels
-    from model import run_vehicle_model_simple, postprocess_7dof
+def simulate_dict_combo(setup_data_raw, track_path, setup_label,
+                        kt_overrides=None):
+    """
+    Ejecuta una simulación 7‑dof para la pareja (setup_dict, track_path).
+
+    • setup_label es el alias corto que ya fabrica run_simulation().
+    • Si kt_overrides != None, fuerza ktf / ktr.
+    • Devuelve (sol, post, setup_label, track_path).
+    """
+    # ── imports locales ────────────────────────────────────────────────────
+    from gui_v2 import (parse_json_setup, prepare_simple_params,
+                        load_track_channels, make_drs_func)
+    from model  import run_vehicle_model_simple, postprocess_7dof
     from pathlib import Path
 
+    # ── 1) convertir JSON‑dict → simple_params ────────────────────────────
     params, global_setup = parse_json_setup(setup_data_raw)
-    simple_params = prepare_simple_params(params, global_setup)
+    simple_params        = prepare_simple_params(params, global_setup)
 
-    if kt_overrides is not None:
+    # —— overrides de rigidez a rueda (opcional) ——
+    if kt_overrides:
         if kt_overrides.get('front') is not None:
             simple_params['ktf'] = kt_overrides['front']
-        if kt_overrides.get('rear') is not None:
+        if kt_overrides.get('rear')  is not None:
             simple_params['ktr'] = kt_overrides['rear']
 
+    # ── 2) cargar pista e interpoladores ───────────────────────────────────
     track_data = load_track_channels(track_path)
-    t_vec   = track_data['t']
-    z_tracks= track_data['z_tracks']
-    vx      = track_data['vx']
-    ax      = track_data['ax']
-    ay      = track_data['ay']
-    rpedal  = track_data['rpedal']
-    pbrake  = track_data['brake']
-    drs_signal = track_data['drs_signal'] 
+    t_vec    = track_data['t']
+    z_tracks = track_data['z_tracks']
+    vx, ax, ay        = track_data['vx'], track_data['ax'], track_data['ay']
+    rpedal, pbrake    = track_data['rpedal'], track_data['brake']
+    drs_signal        = track_data['drs_signal']
 
+    # —— función DRS continuo (0‑1) ——
     drs_frac_func = make_drs_func(t_vec, drs_signal)
+
+    # ── 3) solver dinámico ────────────────────────────────────────────────
     sol = run_vehicle_model_simple(
         t_vec, z_tracks, vx, ax, ay, rpedal, pbrake,
-        simple_params, drs_func=drs_frac_func)
+        simple_params, drs_func=drs_frac_func
+    )
+
+    # ── 4) post‑proceso de KPIs ────────────────────────────────────────────
     simple_params['track_name'] = Path(track_path).stem
-    post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx, ax, ay)
+    post = postprocess_7dof(
+        sol, simple_params, z_tracks, t_vec,
+        rpedal, pbrake, vx, ax, ay
+    )
+
+    # alias de setup para leyendas / tablas
+    post["setup_name"] = setup_label
 
     return sol, post, setup_label, track_path
 
@@ -1170,15 +1194,46 @@ class SevenPostRigGUI(QWidget):
             susp['rear']['internal']['damper']['FDamperLU'] = arr
 
     def run_simulation(self):
+        """
+        Lanza todas las combinaciones Setup × Track (con sweep opcional) y
+        guarda los resultados en self.sim_results.  Los nombres largos de
+        setup se sustituyen por un alias corto; si hay sweep se indica la
+        variable y el valor (% o absoluto redondeado a 1 déc.).
+        """
         from concurrent.futures import ProcessPoolExecutor, as_completed
-        import traceback
-        import json
-        import copy
+        import traceback, json, copy, os, numpy as np
+        from PyQt5.QtCore import QUrl
+        import pandas as pd
 
+        # ───────── helpers internos ────────────────────────────────────────────
+        def make_short_label(param, val, sweep_type):
+            """
+            kSpring_front → kspringF, damper_curve_rear → damperR, etc.
+            Valores % se muestran p.ej. “080”; absolutos se redondean a 1 déc.
+            """
+            param_short = {
+                "kSpring_front":  "kspringF",
+                "kSpring_rear":   "kspringR",
+                "damper_curve_front": "damperF",
+                "damper_curve_rear":  "damperR",
+            }.get(param, param.replace("_", "")[:8])
+
+            if sweep_type == "percent":
+                val_str = f"{val*100:03.0f}"         # 0.88 → 088
+            else:
+                if abs(val) >= 1000:
+                    val_str = f"{val:.0e}".replace("+0", "")
+                else:
+                    val_str = f"{val:.1f}".rstrip("0").rstrip(".")\
+                            .replace(".", "‑")      # 9.5 → 9‑5
+            return f"{param_short}_{val_str}"
+
+        # ───────── validaciones básicas ────────────────────────────────────────
         if self.setup_list.count() == 0 or self.track_list.count() == 0:
             self.feedback("❌ Debes añadir al menos un setup y un track.", "error")
             return
 
+        # ───────── progreso y listas de trabajo ────────────────────────────────
         self.progress.setVisible(True)
         self.progress.setValue(0)
         self.sim_status.setText("Simulando...")
@@ -1190,15 +1245,22 @@ class SevenPostRigGUI(QWidget):
             setup_path = self.setup_list.item(i).text()
             with open(setup_path, 'r') as f:
                 base_setup = json.load(f)
-            variations = [(base_setup, os.path.basename(setup_path))]
+
+            # ① setup base
+            base_label = os.path.basename(setup_path)
+            variations = [(base_setup, base_label)]
+
+            # ② sweep paramétrico
             if getattr(self, 'sweep_config', None):
                 param = self.sweep_config['param']
+                s_type = self.sweep_config['type']
                 for val in self.sweep_config['values']:
                     mod_setup = copy.deepcopy(base_setup)
-                    self.apply_sweep_value(mod_setup, param, val, self.sweep_config['type'])
-                    label = f"{os.path.basename(setup_path)}_{param}={val}"
+                    self.apply_sweep_value(mod_setup, param, val, s_type)
+                    label = make_short_label(param, val, s_type)
                     variations.append((mod_setup, label))
 
+            # → asocia cada variación con todos los tracks
             for setup_dict, label in variations:
                 for j in range(self.track_list.count()):
                     track_path = self.track_list.item(j).text()
@@ -1206,9 +1268,11 @@ class SevenPostRigGUI(QWidget):
 
         self.progress.setMaximum(len(combo_list))
 
+        # ───────── ejecución en paralelo ───────────────────────────────────────
         with ProcessPoolExecutor() as executor:
             futures = [
-                executor.submit(simulate_dict_combo, setup, track, label, self.kt_overrides)
+                executor.submit(simulate_dict_combo,
+                                setup, track, label, self.kt_overrides)
                 for setup, track, label in combo_list
             ]
 
@@ -1216,110 +1280,124 @@ class SevenPostRigGUI(QWidget):
                 try:
                     sol, post, setup_label, track_path = future.result()
 
-                    # === VALIDACIÓN DE TRACK ===
-                    import pandas as pd
+                    # alias corto guardado en el dict KPI
+                    post["setup_name"] = setup_label
+
+                    # validación rápida del track
                     df = pd.read_csv(track_path)
                     if 'Zp_FL' in df.columns:
-                        z_tracks = [
-                            df['Zp_FL'].values,
-                            df['Zp_FR'].values,
-                            df['Zp_RL'].values,
-                            df['Zp_RR'].values
-                        ]
+                        z_tracks = [df[c].values for c in ('Zp_FL', 'Zp_FR', 'Zp_RL', 'Zp_RR')]
                     elif 'z_FL (m)' in df.columns:
-                        z_tracks = [
-                            df['z_FL (m)'].values,
-                            df['z_FR (m)'].values,
-                            df['z_RL (m)'].values,
-                            df['z_RR (m)'].values
-                        ]
+                        z_tracks = [df[c].values for c in ('z_FL (m)', 'z_FR (m)', 'z_RL (m)', 'z_RR (m)')]
                     else:
                         z_tracks = []
 
                     for idx, zt in enumerate(z_tracks):
-                        dz = np.abs(np.diff(zt))
-                        if np.any(dz > 0.05):
-                            msg = (
-                                f"⚠️ Track {['FL','FR','RL','RR'][idx]} "
-                                f"tiene saltos > 0.05 m (máx: {dz.max():.3f} m)"
-                            )
-                            self.feedback(msg, "warning")
+                        if np.any(np.abs(np.diff(zt)) > 0.05):
+                            self.feedback(f"⚠️ Track {['FL','FR','RL','RR'][idx]}"
+                                        " tiene saltos > 0.05 m", "warning")
 
-                    # === GUARDAR RESULTADOS ===
+                    # guardar resultado
                     self.sim_results.append((sol, post, setup_label, track_path))
-                    name = (
-                        f"Setup: {setup_label} | "
-                        f"Track: {os.path.basename(track_path)}"
-                    )
+                    name = f"Setup: {setup_label} | Track: {os.path.basename(track_path)}"
                     self.result_selector.addItem(name)
 
-                    # === LOG DE RESULTADO ===
-                    print(f"\n[DEBUG] Simulación: {name}")
-                    print(f"  Tiempo final: {sol.t[-1]:.3f} s, pasos: {len(sol.t)}")
-                    print(f"  Travel FL final: {post['travel_rel'][0][-1]*1000:.2f} mm")
-                    print(f"  Travel RL final: {post['travel_rel'][2][-1]*1000:.2f} mm")
-                    print(f"  Fuerza muelle FL (inicio): {post['f_spring'][0][:5]}")
-                    print(f"  Fuerza neumático FL (inicio): {post['f_tire'][0][:5]}")
-                    print(f"  Fuerza amortiguador FL (inicio): {post['f_damper'][0][:5]}")
-
-                    # ───────────────────────────────────────────────────────────
-
-                    for eje, idxs in zip(['Front', 'Rear'], [(0,1),(2,3)]):
-                        travel = np.mean([post['travel'][i]*1000 for i in idxs], axis=0)
-                        f_spring = np.mean([post['f_spring'][i] for i in idxs], axis=0)
-                        f_damper = np.mean([post['f_damper'][i] for i in idxs], axis=0)
-                        f_tire = np.mean([post['f_tire'][i] for i in idxs], axis=0)
-                        print(
-                            f"  {eje} travel max: {np.max(travel):.2f} mm, "
-                            f"min: {np.min(travel):.2f} mm"
-                        )
-                        print(f"  {eje} spring max: {np.max(f_spring):.2f} N")
-                        print(f"  {eje} damper max: {np.max(f_damper):.2f} N")
-                        print(f"  {eje} tire max: {np.max(f_tire):.2f} N")
-
                 except Exception as e:
-                    tb = traceback.format_exc()
-                    print(f"[ERROR] Simulación fallida:\n{tb}")
-                    self.feedback(
-                        f"❌ Error en simulación:\n{type(e).__name__}: {str(e)}",
-                        "error"
-                    )
+                    print("[ERROR] Simulación fallida:\n", traceback.format_exc())
+                    self.feedback(f"❌ Error en simulación:\n{type(e).__name__}: {e}", "error")
 
                 self.progress.setValue(i + 1)
 
+        # ───────── post‑proceso final ──────────────────────────────────────────
         self.sim_status.setText("Simulación completada.")
         self.feedback("✅ Simulaciones finalizadas.", "success")
 
         if self.sim_results:
+            # 1) construir las listas kpi_data y setup_names
+            self.kpi_data = [post for _, post, _, _ in self.sim_results]
+            self.setup_names = [
+                os.path.basename(p).replace(".json", "")
+                for (_, _, p, _) in self.sim_results
+            ]
+            # 2) mostrar resultados individuales (curvas tiempo, etc.)
             self.show_results()
+            # 3) lanzar el comparador de KPIs interactivo (como siempre)
             visualizer_dash.run_kpi_comparison_in_thread(self.sim_results)
             self.kpi_web_view.load(QUrl("http://127.0.0.1:8051"))
             self.tabs.setCurrentIndex(self.tabs.indexOf(self.results_tab))
 
+        def show_results(self, idx=None):
+            if not hasattr(self, 'sim_results') or self.result_selector.count() == 0:
+                return
+            idx = self.result_selector.currentIndex() if idx is None else idx
+            if idx < 0 or idx >= len(self.sim_results):
+                return
+            sol, post, setup_label, track_path = self.sim_results[idx]
+            setup_name = os.path.basename(setup_label).replace(".json", "") if os.path.splitext(setup_label)[1] else setup_label
+            visualizer_dash.run_in_thread(sol, post, setup_name=setup_name)
+            self.web_view.load(QUrl("http://127.0.0.1:8050"))
+
+        def export_report(self):
+            if not hasattr(self, 'sim_results') or not self.sim_results:
+                self.feedback("⚠️ No hay resultados para exportar.", "warning")
+                return
+            from visualizer_dash import export_full_report
+            export_path, _ = QFileDialog.getSaveFileName(self, "Guardar Reporte HTML", "", "HTML Files (*.html)")
+            if export_path:
+                try:
+                    export_full_report(self.sim_results, export_path)
+                    self.feedback(f"✅ Reporte exportado en {export_path}", "success")
+                except Exception as e:
+                    self.feedback(f"❌ Error al exportar: {str(e)}", "error")
+            
+        def feedback(self, msg, level):
+            color = {"success": "#4e9a06", "warning": "#f6c700", "error": "#d7263d"}.get(level, "#aaa")
+            self.feedback_label.setText(msg)
+            self.feedback_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+
     def show_results(self, idx=None):
-        if not hasattr(self, 'sim_results') or self.result_selector.count() == 0:
+        if (not hasattr(self, "sim_results")
+                or self.result_selector.count() == 0):
             return
+
         idx = self.result_selector.currentIndex() if idx is None else idx
         if idx < 0 or idx >= len(self.sim_results):
             return
+
         sol, post, setup_label, track_path = self.sim_results[idx]
-        setup_name = os.path.basename(setup_label).replace(".json", "") if os.path.splitext(setup_label)[1] else setup_label
+
+        # Etiqueta corta (el alias que grabamos en post["setup_name"])
+        setup_name = (os.path.basename(setup_label).replace(".json", "")
+                      if os.path.splitext(setup_label)[1]
+                      else setup_label)
+
+        # Lanza la ventana de resultados individuales (Dash en :8050)
+        import visualizer_dash
         visualizer_dash.run_in_thread(sol, post, setup_name=setup_name)
+
+        # Carga la web en el visor embebido
         self.web_view.load(QUrl("http://127.0.0.1:8050"))
 
     def export_report(self):
+        from visualizer_dash import build_kpi_figs_from_data
         if not hasattr(self, 'sim_results') or not self.sim_results:
             self.feedback("⚠️ No hay resultados para exportar.", "warning")
             return
         from visualizer_dash import export_full_report
         export_path, _ = QFileDialog.getSaveFileName(self, "Guardar Reporte HTML", "", "HTML Files (*.html)")
         if export_path:
-            try:
-                export_full_report(self.sim_results, export_path)
-                self.feedback(f"✅ Reporte exportado en {export_path}", "success")
-            except Exception as e:
-                self.feedback(f"❌ Error al exportar: {str(e)}", "error")
-        
+            # generar las figuras con los datos que usó el dash
+            figs = build_kpi_figs_from_data(self.kpi_data, self.setup_names)
+            with open(export_path, "w", encoding="utf-8") as f:
+                f.write("<html><head>")
+                f.write('<meta charset="utf-8">')
+                f.write('<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>')
+                f.write("<title>Reporte KPIs</title></head><body>")
+                f.write("<h1>Comparativa de KPIs entre Setups</h1>")
+                for fig in figs:
+                    f.write(plot(fig, include_plotlyjs=False, output_type='div'))
+                f.write("</body></html>")
+            self.feedback(f"✅ Reporte exportado en {export_path}", "success")
     def feedback(self, msg, level):
         color = {"success": "#4e9a06", "warning": "#f6c700", "error": "#d7263d"}.get(level, "#aaa")
         self.feedback_label.setText(msg)
