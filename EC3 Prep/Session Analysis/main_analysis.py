@@ -17,7 +17,6 @@ import random
 from plotly.subplots import make_subplots 
 from collections import OrderedDict
 import numpy as np
-import concurrent.futures, threading
 
 try:
     import statsmodels.api as sm  # noqa:F401
@@ -54,29 +53,6 @@ from KPI_builder import (
     slipstream_sector_gap_gain,
 )
 
-_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-
-
-def _choose_folder_blocking() -> str:
-    """Lanza filedialog.askdirectory() en el hilo principal."""
-    import tkinter as tk
-    from tkinter import filedialog
-
-    root = tk.Tk()
-    root.withdraw()
-    folder = filedialog.askdirectory()
-    root.destroy()
-    return folder
-
-
-def choose_folder() -> str:
-    """Abre un diálogo de carpeta de forma segura para cualquier hilo."""
-    if threading.current_thread() is threading.main_thread():
-        return _choose_folder_blocking()
-
-    fut = _executor.submit(_choose_folder_blocking)
-    return fut.result()
-
 def get_team_colors() -> dict[str, str]:
     """Devuelve el color principal (hex) para cada equipo."""
     return {
@@ -109,7 +85,6 @@ def get_team_colors() -> dict[str, str]:
 
 TEAM_COLOR = get_team_colors()
 
-from comparison_utils import build_comparison_figures
 # ---------------------------------------------------------------------------
 # Control panel utilities
 # ---------------------------------------------------------------------------
@@ -1199,15 +1174,11 @@ app.layout = html.Div(
         html.H1("Session Analysis Dashboard"),
         dcc.Input(id="folder-input", type="text", placeholder="Session folder"),
         html.Button("Browse", id="browse-btn"),
-        dcc.Input(id="folder-input-2", type="text", placeholder="Second session folder"),
-        html.Button("Browse 2", id="browse-btn-2"),
         html.Button("Load Session", id="load-btn"),
         html.Button("Export Report", id="export-btn"),
         dcc.Download(id="download-report"),
         dcc.Store(id="data-store"),
         dcc.Store(id="session-data"),
-        dcc.Store(id="sessionA-data"),
-        dcc.Store(id="sessionB-data"),
         dcc.Store(id="kpi-config", storage_type="session", data=DEFAULT_KPI_VALUES),
         dcc.Checklist(id="lap-filter-toggle",
                   options=[{"label": "Ver todas las vueltas", "value": "ALL"}],
@@ -1225,7 +1196,6 @@ app.layout = html.Div(
             children=[
                 dcc.Tab(label="Tables", value="tab-tables"),
                 dcc.Tab(label="Figures", value="tab-figs"),
-                dcc.Tab(label="Comparison", value="tab-compare"),
                 dcc.Tab(label="Control Panel", value="tab-control",
                         children=[html.Div(id="control-panel-body",
                                            style={"padding": "15px", "maxWidth": "500px"})]),
@@ -1296,27 +1266,16 @@ def update_kpi_store(n_apply, n_reset,
 )
 
 def on_browse(n_clicks):
-    folder = choose_folder()
-    if not folder:
-        raise PreventUpdate
-    return folder
-
-@app.callback(
-    Output("folder-input-2", "value"),
-    Input("browse-btn-2", "n_clicks"),
-    prevent_initial_call=True,
-)
-
-def on_browse_2(n_clicks):
-    folder = choose_folder()
+    root = tk.Tk()
+    root.withdraw()
+    folder = filedialog.askdirectory()
+    root.destroy()
     if not folder:
         raise PreventUpdate
     return folder
 
 @app.callback(
     Output("tab-content", "children"),
-    Output("sessionA-data", "data"),
-    Output("sessionB-data", "data"),
     Output("data-store", "data"),
     Output("session-data", "data"),
     Output("team-filter", "options"),
@@ -1326,21 +1285,19 @@ def on_browse_2(n_clicks):
     Input("load-btn", "n_clicks"),
     Input("result-tabs", "value"),
     Input("kpi-config", "data"),
-    Input("lap-filter-toggle", "value"),
-    Input("sector-toggle", "value"),
-    Input("gap-toggle", "value"),
+    Input("lap-filter-toggle", "value"),   
+    Input("sector-toggle", "value"),        
+    Input("gap-toggle", "value"),           
     State("folder-input", "value"),
-    State("folder-input-2", "value"),
     State("team-filter", "value"),
     State("number-filter", "value"),
     State("data-store", "data"),
     prevent_initial_call=True,
 )
 
-def update_single_tab(n_clicks, tab, kpi_cfg,
+def update_tab_content(n_clicks, tab, kpi_cfg,
                       lap_toggle, sec_toggle, gap_toggle,
-                      folderA, folderB, teams, drivers, stored):
-    
+                      folder, teams, drivers, stored):
     ctx = dash.callback_context
     trig = ctx.triggered_id
 
@@ -1350,36 +1307,13 @@ def update_single_tab(n_clicks, tab, kpi_cfg,
         driver_opts = dash.no_update
         teams_out = dash.no_update
         drivers_out = dash.no_update
-        storeA = dash.no_update
-        storeB = dash.no_update
     else:
-        if not n_clicks or not folderA or not os.path.isdir(folderA):
+        if not n_clicks or not folder or not os.path.isdir(folder):
             raise PreventUpdate
-        df_analysis, df_class, weather_df, tracklimits_df = load_data(folderA)
-        raw_path = os.path.join(folderA, "session_raw_data.xlsx")
-        export_raw_session(folderA, raw_path)
+        df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
+        raw_path = os.path.join(folder, "session_raw_data.xlsx")
+        export_raw_session(folder, raw_path)
         logging.info(f"Raw data exported to {raw_path}")
-
-        if folderB and os.path.isdir(folderB):
-            dfB_analysis, dfB_class, _, _ = load_data(folderB)
-        else:
-            dfB_analysis = pd.DataFrame()
-            dfB_class = pd.DataFrame()
-
-        storeA = {
-            "name": os.path.basename(folderA) or "Session 1", 
-            "analysis": df_analysis.to_dict("records"),
-            "class": df_class.to_dict("records"),
-            "weather": weather_df.to_dict("records"),
-            "track": tracklimits_df.to_dict("records"),
-        }
-        storeB = {
-            "name": os.path.basename(folderB) or "Session 2",
-            "analysis": dfB_analysis.to_dict("records"),
-            "class": dfB_class.to_dict("records"),
-            "weather": weather_df.to_dict("records"),
-            "track": tracklimits_df.to_dict("records"),
-        }
 
         team_names = sorted(df_analysis["team"].dropna().unique().tolist())
         driver_names = sorted(df_analysis["number"].dropna().unique().tolist())
@@ -1500,9 +1434,7 @@ def update_single_tab(n_clicks, tab, kpi_cfg,
         )
         table_divs.insert(0, html.Div(summary, style={"flex": "1 0 100%", "padding": "5px"}))
 
-    if tab == "tab-compare":
-        content = dash.no_update
-    elif tab == "tab-tables":
+    if tab == "tab-tables":
         content = html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
     elif tab == "tab-figs":
         graphs = []
@@ -1536,71 +1468,7 @@ def update_single_tab(n_clicks, tab, kpi_cfg,
     else:
         content = html.Div()
 
-    return (
-        content,
-        storeA,
-        storeB,
-        data,
-        data,
-        team_opts,
-        teams_out,
-        driver_opts,
-        drivers_out,
-    )
-
-@app.callback(
-    Output("tab-content", "children"),
-    Input("result-tabs", "value"),
-    State("sessionA-data", "data"),
-    State("sessionB-data", "data"),
-    State("team-filter", "value"),
-    State("number-filter", "value"),
-    State("lap-filter-toggle", "value"),
-    State("sector-toggle", "value"),
-    State("gap-toggle", "value"),
-    prevent_initial_call=True,
-)
-
-def update_compare_content(tab, dataA, dataB,
-                           teams, drivers,
-                           lap_toggle, sec_toggle, gap_toggle):
-    if tab != "tab-compare":
-        raise PreventUpdate
-
-    if not dataA or not dataB:
-        return html.Div("Load two sessions to compare")
-
-    def df_from(store, key):
-        rows = store.get(key, [])
-        return pd.DataFrame(rows)
-
-    dfA = df_from(dataA, "analysis")
-    dfB = df_from(dataB, "analysis")
-    classA = df_from(dataA, "class")
-    classB = df_from(dataB, "class")
-
-    if teams:
-        dfA = dfA[dfA["team"].isin(teams)]
-        dfB = dfB[dfB["team"].isin(teams)]
-    if drivers:
-        dfA = dfA[dfA["number"].isin(drivers)]
-        dfB = dfB[dfB["number"].isin(drivers)]
-    
-    sessionA_name = dataA.get("name", "Session 1")
-    sessionB_name = dataB.get("name", "Session 2")
-
-    figs = build_comparison_figures(
-    dfA, dfB,
-    nameA=sessionA_name,          # o simplemente "Q1"
-    nameB=sessionB_name,          #            "Q2"
-    team_colors=TEAM_COLOR,       # ← aquí
-)
-    graphs = [dcc.Graph(figure=f) for f in figs.values()]
-    return html.Div(graphs, style={
-        "display": "grid",
-        "gridTemplateColumns": "repeat(2,1fr)",
-        "gap": "12px",
-    })
+    return (content, data, data, team_opts, teams_out, driver_opts, drivers_out)
 
 @app.callback(
     Output("download-report", "data"),
