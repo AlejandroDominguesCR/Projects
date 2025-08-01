@@ -378,7 +378,7 @@ def build_figures(
 
     ss_sector = sector_slipstream_stats(
         df_analysis,
-        fast_threshold=cfg.get("fast_threshold", 0.05),
+        fast_threshold=cfg.get("fast_threshold", 0.02),   # usa el mismo slider
         dt_min=cfg.get("dt_min", 0.20),
         dt_max=cfg.get("dt_max", 2.50),
         topspeed_delta=cfg.get("topspeed_delta", 6.0),
@@ -1208,6 +1208,58 @@ app.layout = html.Div(
 app.layout["control-panel-body"].children = build_control_panel(DEFAULT_KPI_VALUES)
 
 @app.callback(
+    Output("kpi-config", "data"),
+    Output("kpi-fast-threshold", "value"),
+    Output("kpi-dt-min", "value"),
+    Output("kpi-dt-max", "value"),
+    Output("kpi-topspeed-delta", "value"),
+    Output("kpi-ref-gap", "value"),
+    Output("kpi-min-laps", "value"),
+    Output("kpi-consistency-trim", "value"),
+    Input("apply-kpi-btn", "n_clicks"),
+    Input("reset-kpi-btn", "n_clicks"),
+    State("kpi-fast-threshold", "value"),
+    State("kpi-dt-min", "value"),
+    State("kpi-dt-max", "value"),
+    State("kpi-topspeed-delta", "value"),
+    State("kpi-ref-gap", "value"),
+    State("kpi-min-laps", "value"),
+    State("kpi-consistency-trim", "value"),
+    prevent_initial_call=True,
+)
+
+def update_kpi_store(n_apply, n_reset,
+                     fast_thr, dt_min, dt_max,
+                     ts_delta, ref_gap, min_laps, cons_trim):
+    """Update kpi-config store and optionally reset the panel inputs."""
+    trig = dash.callback_context.triggered_id
+    if trig == "reset-kpi-btn":
+        cfg = DEFAULT_KPI_VALUES.copy()
+    else:
+        cfg = {
+            "fast_threshold": fast_thr,
+            "dt_min": dt_min,
+            "dt_max": dt_max,
+            "topspeed_delta": ts_delta,
+            "ref_gap": ref_gap,
+            "min_laps": min_laps,
+            "consistency_threshold": DEFAULT_KPI_VALUES["consistency_threshold"],
+            "consistency_trim": cons_trim,
+            "consistency_min_laps": DEFAULT_KPI_VALUES["consistency_min_laps"],
+        }
+
+    return (
+        cfg,
+        cfg["fast_threshold"],
+        cfg["dt_min"],
+        cfg["dt_max"],
+        cfg["topspeed_delta"],
+        cfg["ref_gap"],
+        cfg["min_laps"],
+        cfg["consistency_trim"],
+    )
+
+@app.callback(
     Output("folder-input", "value"),
     Input("browse-btn", "n_clicks"),
     prevent_initial_call=True,
@@ -1223,178 +1275,93 @@ def on_browse(n_clicks):
     return folder
 
 @app.callback(
+    Output("tab-content", "children"),
     Output("data-store", "data"),
+    Output("session-data", "data"),
     Output("team-filter", "options"),
     Output("team-filter", "value"),
-    Output("session-data", "data"),
     Output("number-filter", "options"),
     Output("number-filter", "value"),
     Input("load-btn", "n_clicks"),
-    Input("team-filter", "value"),
-    State("folder-input", "value"),
-    Input("lap-filter-toggle", "value"),
-    Input("sector-toggle", "value"),
-    Input("gap-toggle", "value"),
-    Input("number-filter", "value"),
-    Input("kpi-config", "data"),
-)
-
-def on_load(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers, kpi_cfg):
-    if not n_clicks or not folder or not os.path.isdir(folder):
-        raise PreventUpdate
-    df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
-    # 0) Extraemos la base “raw” en Excel
-    raw_path = os.path.join(folder, "session_raw_data.xlsx")
-    export_raw_session(folder, raw_path)
-    logging.info(f"Raw data exported to {raw_path}")
-    team_names   = sorted(df_analysis["team"].dropna().unique().tolist())
-    driver_names = sorted(df_analysis["number"].dropna().unique().tolist())
-    if not teams:
-        teams = team_names
-
-    if not drivers:                      
-        drivers = driver_names
-
-    df_analysis = df_analysis[df_analysis["number"].isin(drivers)]
-
-    filter_fast   = "ALL" not in (lap_toggle or [])
-    include_sects = "SECT" in (sec_toggle or [])
-    include_gap   = "GAP" in (gap_toggle or [])
-    cfg = kpi_cfg or {}
-    figs, driver_tables, fast_table, grid_order = build_figures(
-        df_analysis, df_class, weather_df, tracklimits_df, teams,
-        filter_fast=filter_fast,
-        include_sectors=include_sects,
-        include_sector_gaps=include_gap,
-        kpi_params=cfg,
-    )
-
-    grid_order = list(driver_tables.keys())
-    if not df_class.empty and "position" in df_class.columns:
-        grid_order = (
-            df_class.sort_values("position")["number"].tolist()
-        )
-
-    grid_order = [d for d in grid_order if d in drivers]
-    for drv in drivers:
-        if drv not in grid_order:
-            grid_order.append(drv)
-
-    if fast_table is None:
-        logging.warning("fast_table is None – returning empty list")
-        fast_rows = []
-    else:
-        fast_rows = fast_table.to_dict(orient="records")
-
-    serialized = {
-        "figs": {name: fig.to_dict() for name, fig in figs.items()},
-        "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
-        "fast_table": fast_rows,
-        "include_gap": include_gap,
-        "grid_order": grid_order,
-    }
-
-    team_opts   = [{"label": t, "value": t} for t in team_names]
-    driver_opts = [{"label": d, "value": d} for d in driver_names]
-
-    return (
-        serialized, team_opts, teams, serialized, driver_opts, drivers,
-    )
-
-@app.callback(
-    Output("data-store", "data", allow_duplicate=True),
-    Output("session-data", "data", allow_duplicate=True),
-    Output("kpi-config", "data"),
-    Input("apply-kpi-btn", "n_clicks"),
-    State("team-filter", "value"),
-    State("folder-input", "value"),
-    State("lap-filter-toggle", "value"),
-    State("sector-toggle", "value"),
-    State("gap-toggle", "value"),
-    State("number-filter", "value"),
-    State("kpi-fast-threshold", "value"),
-    State("kpi-dt-min", "value"),
-    State("kpi-dt-max", "value"),
-    State("kpi-topspeed-delta", "value"),
-    State("kpi-ref-gap", "value"),
-    State("kpi-min-laps", "value"),
-    State("kpi-consistency-threshold", "value"),
-    State("kpi-consistency-trim", "value"),
-    State("kpi-consistency-min-laps", "value"),
-    prevent_initial_call=True,
-)
-
-def apply_kpi_params(n_clicks, teams, folder, lap_toggle, sec_toggle, gap_toggle, drivers,
-                     _fast_thr, _dt_min, _dt_max, _ts_delta, _ref_gap, _min_laps,
-                     _cons_thr, _cons_trim, _cons_min):
-    if not n_clicks or not folder or not os.path.isdir(folder):
-        raise PreventUpdate
-
-    ctx = dash.callback_context
-    cfg = {
-        key: ctx.states.get(f"kpi-{key.replace('_', '-')}.value")
-        for key in DEFAULT_KPI_VALUES
-    }
-
-    df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
-    team_names = sorted(df_analysis["team"].dropna().unique().tolist())
-    driver_names = sorted(df_analysis["number"].dropna().unique().tolist())
-
-    if not teams:
-        teams = team_names
-    if not drivers:
-        drivers = driver_names
-
-    df_analysis = df_analysis[df_analysis["number"].isin(drivers)]
-    filter_fast = "ALL" not in (lap_toggle or [])
-    include_sects = "SECT" in (sec_toggle or [])
-    include_gap = "GAP" in (gap_toggle or [])
-
-    figs, driver_tables, fast_table, grid_order = build_figures(
-        df_analysis, df_class, weather_df, tracklimits_df, teams,
-        filter_fast=filter_fast,
-        include_sectors=include_sects,
-        include_sector_gaps=include_gap,
-        kpi_params=cfg,
-    )
-
-    grid_order = [d for d in grid_order if d in drivers]
-    for drv in drivers:
-        if drv not in grid_order:
-            grid_order.append(drv)
-
-    fast_rows = [] if fast_table is None else fast_table.to_dict(orient="records")
-    serialized = {
-        "figs": {name: fig.to_dict() for name, fig in figs.items()},
-        "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
-        "fast_table": fast_rows,
-        "include_gap": include_gap,
-        "grid_order": grid_order,
-    }
-
-    return serialized, serialized, cfg
-
-@app.callback(
-    Output("control-panel", "children"),
-    Input("reset-kpi-btn", "n_clicks"),
-    prevent_initial_call=True,
-)
-
-def reset_kpi_params(n_clicks):
-    if not n_clicks:
-        raise PreventUpdate
-    return build_control_panel()
-
-@app.callback(
-    Output("tab-content", "children"),
-    Input("data-store", "data"),
     Input("result-tabs", "value"),
     Input("kpi-config", "data"),
+    Input("lap-filter-toggle", "value"),   
+    Input("sector-toggle", "value"),        
+    Input("gap-toggle", "value"),           
+    State("folder-input", "value"),
+    State("team-filter", "value"),
+    State("number-filter", "value"),
+    State("data-store", "data"),
+    prevent_initial_call=True,
 )
 
-def update_tab_content(data, tab, _):
-    if not data:
-        raise PreventUpdate
+def update_tab_content(n_clicks, tab, kpi_cfg,
+                      lap_toggle, sec_toggle, gap_toggle,
+                      folder, teams, drivers, stored):
+    ctx = dash.callback_context
+    trig = ctx.triggered_id
+
+    if trig == "result-tabs" and stored:
+        data = stored
+        team_opts = dash.no_update
+        driver_opts = dash.no_update
+        teams_out = dash.no_update
+        drivers_out = dash.no_update
+    else:
+        if not n_clicks or not folder or not os.path.isdir(folder):
+            raise PreventUpdate
+        df_analysis, df_class, weather_df, tracklimits_df = load_data(folder)
+        raw_path = os.path.join(folder, "session_raw_data.xlsx")
+        export_raw_session(folder, raw_path)
+        logging.info(f"Raw data exported to {raw_path}")
+
+        team_names = sorted(df_analysis["team"].dropna().unique().tolist())
+        driver_names = sorted(df_analysis["number"].dropna().unique().tolist())
+
+        if not teams:
+            teams = team_names
+        if not drivers:
+            drivers = driver_names
+
+        df_analysis = df_analysis[df_analysis["number"].isin(drivers)]
+
+        filter_fast = "ALL" not in (lap_toggle or [])
+        include_sects = "SECT" in (sec_toggle or [])
+        include_gap = "GAP" in (gap_toggle or [])
+        cfg = kpi_cfg or {}
+
+        figs, driver_tables, fast_table, grid_order = build_figures(
+            df_analysis, df_class, weather_df, tracklimits_df, teams,
+            filter_fast=filter_fast,
+            include_sectors=include_sects,
+            include_sector_gaps=include_gap,
+            kpi_params=cfg,
+        )
+
+        grid_order = list(driver_tables.keys())
+        if not df_class.empty and "position" in df_class.columns:
+            grid_order = (
+                df_class.sort_values("position")["number"].tolist()
+            )
+
+        grid_order = [d for d in grid_order if d in drivers]
+        for drv in drivers:
+            if drv not in grid_order:
+                grid_order.append(drv)
+
+        fast_rows = [] if fast_table is None else fast_table.to_dict(orient="records")
+        data = {
+            "figs": {name: fig.to_dict() for name, fig in figs.items()},
+            "tables": {drv: tbl.to_dict(orient="records") for drv, tbl in driver_tables.items()},
+            "fast_table": fast_rows,
+            "include_gap": include_gap,
+            "grid_order": grid_order,
+        }
+
+        team_opts = [{"label": t, "value": t} for t in team_names]
+        driver_opts = [{"label": d, "value": d} for d in driver_names]
+        teams_out = teams
+        drivers_out = drivers
 
     figs_dict = data.get("figs", {})
     figs = {
@@ -1468,7 +1435,7 @@ def update_tab_content(data, tab, _):
         table_divs.insert(0, html.Div(summary, style={"flex": "1 0 100%", "padding": "5px"}))
 
     if tab == "tab-tables":
-        return html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
+        content = html.Div(table_divs, style={"display": "flex", "flexWrap": "wrap"})
     elif tab == "tab-figs":
         graphs = []
 
@@ -1495,11 +1462,13 @@ def update_tab_content(data, tab, _):
                 )
             )
 
-        return html.Div(graphs)
+        content = html.Div(graphs)
     elif tab == "tab-control":
-        return html.Div()
+        content = html.Div()
+    else:
+        content = html.Div()
 
-    return html.Div()
+    return (content, data, data, team_opts, teams_out, driver_opts, drivers_out)
 
 @app.callback(
     Output("download-report", "data"),
