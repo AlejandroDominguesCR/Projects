@@ -158,6 +158,7 @@ def seconds_to_mmss(t: float | int | str) -> str:
     m, s = divmod(t, 60)
     return f"{int(m):d}:{s:06.3f}"
 
+
 def compute_gap_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Compute gap-related columns if not already present.
 
