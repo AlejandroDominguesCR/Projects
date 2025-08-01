@@ -17,6 +17,7 @@ import random
 from plotly.subplots import make_subplots 
 from collections import OrderedDict
 import numpy as np
+import concurrent.futures, threading
 
 try:
     import statsmodels.api as sm  # noqa:F401
@@ -52,6 +53,29 @@ from KPI_builder import (
     slipstream_gap_gain,
     slipstream_sector_gap_gain,
 )
+
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+
+def _choose_folder_blocking() -> str:
+    """Lanza filedialog.askdirectory() en el hilo principal."""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    folder = filedialog.askdirectory()
+    root.destroy()
+    return folder
+
+
+def choose_folder() -> str:
+    """Abre un diálogo de carpeta de forma segura para cualquier hilo."""
+    if threading.current_thread() is threading.main_thread():
+        return _choose_folder_blocking()
+
+    fut = _executor.submit(_choose_folder_blocking)
+    return fut.result()
 
 def get_team_colors() -> dict[str, str]:
     """Devuelve el color principal (hex) para cada equipo."""
@@ -1272,10 +1296,7 @@ def update_kpi_store(n_apply, n_reset,
 )
 
 def on_browse(n_clicks):
-    root = tk.Tk()
-    root.withdraw()
-    folder = filedialog.askdirectory()
-    root.destroy()
+    folder = choose_folder()
     if not folder:
         raise PreventUpdate
     return folder
@@ -1287,10 +1308,7 @@ def on_browse(n_clicks):
 )
 
 def on_browse_2(n_clicks):
-    root = tk.Tk()
-    root.withdraw()
-    folder = filedialog.askdirectory()
-    root.destroy()
+    folder = choose_folder()
     if not folder:
         raise PreventUpdate
     return folder
