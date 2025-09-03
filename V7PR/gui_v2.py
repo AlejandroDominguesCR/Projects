@@ -13,7 +13,6 @@ from scipy.interpolate import interp1d
 from plotly.offline import plot
 import math
 
-
 def set_dark_theme(app):
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor(30, 30, 30))
@@ -87,7 +86,7 @@ def parse_json_setup(json_data):
 
     # Neumático (ejemplo)
     kt_f = 373100 #276500
-    kt_r = 397900 #397900 #295000 #282100, 269000, 
+    kt_r = 397900 #295000 #397900  #282100, 269000, 
 
     hRideF = json_data["config"]["chassis"].get("hRideFSetup")
     hRideR = json_data["config"]["chassis"].get("hRideRSetup")
@@ -96,15 +95,15 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    stroke_FL = 0.029 #
-    stroke_FR = 0.029 #
-    stroke_RL = 0.059 #
-    stroke_RR = 0.059 #
+    #stroke_FL = 0.029 #
+    #stroke_FR = 0.029 #
+    #stroke_RL = 0.059 #
+    #stroke_RR = 0.059 #
 
-    #stroke_FL = 0.01965
-    #stroke_FR = 0.01965
-    #stroke_RL = 0.0305
-    #stroke_RR = 0.0305
+    stroke_FL = 0.01965
+    stroke_FR = 0.01965
+    stroke_RL = 0.0305
+    stroke_RR = 0.0305
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -182,7 +181,6 @@ def parse_json_setup(json_data):
         'zCoG': zCoG
     }
 
-
     global_setup.update({
         "gap_bumpstop_FL": params[0]["bump_gap"] ,
         "gap_bumpstop_FR": params[1]["bump_gap"] ,
@@ -190,8 +188,7 @@ def parse_json_setup(json_data):
         "gap_bumpstop_RR": params[3]["bump_gap"] 
     })
 
-
-    mr_f_wd = 2.1 #1.491587949 
+    mr_f_wd = 1.491587949 
     mr_r_wd = 1.32579 
 
     mr_f_rd = (1.491587949 * (np.pi / 180.0))/1000  #mr_wd * mr_rd para sacar el mr_rw, es decir, el paso directo
@@ -242,7 +239,7 @@ def parse_json_setup(json_data):
             'vertical': tyres['rear']['VERTICAL']
         }
     }
-    # --- AERODINÁMICA ---
+
     global_setup.update({
         "aero_full": aero  # información extendida del undertray
     })
@@ -282,7 +279,7 @@ def parse_json_setup(json_data):
     aARB_R_mm = dist(pts_r["rARBAxis"], pts_r["rARBRockerPickup"]) * 1000
 
     # 2. Wheel-rate (N/mm) de la barra para UNA rueda
-    kARB_F_wheel = 2*kARB_F * 1000 / (aARB_F_mm ** 2 * mr_f_wd)
+    kARB_F_wheel = (2*kARB_F * 1000 / (aARB_F_mm ** 2 * mr_f_wd))
     kARB_R_wheel = 2*kARB_R * 1000 / (aARB_R_mm ** 2 * mr_r_wd)
 
     # 3. Guárdalo en global_setup
@@ -303,8 +300,8 @@ def prepare_simple_params(params, global_setup):
 
     from scipy.interpolate import interp1d
 
-    kFL = (params[0]['kSpring']) / global_setup['MR_spring_FL']**2
-    kFR = (params[1]['kSpring']) / global_setup['MR_spring_FR']**2
+    kFL = (params[0]['kSpring']*1.5) / global_setup['MR_spring_FL']**2
+    kFR = (params[1]['kSpring']*1.5) / global_setup['MR_spring_FR']**2
     kRL = (params[2]['kSpring']) / global_setup['MR_spring_RL']**2
     kRR = (params[3]['kSpring']) / global_setup['MR_spring_RR']**2
 
@@ -1398,7 +1395,6 @@ class SevenPostRigGUI(QWidget):
         from visualizer_dash import export_full_report
         export_full_report(self.sim_results, export_path)
         self.feedback(f"✅ Reporte exportado en {export_path}", "success")
-
 
     def feedback(self, msg, level):
         color = {"success": "#4e9a06", "warning": "#f6c700", "error": "#d7263d"}.get(level, "#aaa")

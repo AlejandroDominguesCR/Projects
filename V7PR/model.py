@@ -98,9 +98,9 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
 
         # 6) tope rígido (pistón → rueda)
         f_stop_p = tope_fuerza(x_raw, z_top, z_bot)  # [N] pistón
-        f_stop   = f_stop_p * mr_dw                 # [N] rueda
+        #f_stop   = f_stop_p * mr_dw                 # [N] rueda
 
-        return f_spring + f_bump + f_damper + f_stop
+        return f_spring + f_bump + f_damper + f_stop_p
 
     # Cálculo de offsets estáticos y dinámicos
     phi_off_front = -lf * phi
@@ -544,9 +544,10 @@ def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, params
         # Guarda el sag estático en el diccionario para que wheel_force lo utilice
         # (comp_rel = x_piston - sag_piston). Esto actualiza el valor que se
         # utiliza dentro del solver para corregir la precarga.
+        mr     = params[f'MR_{corner}']           # wheel/damper
         params[f'x_static_{corner}'] = x_stat
         # Carrera total de amortiguador para esta esquina [m]
-        stroke = params[f'stroke_{corner}']
+        stroke = params[f'stroke_{corner}']*mr
         # Extensión disponible = lo mismo que nos hemos comprimido [m]
         stroke_ext  = abs(x_stat)
         # Compresión disponible = lo que queda del stroke [m]
@@ -555,8 +556,6 @@ def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, params
         params[f'z_topout_{corner}']    = x_stat - stroke_ext   # límite de extensión
         params[f'z_bottomout_{corner}'] = x_stat + stroke_comp  # límite de compresión
     # ──────────────────────────────────────────────────────────────
-
-
 
     y0 = [h0, 0.0, phi0, 0.0, theta0, 0.0, zFR0, 0.0, zFL0, 0.0, zRL0, 0.0, zRR0, 0.0]
 
@@ -602,13 +601,10 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         [ lr,  track_r / 2],   # RL
         [ lr, -track_r / 2],   # RR
     ])
-    xi = pos[:, 0]      # coordenada longitudinal  (x)
-    yi = pos[:, 1]      # coordenada transversal  (y)
+
     # Índices de estado en sol.y: desplazamientos "unsprung" (zu) y velocidades (zu_dot)
     zu_idx    = [8,  6, 10, 12]
     zudot_idx = [9,  7, 11, 13]
-
-
 
     # ──────────────────────────────────────────────────────────────────────────────
     # 2) Extraer estados principales de sol.y
@@ -619,9 +615,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     phi_dot= sol.y[3, :]
     theta  = sol.y[4, :]     # roll [rad]
     theta_dot = sol.y[5, :]
-
-    h0_static = params['h0']                  # lo guardó compute_static_equilibrium
-
 
     # Desplazamientos "unsprung" (ruedas) y sus velocidades
     zu      = np.stack([sol.y[idx, :] for idx in zu_idx],    axis=0)  # shape: (4, N)
@@ -794,7 +787,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     heave_front = (RH_front - RH_front_static)/mr_wd[0]     # m  (negativo = se hunde)
     heave_rear  = (RH_rear  - RH_rear_static)/mr_wd[2]      # m
     
-    sag_piston = sag_wheel / mr_dw  # → pistón
+    sag_piston = sag_wheel * mr_dw  # → pistón
 
     # travel instantáneo rueda→pistón (compresión +)
     x_piston   = x_spring_raw / mr_dw  # porque x_spring_raw es negativo en compresión
@@ -888,11 +881,11 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     f_dyn = dF_lat + dF_long              #  (+ dF_el si procede)
 
     # 4d) Fuerza neta en rueda (nunca negativa)
-    wheel_load = (static - aero - f_arb + f_dyn) / 9.81
+    wheel_load = (static - aero + f_dyn) / 9.81
     wheel_load_std = np.std(wheel_load, axis=1)          # (4,)
     wheel_load_max = np.max(wheel_load, axis=1)   # máximo por rueda [N]
     wheel_load_min = np.min(wheel_load, axis=1)   # mínimo por rueda [N]
-    f_wheel = (static - aero - f_arb + f_dyn)    # (4, N)
+    f_wheel = (static - aero + f_dyn)    # (4, N)
     
 
     f_damp_FL, Pxx_damp_FL = welch(f_damper[0], fs=fs, nperseg=nperseg, noverlap=noverlap)
@@ -1015,8 +1008,8 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
 
     # Cargas front/rear  RMS en mask grip-lateral
     if np.any(grip_lateral_mask):
-        fl_gl = np.mean(wheel_load[0:2, grip_lateral_mask], axis=0)
-        rl_gl = np.mean(wheel_load[2:4, grip_lateral_mask], axis=0)
+        fl_gl = np.mean(f_tire[0:2, grip_lateral_mask], axis=0)
+        rl_gl = np.mean(f_tire[2:4, grip_lateral_mask], axis=0)
         front_load_rms = np.sqrt(np.mean(fl_gl**2))
         rear_load_rms  = np.sqrt(np.mean(rl_gl**2))
     else:
@@ -1112,7 +1105,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     return {
         # --- Cinemática básica ---
         'travel' :            RH + travel_rel,             # (4, N) [m]  
-        'RH' :                RH_corners,                     # (4, N) [m]
+        'RH' :                RH_corners + travel_rel ,                     # (4, N) [m]
         'RH_front':           RH_front*mr_wd,               # (N,) [m]
         'RH_rear':            RH_rear*mr_wd,                # (N,) [m]
         'z_s' :               zs,                     # (4, N) [m]
@@ -1121,7 +1114,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         'travel_static':      travel_static,          # (4, 1)
         'travel_max':         travel_max,             # (4,)
         'travel_min':         travel_min,             # (4,)
-        'damper_travel':      x_wheel,                # (4, N)
+        'damper_travel':      (travel_rel-(sag_wheel/mr_wd)),                  #(4, N)
         'margen_ext':         margen_ext,             # (4, N)
         'margen_comp':        margen_comp,            # (4, N)
 

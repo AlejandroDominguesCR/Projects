@@ -995,262 +995,262 @@
       "rGripBalanceUserOffset": 0
     },
     "aero": {
-      "PolynomialCLiftBodyFDefinition": [
-        {
-          "expression": "Const",
-          "coefficient": 1.329317
-        },
-        {
-          "expression": "hRideR",
-          "coefficient": 32.417
-        },
-        {
-          "expression": "hRideR*hRideR",
-          "coefficient": -762.32
-        },
-        {
-          "expression": "hRideR*hRideR*hRideR",
-          "coefficient": 6200
-        },
-        {
-          "expression": "hRideF",
-          "coefficient": -34.769
-        },
-        {
-          "expression": "hRideF*hRideR",
-          "coefficient": 687.53
-        },
-        {
-          "expression": "hRideF*hRideR*hRideR",
-          "coefficient": -8610
-        },
-        {
-          "expression": "hRideF*hRideF",
-          "coefficient": 669.4
-        },
-        {
-          "expression": "hRideF*hRideF*hRideR",
-          "coefficient": -41500
-        },
-        {
-          "expression": "hRideF*hRideF*hRideR*hRideR",
-          "coefficient": 537000
-        },
-        {
-          "expression": "hRideF*hRideF*hRideF",
-          "coefficient": 166
-        },
-        {
-          "expression": "aFlapF",
-          "coefficient": -0.017745
-        },
-        {
-          "expression": "aFlapF*aFlapF",
-          "coefficient": 0.001179
-        },
-        {
-          "expression": "aFlapR",
-          "coefficient": 0
-        },
-        {
-          "expression": "aFlapR*aFlapR",
-          "coefficient": 0
-        }
-      ],
-      "PolynomialCLiftBodyRDefinition": [
-        {
-          "expression": "Const",
-          "coefficient": 5.628673
-        },
-        {
-          "expression": "hRideR",
-          "coefficient": 67.384
-        },
-        {
-          "expression": "hRideR*hRideR",
-          "coefficient": -1922
-        },
-        {
-          "expression": "hRideR*hRideR*hRideR",
-          "coefficient": 15700
-        },
-        {
-          "expression": "hRideF",
-          "coefficient": -14.238
-        },
-        {
-          "expression": "hRideF*hRideR",
-          "coefficient": 2590.3
-        },
-        {
-          "expression": "hRideF*hRideR*hRideR",
-          "coefficient": -54500
-        },
-        {
-          "expression": "hRideF*hRideF",
-          "coefficient": 1354
-        },
-        {
-          "expression": "hRideF*hRideF*hRideR",
-          "coefficient": -112800
-        },
-        {
-          "expression": "hRideF*hRideF*hRideR*hRideR",
-          "coefficient": 2000000
-        },
-        {
-          "expression": "hRideF*hRideF*hRideF",
-          "coefficient": -9990
-        },
-        {
-          "expression": "aFlapF",
-          "coefficient": -0.250101
-        },
-        {
-          "expression": "aFlapF*aFlapF",
-          "coefficient": 0.003883
-        },
-        {
-          "expression": "aFlapR",
-          "coefficient": 0
-        },
-        {
-          "expression": "aFlapR*aFlapR",
-          "coefficient": 0
-        }
-      ],
-      "PolynomialCDragBodyDefinition": [
-        {
-          "expression": "Const",
-          "coefficient": 2.145258
-        },
-        {
-          "expression": "hRideR",
-          "coefficient": 6.5203
-        },
-        {
-          "expression": "hRideR*hRideR",
-          "coefficient": -222.61
-        },
-        {
-          "expression": "hRideR*hRideR*hRideR",
-          "coefficient": 2450
-        },
-        {
-          "expression": "hRideF",
-          "coefficient": -4.8693
-        },
-        {
-          "expression": "hRideF*hRideR",
-          "coefficient": 159.83
-        },
-        {
-          "expression": "hRideF*hRideR*hRideR",
-          "coefficient": -2440
-        },
-        {
-          "expression": "hRideF*hRideF",
-          "coefficient": 342.81
-        },
-        {
-          "expression": "hRideF*hRideF*hRideR",
-          "coefficient": -9130
-        },
-        {
-          "expression": "hRideF*hRideF*hRideR*hRideR",
-          "coefficient": 123000
-        },
-        {
-          "expression": "hRideF*hRideF*hRideF",
-          "coefficient": -4190
-        },
-        {
-          "expression": "aFlapF",
-          "coefficient": -0.057083
-        },
-        {
-          "expression": "aFlapF*aFlapF",
-          "coefficient": 0.000998
-        },
-        {
-          "expression": "aFlapR",
-          "coefficient": 0
-        },
-        {
-          "expression": "aFlapR*aFlapR",
-          "coefficient": 0
-        }
-      ],
-      "flapAngles": {
-        "aFlapF": 25.5,
-        "aFlapR": 0
-      },
-      "hRideRStallOnset": 0,
-      "hRideRStallComplete": 0,
-      "CLiftBodyFStallLoss": 0,
-      "CLiftBodyRStallLoss": 0,
-      "CDragBodyStallLoss": 0,
-      "coefficientOffsets": {
-        "CLiftBodyFUserOffset": 0,
-        "CLiftBodyRUserOffset": 0,
-        "CDragBodyUserOffset": 0,
-        "CLiftBodyUserOffset": 0,
-        "rAeroBalanceUserOffset": 0
-      },
-      "CDragWheelF": 0,
-      "CDragWheelR": 0,
-      "CLiftWheelF": 0,
-      "CLiftWheelR": 0,
-      "ARef": 1,
-      "DRS": {
-        "CLiftBodyFDRSPolynomial": [
-          {
+        "PolynomialCLiftBodyFDefinition": [
+            {
             "expression": "Const",
-            "coefficient": 0.09
-          },
-          {
+            "coefficient": 1.385265
+            },
+            {
+            "expression": "hRideR",
+            "coefficient": 30.94
+            },
+            {
+            "expression": "hRideR*hRideR",
+            "coefficient": -693
+            },
+            {
+            "expression": "hRideR*hRideR*hRideR",
+            "coefficient": 5381
+            },
+            {
+            "expression": "hRideF",
+            "coefficient": -37.548
+            },
+            {
+            "expression": "hRideF*hRideR",
+            "coefficient": 626.42
+            },
+            {
+            "expression": "hRideF*hRideR*hRideR",
+            "coefficient": -7650.7
+            },
+            {
+            "expression": "hRideF*hRideF",
+            "coefficient": 879.16
+            },
+            {
+            "expression": "hRideF*hRideF*hRideR",
+            "coefficient": -39946
+            },
+            {
+            "expression": "hRideF*hRideF*hRideR*hRideR",
+            "coefficient": 508860
+            },
+            {
+            "expression": "hRideF*hRideF*hRideF",
+            "coefficient": -3873.3
+            },
+            {
+            "expression": "aFlapF",
+            "coefficient": -0.017745
+            },
+            {
+            "expression": "aFlapF*aFlapF",
+            "coefficient": 0.001179
+            },
+            {
             "expression": "aFlapR",
             "coefficient": 0
-          },
-          {
+            },
+            {
             "expression": "aFlapR*aFlapR",
             "coefficient": 0
-          }
+            }
         ],
-        "CLiftBodyRDRSPolynomial": [
-          {
+        "PolynomialCLiftBodyRDefinition": [
+            {
             "expression": "Const",
-            "coefficient": -0.813
-          },
-          {
+            "coefficient": 5.642835
+            },
+            {
+            "expression": "hRideR",
+            "coefficient": 53.884
+            },
+            {
+            "expression": "hRideR*hRideR",
+            "coefficient": -1769.7
+            },
+            {
+            "expression": "hRideR*hRideR*hRideR",
+            "coefficient": 14505
+            },
+            {
+            "expression": "hRideF",
+            "coefficient": -12.955
+            },
+            {
+            "expression": "hRideF*hRideR",
+            "coefficient": 2693.8
+            },
+            {
+            "expression": "hRideF*hRideR*hRideR",
+            "coefficient": -57684
+            },
+            {
+            "expression": "hRideF*hRideF",
+            "coefficient": 1365.9
+            },
+            {
+            "expression": "hRideF*hRideF*hRideR",
+            "coefficient": -116910
+            },
+            {
+            "expression": "hRideF*hRideF*hRideR*hRideR",
+            "coefficient": 2094600
+            },
+            {
+            "expression": "hRideF*hRideF*hRideF",
+            "coefficient": -10604
+            },
+            {
+            "expression": "aFlapF",
+            "coefficient": -0.250101
+            },
+            {
+            "expression": "aFlapF*aFlapF",
+            "coefficient": 0.003883
+            },
+            {
             "expression": "aFlapR",
             "coefficient": 0
-          },
-          {
+            },
+            {
             "expression": "aFlapR*aFlapR",
             "coefficient": 0
-          }
+            }
         ],
-        "CDragBodyDRSPolynomial": [
-          {
+        "PolynomialCDragBodyDefinition": [
+            {
             "expression": "Const",
-            "coefficient": -0.269
-          },
-          {
+            "coefficient": 2.054261
+            },
+            {
+            "expression": "hRideR",
+            "coefficient": 6.0928
+            },
+            {
+            "expression": "hRideR*hRideR",
+            "coefficient": -203.39
+            },
+            {
+            "expression": "hRideR*hRideR*hRideR",
+            "coefficient": 2267.4
+            },
+            {
+            "expression": "hRideF",
+            "coefficient": -5.0619
+            },
+            {
+            "expression": "hRideF*hRideR",
+            "coefficient": 150.35
+            },
+            {
+            "expression": "hRideF*hRideR*hRideR",
+            "coefficient": -2558.8
+            },
+            {
+            "expression": "hRideF*hRideF",
+            "coefficient": 370.94
+            },
+            {
+            "expression": "hRideF*hRideF*hRideR",
+            "coefficient": -8542.8
+            },
+            {
+            "expression": "hRideF*hRideF*hRideR*hRideR",
+            "coefficient": 120390
+            },
+            {
+            "expression": "hRideF*hRideF*hRideF",
+            "coefficient": -5047.2
+            },
+            {
+            "expression": "aFlapF",
+            "coefficient": -0.057086
+            },
+            {
+            "expression": "aFlapF*aFlapF",
+            "coefficient": 0.000998
+            },
+            {
             "expression": "aFlapR",
             "coefficient": 0
-          },
-          {
+            },
+            {
             "expression": "aFlapR*aFlapR",
             "coefficient": 0
-          }
+            }
         ],
-        "bDRSEnabled": true,
-        "vCarDRSStraightSim": 81.9444444444444
-      },
-      "rCLiftBodyFFactor": 1,
-      "rCLiftBodyRFactor": 1,
-      "rCDragBodyFactor": 1
+        "flapAngles": {
+            "aFlapF": 23.5,
+            "aFlapR": 0
+        },
+        "hRideRStallOnset": 0,
+        "hRideRStallComplete": 0,
+        "CLiftBodyFStallLoss": 0,
+        "CLiftBodyRStallLoss": 0,
+        "CDragBodyStallLoss": 0,
+        "coefficientOffsets": {
+            "CLiftBodyFUserOffset": -0.15,
+            "CLiftBodyRUserOffset": 0,
+            "CDragBodyUserOffset": 0,
+            "CLiftBodyUserOffset": 0,
+            "rAeroBalanceUserOffset": 0
+        },
+        "CDragWheelF": 0,
+        "CDragWheelR": 0,
+        "CLiftWheelF": 0,
+        "CLiftWheelR": 0,
+        "ARef": 1,
+        "DRS": {
+            "CLiftBodyFDRSPolynomial": [
+            {
+                "expression": "Const",
+                "coefficient": 0.073
+            },
+            {
+                "expression": "aFlapR",
+                "coefficient": 0
+            },
+            {
+                "expression": "aFlapR*aFlapR",
+                "coefficient": 0
+            }
+            ],
+            "CLiftBodyRDRSPolynomial": [
+            {
+                "expression": "Const",
+                "coefficient": -0.846
+            },
+            {
+                "expression": "aFlapR",
+                "coefficient": 0
+            },
+            {
+                "expression": "aFlapR*aFlapR",
+                "coefficient": 0
+            }
+            ],
+            "CDragBodyDRSPolynomial": [
+            {
+                "expression": "Const",
+                "coefficient": -0.274
+            },
+            {
+                "expression": "aFlapR",
+                "coefficient": 0
+            },
+            {
+                "expression": "aFlapR*aFlapR",
+                "coefficient": 0
+            }
+            ],
+            "bDRSEnabled": true,
+            "vCarDRSStraightSim": 81.9444444444444
+        },
+        "rCLiftBodyFFactor": 1,
+        "rCLiftBodyRFactor": 1,
+        "rCDragBodyFactor": 1
     },
     "brakes": {
       "front": {

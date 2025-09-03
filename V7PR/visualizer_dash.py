@@ -307,6 +307,124 @@ def launch_dash(sol, post, setup_name="Setup"):
     plot_data()
     app.run(port=8050, debug=False)
 
+# === Radar KPIs (5 métricas) con rangos fijos ==================================
+RADAR_METRICS = [
+    ("FRH RMS [mm]",        "frh_rms",        False,  1000.0),
+    ("RRH RMS [mm]",        "rrh_rms",        False,  1000.0),
+    ("Pitch RMS [°]",       "pitch_rms",      False,     1.0),
+    ("Front Load RMS [N]",  "front_load_rms", False,    1.0),
+    ("Rear Load RMS [N]",   "rear_load_rms",  False,    1.0),
+]
+
+# rangos "fijos" en UNIDADES ya escaladas por 'scale' (mm, °, N)
+RADAR_FIXED_RANGES = {
+    "frh_rms":        (0.0, 20.0),   # mm  
+    "rrh_rms":        (0.0, 20.0),   # mm
+    "pitch_rms":      (0.0, 0.35),   # °   
+    "front_load_rms": (0.0, 5000), # N   
+    "rear_load_rms":  (0.0, 18000), # N
+}
+
+def build_kpi_radar(
+    kpi_data,
+    labels,
+    metrics=RADAR_METRICS,
+    normalize="fixed",           # "dataset" | "fixed" | False
+    fixed_ranges=RADAR_FIXED_RANGES
+):
+
+    theta = [m[0] for m in metrics]
+
+    # matriz raw[M métricas, K setups] en unidades finales (mm,°,N)
+    raw = np.array([
+        [float(k.get(key, np.nan)) * scale for k in kpi_data]
+        for (_lbl, key, _inv, scale) in metrics
+    ], dtype=float)
+
+    if normalize == "dataset":
+        mins = np.nanmin(raw, axis=1)
+        maxs = np.nanmax(raw, axis=1)
+        span = np.where((maxs - mins) == 0.0, 1.0, (maxs - mins))
+        vals = (raw - mins[:, None]) / span[:, None]
+        title_suffix = " (normalised to dataset, higher is better)"
+        radial_range = [0, 1]
+
+    elif normalize == "fixed":
+        # rangos base por métrica
+        mins = np.array([fixed_ranges[m[1]][0] for m in metrics], dtype=float)
+        maxs = np.array([fixed_ranges[m[1]][1] for m in metrics], dtype=float)
+
+        # auto-expandir si hay datos fuera de rango (padding 5%)
+        data_min = np.nanmin(raw, axis=1)
+        data_max = np.nanmax(raw, axis=1)
+        mins = np.minimum(mins, data_min * 0.95)
+        maxs = np.maximum(maxs, data_max * 1.05)
+
+        span = np.where((maxs - mins) == 0.0, 1.0, (maxs - mins))
+        vals = (raw - mins[:, None]) / span[:, None]
+        vals = np.clip(vals, 0.0, 1.0)
+
+        title_suffix = ""
+        radial_range = [0, 1]
+
+    else:
+        # sin normalizar (forma menos interpretable por mezclar unidades)
+        vals = raw.copy()
+        title_suffix = " (raw values)"
+        radial_range = [float(np.nanmin(vals)), float(np.nanmax(vals))]
+
+    # invierte donde “menos es mejor”
+    for i, (_lbl, _key, invert, _s) in enumerate(metrics):
+        if invert:
+            vals[i] = 1.0 - vals[i] if normalize else -vals[i]
+
+    vals = np.nan_to_num(vals, nan=0.0)
+
+    fig = go.Figure()
+    th = theta + [theta[0]]
+    for j, name in enumerate(labels):
+        r = vals[:, j].tolist()
+        r.append(r[0])  # cerrar polígono
+
+        custom = np.append(raw[:, j], raw[0, j])
+
+        fig.add_trace(go.Scatterpolar(
+            r=r, theta=th, fill='toself', name=name,
+            customdata=custom,
+            text=[name]*len(th),
+            hovertemplate="<b>%{text}</b><br>%{theta}: %{customdata:.2f}<extra></extra>",
+        ))
+
+    FIG_HEIGHT = globals().get("FIG_HEIGHT", 420)
+    fig.update_layout(
+        title="KPIs – Radar" + title_suffix,
+        polar=dict(radialaxis=dict(range=radial_range, showline=True,
+                                   ticks='outside', tickfont=dict(size=9))),
+        legend=dict(orientation="h", x=0, y=-0.20),
+        margin=dict(t=40, b=80, l=40, r=40),
+        height=FIG_HEIGHT
+    )
+    return fig
+
+def build_kpi_radar_table(kpi_data, labels, metrics=RADAR_METRICS):
+    """Tabla de valores brutos (mm, °, N) para no perder magnitud."""
+    import numpy as np
+    import plotly.graph_objects as go
+    headers = ["KPI"] + list(labels)
+    rows = []
+    for (label, key, _inv, scale) in metrics:
+        row = [label] + [float(k.get(key, float("nan")))*scale for k in kpi_data]
+        rows.append(row)
+
+    # transponer a columnas para go.Table
+    cols = list(map(list, zip(*rows)))
+    fig = go.Figure(data=[go.Table(
+        header=dict(values=headers, fill_color='paleturquoise', align='left'),
+        cells=dict(values=cols, fill_color='lavender', align='left')
+    )])
+    fig.update_layout(title="KPIs – Valores brutos", height=globals().get("FIG_HEIGHT", 480))
+    return fig
+
 def launch_dash_kpis(kpi_data, setup_names):
     from dash import Dash, dcc, html
     import plotly.graph_objects as go
@@ -353,6 +471,22 @@ def launch_dash_kpis(kpi_data, setup_names):
                
         except KeyError:
             continue
+
+    try:
+        fig_radar = build_kpi_radar(kpi_data, labels, normalize="fixed")
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_radar, config=GRAPH_CFG,
+                    style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
+        # tabla de valores brutos
+        fig_radar_tbl = build_kpi_radar_table(kpi_data, labels)
+        layout.append(html.Div(
+            dcc.Graph(figure=fig_radar_tbl, config=GRAPH_CFG,
+                    style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
+    except Exception as e:
+        print("[RADAR] no generado:", e)
+
 
     # --- KPIs PERSONALIZADOS: Road Noise, Pitch vs Distance, Pitch RMS, Ride Height RMS, Scatter, etc. ---
     # ── 2) Accumulated Road‐Noise Normalised by Lap Time ─────────────────────────
@@ -1334,7 +1468,7 @@ def export_full_report(setups, export_path="export_full_report.html"):
         # === 4) Canales de salida del postprocesado =================================
         # (Todos tienen forma (4,N) salvo los listados como escalares/1D)
         trv     = post['travel']            # (4,N) m (neg = compresión)
-        dmp_trv = post['travel_rel']     # (4,N) m
+        dmp_trv = post['damper_travel']     # (4,N) m
         mext    = post['margen_ext']        # (4,N) m
         mcomp   = post['margen_comp']       # (4,N) m
         Fspr    = post['f_spring']          # (4,N) N
