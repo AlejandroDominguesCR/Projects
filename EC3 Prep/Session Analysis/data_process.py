@@ -97,15 +97,21 @@ def convert_time_column(df: pd.DataFrame, time_col: str) -> pd.DataFrame:
     return df
 
 def unify_timestamps(df: pd.DataFrame, time_col: str = "time") -> pd.DataFrame:
-    """Convert ``time_col`` to ``datetime`` if it exists and sort by it."""
-
+    """Convert ``time_col`` to datetime (HH:MM:SS[.ffffff]) sin warnings y ordena por él."""
     if time_col not in df.columns:
         return df
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        df = df.copy()
-        df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+    s = df[time_col].astype(str).str.strip()
+    df = df.copy()
+
+    # Intenta primero con microsegundos, luego sin ellos.
+    dt = pd.to_datetime(s, format="%H:%M:%S.%f", errors="coerce")
+    mask = dt.isna()
+    if mask.any():
+        dt2 = pd.to_datetime(s[mask], format="%H:%M:%S", errors="coerce")
+        dt[mask] = dt2
+
+    df[time_col] = dt
     df = df.sort_values(time_col).reset_index(drop=True)
     return df
 

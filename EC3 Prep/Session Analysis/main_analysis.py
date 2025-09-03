@@ -1,11 +1,10 @@
 import os
 import pandas as pd
 import dash
-from dash import dcc, html, Input, Output, State
+from dash import dcc, html, Input, Output, State, dash_table, MATCH, ALL
 import dash_bootstrap_components as dbc
 from dash.exceptions import PreventUpdate
 import plotly.express as px
-from dash import dash_table  
 import plotly.graph_objects as go
 import argparse
 from plotly.offline import plot
@@ -17,6 +16,7 @@ import random
 from plotly.subplots import make_subplots 
 from collections import OrderedDict
 import numpy as np
+from io import StringIO
 
 try:
     import statsmodels.api as sm  # noqa:F401
@@ -84,10 +84,6 @@ def get_team_colors() -> dict[str, str]:
     }
 
 TEAM_COLOR = get_team_colors()
-
-# ---------------------------------------------------------------------------
-# Control panel utilities
-# ---------------------------------------------------------------------------
 
 DEFAULT_KPI_VALUES: dict[str, float] = {
     "fast_threshold": 0.02,
@@ -371,94 +367,128 @@ def build_figures(
     ss = slipstream_stats(
         df_analysis,
         fast_threshold=cfg.get("fast_threshold", 0.02),
-        dt_min=cfg.get("dt_min", 0.20),
-        dt_max=cfg.get("dt_max", 2.50),
+        dt_min       =cfg.get("dt_min", 0.5),
+        dt_max       =cfg.get("dt_max", 5),
         topspeed_delta=cfg.get("topspeed_delta", 6.0),
     )
 
     ss_sector = sector_slipstream_stats(
         df_analysis,
-        fast_threshold=cfg.get("fast_threshold", 0.02),   # usa el mismo slider
-        dt_min=cfg.get("dt_min", 0.20),
-        dt_max=cfg.get("dt_max", 2.50),
-        topspeed_delta=cfg.get("topspeed_delta", 6.0),
+        fast_threshold = 0.20,     # o incluso 1.20 para que entre toda la tabla
+        dt_min         = 0.00,     # ← permite gaps de 0.0 s a 2.50 s
+        dt_max         = 2.50,
+        topspeed_delta = 0.0,      # ← sin requisito de +km/h
     ).rename(columns={
         "min_time_with_slip_s1": "min_s1_with_slip",
-        "min_time_no_slip_s1": "min_s1_no_slip",
+        "min_time_no_slip_s1":   "min_s1_no_slip",
         "min_time_with_slip_s2": "min_s2_with_slip",
-        "min_time_no_slip_s2": "min_s2_no_slip",
+        "min_time_no_slip_s2":   "min_s2_no_slip",
     })
 
+    # ---------- 1) Lap-time mínimo y Top-speed máximo (con / sin rebufo)
     if not ss.empty:
-        # 1) Lap-time mínimo (orden asc.)
-        ss_lap   = ss.sort_values("min_lap_time_with_slip")
-        orderLap = ss_lap["number"].tolist()
+        ss_lap = ss.sort_values("min_lap_time_with_slip")
+        order  = ss_lap["number"].tolist()
+
         fig_slip_lap = px.bar(
             ss_lap, x="number",
             y=["min_lap_time_no_slip", "min_lap_time_with_slip"],
             barmode="group", title="Lap-time mínimo – Con vs Sin rebufo",
-        )
-        first_val = ss_lap.iloc[0][["min_lap_time_no_slip",
-                                    "min_lap_time_with_slip"]].min()
-        last_val  = ss_lap.iloc[-1][["min_lap_time_no_slip",
-                                    "min_lap_time_with_slip"]].max()
-        fig_slip_lap.update_layout(
-            xaxis={"categoryorder": "array", "categoryarray": orderLap},
-            yaxis={"range": [first_val*0.90, last_val*1.05]}
+        ).update_layout(
+            xaxis={"categoryorder": "array", "categoryarray": order},
+            yaxis={"range": [
+                ss_lap[["min_lap_time_no_slip",
+                        "min_lap_time_with_slip"]].min().min()*0.90,
+                ss_lap[["min_lap_time_no_slip",
+                        "min_lap_time_with_slip"]].max().max()*1.05,
+            ]}
         )
 
-        # 2) Top-speed máximo (orden desc.)
-        ss_spd   = ss.sort_values("max_top_speed_with_slip", ascending=False)
-        orderSpd = ss_spd["number"].tolist()
+        ss_spd  = ss.sort_values("max_top_speed_with_slip", ascending=False)
+        order_s = ss_spd["number"].tolist()
         fig_slip_speed = px.bar(
             ss_spd, x="number",
             y=["max_top_speed_no_slip", "max_top_speed_with_slip"],
-            barmode="group", title="Top Speed máxima – Con vs Sin rebufo",
-        )
-        first_val = ss_spd.iloc[0][["max_top_speed_no_slip",
-                                    "max_top_speed_with_slip"]].max()
-        last_val  = ss_spd.iloc[-1][["max_top_speed_no_slip",
-                                    "max_top_speed_with_slip"]].min()
-        fig_slip_speed.update_layout(
-            xaxis={"categoryorder": "array", "categoryarray": orderSpd},
-            yaxis={"range": [last_val*0.90, first_val*1.05]}
+            barmode="group", title="Top-speed máximo – Con vs Sin rebufo",
+        ).update_layout(
+            xaxis={"categoryorder": "array", "categoryarray": order_s},
+            yaxis={"range": [
+                ss_spd[["max_top_speed_no_slip",
+                        "max_top_speed_with_slip"]].min().min()*0.95,
+                ss_spd[["max_top_speed_no_slip",
+                        "max_top_speed_with_slip"]].max().max()*1.05,
+            ]}
         )
 
-        # 3) Registrar las figuras ⇣
         figs["Slipstream Lap-time (min)"] = fig_slip_lap
         figs["Slipstream TopSpeed (max)"] = fig_slip_speed
 
+    # ─── 2) Sectores 1 y 2  ─────────────────────────────────────────────────
+    #     ‣ Descartamos, por cada piloto, los tiempos de sector que
+    #       superen en > 5 % su sector más rápido (con o sin rebufo).
+    # -----------------------------------------------------------------------
     if not ss_sector.empty:
-        s1 = ss_sector.sort_values("min_s1_with_slip")
-        order_s1 = s1["number"].tolist()
-        fig_s1 = px.bar(
-            s1,
-            x="number",
-            y=["min_s1_no_slip", "min_s1_with_slip"],
-            barmode="group",
-            title="Slipstream Lap-time S1",
+
+        # ── Sector 1 ────────────────────────────────────────────────────────
+        # 1· dataframe “largo”
+        df_s1 = (
+            ss_sector[["number", "min_s1_no_slip", "min_s1_with_slip"]]
+            .melt(id_vars="number", var_name="slip_type", value_name="time")
+            .dropna(subset=["time"])
         )
-        first_val = s1.iloc[0][["min_s1_no_slip", "min_s1_with_slip"]].min()
-        last_val = s1.iloc[-1][["min_s1_no_slip", "min_s1_with_slip"]].max()
-        fig_s1.update_layout(
-            xaxis={"categoryorder": "array", "categoryarray": order_s1},
-            yaxis={"range": [first_val * 0.90, last_val * 1.05]},
+        # 2· sector más rápido de cada piloto
+        best_s1 = (
+            df_s1.groupby("number")["time"]
+                .min()
+                .rename("best_time")
+                .reset_index()
+        )
+        # 3· unimos y filtramos a ≤ 105 % de su best_time
+        df_s1 = (
+            df_s1.merge(best_s1, on="number", how="left")
+                .loc[lambda d: d["time"] <= 1.05 * d["best_time"]]
+        )
+        # 4· orden = tiempo más rápido CON slipstream ya filtrado
+        order_s1 = (
+            df_s1[df_s1["slip_type"] == "min_s1_with_slip"]
+            .sort_values("time")["number"].tolist()
+        )
+        fig_s1 = px.bar(
+            df_s1, x="number", y="time", color="slip_type",
+            barmode="group", category_orders={"number": order_s1},
+            title="Slipstream Lap-time S1",
+        ).update_layout(
+            yaxis={"range": [df_s1["time"].min()*0.90,
+                            df_s1["time"].max()*1.05]},
         )
 
-        s2 = ss_sector.sort_values("min_s2_with_slip")
-        order_s2 = s2["number"].tolist()
-        fig_s2 = px.bar(
-            s2,
-            x="number",
-            y=["min_s2_no_slip", "min_s2_with_slip"],
-            barmode="group",
-            title="Slipstream Lap-time S2",
+        # ── Sector 2 ────────────────────────────────────────────────────────
+        df_s2 = (
+            ss_sector[["number", "min_s2_no_slip", "min_s2_with_slip"]]
+            .melt(id_vars="number", var_name="slip_type", value_name="time")
+            .dropna(subset=["time"])
         )
-        first_val = s2.iloc[0][["min_s2_no_slip", "min_s2_with_slip"]].min()
-        last_val = s2.iloc[-1][["min_s2_no_slip", "min_s2_with_slip"]].max()
-        fig_s2.update_layout(
-            xaxis={"categoryorder": "array", "categoryarray": order_s2},
-            yaxis={"range": [first_val * 0.90, last_val * 1.05]},
+        best_s2 = (
+            df_s2.groupby("number")["time"]
+                .min()
+                .rename("best_time")
+                .reset_index()
+        )
+        df_s2 = (
+            df_s2.merge(best_s2, on="number", how="left")
+                .loc[lambda d: d["time"] <= 1.05 * d["best_time"]]
+        )
+        order_s2 = (
+            df_s2[df_s2["slip_type"] == "min_s2_with_slip"]
+            .sort_values("time")["number"].tolist()
+        )
+        fig_s2 = px.bar(
+            df_s2, x="number", y="time", color="slip_type",
+            barmode="group", category_orders={"number": order_s2},
+            title="Slipstream Lap-time S2",
+        ).update_layout(
+            yaxis={"range": [df_s2["time"].min()*0.90,
+                            df_s2["time"].max()*1.05]},
         )
 
         figs["Slipstream Lap-time S1"] = fig_s1
@@ -467,7 +497,6 @@ def build_figures(
     if not ss.empty or not ss_sector.empty:
         df_tmp = df_analysis.copy()
         df_tmp['slipstream'] = False
-
 
     gain_df = slipstream_gap_gain(
         df_analysis,
@@ -688,6 +717,52 @@ def build_figures(
         )
         figs["Lap Time History"] = fig_hist
 
+    # ─── Fastest-Lap vs Hora ──────────────────────────────────────────────
+    if "timestamp" not in df_analysis.columns and "hour" in df_analysis.columns:
+        # Aseguramos timestamp en formato datetime
+        df_analysis = df_analysis.copy()
+        df_analysis["timestamp"] = pd.to_datetime(
+            df_analysis["hour"], format="%H:%M:%S.%f", errors="coerce"
+        )
+
+    if {"timestamp", "lap_time"}.issubset(df_analysis.columns):
+        # 1· mejor vuelta de cada piloto
+        best_idx = df_analysis.groupby("number")["lap_time"].idxmin()
+        best_df  = df_analysis.loc[best_idx, ["number", "team", "lap_time", "timestamp"]].copy()
+
+        # 2· scatter coloreado por equipo
+        fig_best_vs_time = px.scatter(
+            best_df.sort_values("timestamp"),
+            x="timestamp",
+            y="lap_time",
+            color="team",
+            color_discrete_map=TEAM_COLOR,
+            hover_name="number",
+            title="Fastest Lap de cada piloto vs Hora",
+            labels={"timestamp": "Hora", "lap_time": "Lap-time (s)"},
+        )
+        # 3· línea de tendencia opcional (track evolution)
+        if HAS_STATSMODELS and len(best_df) >= 3:
+            fig_best_vs_time = px.scatter(
+                best_df.sort_values("timestamp"),
+                x="timestamp",
+                y="lap_time",
+                color="team",
+                color_discrete_map=TEAM_COLOR,
+                hover_name="number",
+                title="Fastest Lap de cada piloto vs Hora",
+                labels={"timestamp": "Hora", "lap_time": "Lap-time (s)"},
+            )
+
+        # 4· ejes:  –5 % a +10 % del rango de tiempos
+        ymin, ymax = best_df["lap_time"].min(), best_df["lap_time"].max()
+        delta = ymax - ymin if ymax > ymin else 1
+        fig_best_vs_time.update_layout(
+            yaxis=dict(range=[ymin - 0.05*delta, ymax + 0.10*delta])
+        )
+
+        figs["Fastest Lap vs ToD"] = fig_best_vs_time
+
     bst = best_sector_times(df_analysis)
     if not bst.empty:
         for sec in ['sector1', 'sector2', 'sector3']:
@@ -866,7 +941,6 @@ def build_figures(
                 merged, x="lap_time", y="wind_direction",
                 title="Lap Time vs Wind Direction",
                 **color_kw,
-                trendline="ols" if HAS_STATSMODELS else None,
             )
             fig_scatter_rot.update_layout(
                 xaxis_title="Lap Time (s)", yaxis_title="Dirección (°)"
@@ -1167,7 +1241,104 @@ def build_control_panel(defaults: dict[str, float]) -> html.Div:
 
     return panel
 
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+def _select_folder(dialog_title: str) -> str | None:
+    root = tk.Tk()
+    root.withdraw()
+    root.lift()
+    root.attributes("-topmost", True)
+    root.focus_force()
+    folder = filedialog.askdirectory(parent=root, title=dialog_title, initialdir=os.getcwd())
+    root.destroy()
+    return folder or None
+
+def _attach_weather_to_laps(ldf: pd.DataFrame, wdf: pd.DataFrame) -> pd.DataFrame:
+    """
+    Devuelve ldf + columnas meteo alineadas por timestamp (merge_asof).
+    Crea columnas canónicas: track_temp, wind_direction, wind_speed.
+    """
+    if wdf is None or wdf.empty or ldf is None or ldf.empty:
+        return ldf
+
+    wdf = wdf.copy()
+
+    # --- localizar columnas de tiempo de meteo (mismo set que en Figures) ---
+    ts_cols = {"time_utc", "time_local", "time", "time_utc_str"}
+    time_col = next((c for c in ts_cols if c in wdf.columns), None)
+    if time_col is None:
+        return ldf
+
+    wdf["timestamp"] = pd.to_datetime(wdf[time_col], errors="coerce")
+
+    # --- limpiar dirección viento ---
+    if "wind_direction" in wdf.columns:
+        wdf["wind_direction"] = (
+            wdf["wind_direction"].astype(str)
+                .str.replace(r"[^0-9,.-]", "", regex=True)
+                .str.replace(",", ".")
+                .astype(float)
+        )
+
+    # --- localizar y limpiar velocidad viento ---
+    speed_col = next((c for c in [
+        "wind_speed_kph", "wind_speed_kmh", "wind_speed",
+        "wind_velocity", "wind_speed_ms"
+    ] if c in wdf.columns), None)
+    if speed_col:
+        wdf[speed_col] = (
+            wdf[speed_col].astype(str)
+                .str.replace(r"[^0-9,.-]", "", regex=True)
+                .str.replace(",", ".")
+                .astype(float)
+        )
+        wdf = wdf.rename(columns={speed_col: "wind_speed"})
+    else:
+        wdf["wind_speed"] = np.nan
+
+    # --- localizar y limpiar temperatura pista ---
+    temp_col = next((c for c in [
+        "track_temp", "track_temperature", "track_temp_c", "track_temperature_c"
+    ] if c in wdf.columns), None)
+    if temp_col:
+        wdf[temp_col] = (
+            wdf[temp_col].astype(str)
+                .str.replace(r"[^0-9,.-]", "", regex=True)
+                .str.replace(",", ".")
+                .astype(float)
+        )
+        wdf = wdf.rename(columns={temp_col: "track_temp"})
+    else:
+        wdf["track_temp"] = np.nan
+
+    # --- timestamps de laps: usar fecha de la meteo + 'hour' de ldf (mismo patrón que Figures) ---
+    if "timestamp" not in ldf.columns:
+        if "hour" in ldf.columns:
+            # toma el día de la meteo (primero no nulo)
+            if wdf["timestamp"].notna().any():
+                session_day = wdf["timestamp"].dropna().iloc[0].normalize()
+                ldf = ldf.copy()
+                ldf["timestamp"] = pd.to_datetime(
+                    session_day.strftime("%Y-%m-%d ") + ldf["hour"],
+                    format="%Y-%m-%d %H:%M:%S.%f", errors="coerce"
+                )
+                # Si en Figures aplicas offset horario, reprodúcelo aquí:
+                ldf["timestamp"] = ldf["timestamp"] - pd.Timedelta(hours=2)
+        else:
+            # sin 'hour', no podemos alinear decentemente
+            return ldf
+
+    # --- merge_asof con tolerancia razonable ---
+    merged = (
+        pd.merge_asof(
+            ldf.sort_values("timestamp"),
+            wdf.sort_values("timestamp")[["timestamp", "track_temp", "wind_direction", "wind_speed"]],
+            on="timestamp", direction="nearest",
+            tolerance=pd.Timedelta("5min")
+        )
+    )
+
+    return merged
+
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP], suppress_callback_exceptions=True)
 
 app.layout = html.Div(
     [
@@ -1180,6 +1351,7 @@ app.layout = html.Div(
         dcc.Store(id="data-store"),
         dcc.Store(id="session-data"),
         dcc.Store(id="kpi-config", storage_type="session", data=DEFAULT_KPI_VALUES),
+        dcc.Store(id="compare-store", storage_type="session"),
         dcc.Checklist(id="lap-filter-toggle",
                   options=[{"label": "Ver todas las vueltas", "value": "ALL"}],
                   value=[], style={"marginTop": "10px"}),
@@ -1199,6 +1371,7 @@ app.layout = html.Div(
                 dcc.Tab(label="Control Panel", value="tab-control",
                         children=[html.Div(id="control-panel-body",
                                            style={"padding": "15px", "maxWidth": "500px"})]),
+                dcc.Tab(label="Compare", value="tab-compare"),
             ],
         ),
         html.Div(id="tab-content"),
@@ -1265,14 +1438,197 @@ def update_kpi_store(n_apply, n_reset,
     prevent_initial_call=True,
 )
 
-def on_browse(n_clicks):
+def on_browse_main(n_clicks):
     root = tk.Tk()
     root.withdraw()
-    folder = filedialog.askdirectory()
+    root.lift()
+    root.attributes("-topmost", True)
+    root.focus_force()
+
+    folder = filedialog.askdirectory(
+        parent=root,                     # ← hereda el top-most
+        title="Selecciona carpeta de sesión",
+        initialdir=os.getcwd(),
+    )
     root.destroy()
+
     if not folder:
         raise PreventUpdate
     return folder
+
+@app.callback(
+    Output("session-pickers", "children"),
+    Input("n-sessions", "value"),
+)
+
+def _build_session_pickers(n):
+    n = int(n or 2)
+    rows = []
+    for i in range(n):
+        rows.append(
+            html.Div([
+                html.Span(f"Sesión {i+1}", style={"width":"75px"}),
+                dcc.Input(
+                    id={"type": "session-name", "index": i},
+                    type="text", placeholder="Nombre (opcional)",
+                    style={"width":"180px"}
+                ),
+                dcc.Input(
+                    id={"type":"session-folder","index":i},
+                    type="text", placeholder="Carpeta de la sesión",
+                    style={"flex":"1 1 auto", "minWidth":"320px"}
+                ),
+                html.Button("Browse", id={"type":"session-browse","index":i}),
+            ], style={"display":"flex","gap":"8px","marginBottom":"6px","alignItems":"center"})
+        )
+    return rows
+
+@app.callback(
+    Output({"type":"session-folder","index":MATCH}, "value"),
+    Input({"type":"session-browse","index":MATCH}, "n_clicks"),
+    prevent_initial_call=True,
+)
+
+def _on_browse_session(n_clicks):
+    folder = _select_folder("Selecciona carpeta de sesión")
+    if not folder:
+        raise PreventUpdate
+    return folder
+
+@app.callback(
+    Output("compare-store", "data"),
+    Input("load-compare-btn", "n_clicks"),
+    State({"type":"session-folder","index":ALL}, "value"),
+    State({"type":"session-name","index":ALL}, "value"),
+    prevent_initial_call=True,
+)
+
+def _load_multi_sessions(n_clicks, folders, names):
+    if not folders:
+        raise PreventUpdate
+
+    # Sesiones válidas
+    pairs = []
+    for i, fld in enumerate(folders):
+        if fld and os.path.isdir(fld):
+            name = (names[i] or os.path.basename(os.path.normpath(fld))).strip()
+            pairs.append((name, fld))
+    if len(pairs) < 2:
+        raise PreventUpdate
+
+    frames, wframes = [], []
+
+    def _clean_float(s):
+        return (
+            s.astype(str)
+             .str.replace(r"[^0-9,.\-]", "", regex=True)
+             .str.replace(",", ".", regex=False)
+             .astype(float)
+        )
+
+    def _normalize_weather(wdf: pd.DataFrame) -> pd.DataFrame:
+        if wdf is None or wdf.empty:
+            return pd.DataFrame()
+        w = wdf.copy()
+
+        # tiempo
+        time_candidates = ["time_utc", "time_local", "time", "time_utc_str", "timestamp", "hour"]
+        time_col = next((c for c in time_candidates if c in w.columns), None)
+        if not time_col:
+            return pd.DataFrame()
+        w["timestamp"] = pd.to_datetime(w[time_col], errors="coerce")
+
+        # temperatura de pista
+        t_candidates = ["track_temp", "track_temperature", "track_temp_c", "track_temperature_c"]
+        t_col = next((c for c in t_candidates if c in w.columns), None)
+        w["track_temp"] = _clean_float(w[t_col]) if t_col else np.nan
+
+        # viento (dirección)
+        d_candidates = ["wind_direction", "wind_dir", "wind_deg", "wind_degree"]
+        d_col = next((c for c in d_candidates if c in w.columns), None)
+        w["wind_direction"] = (_clean_float(w[d_col]) % 360) if d_col else np.nan
+
+        # viento (velocidad)
+        s_candidates = ["wind_speed_kph", "wind_speed_kmh", "wind_speed", "wind_velocity", "wind_speed_ms"]
+        s_col = next((c for c in s_candidates if c in w.columns), None)
+        if s_col:
+            w["wind_speed"] = _clean_float(w[s_col])
+            if s_col.endswith("_ms"):        # m/s → km/h
+                w["wind_speed"] = w["wind_speed"] * 3.6
+        else:
+            w["wind_speed"] = np.nan
+
+        return (
+            w[["timestamp", "track_temp", "wind_direction", "wind_speed"]]
+            .dropna(subset=["timestamp"])
+            .sort_values("timestamp")
+            .reset_index(drop=True)
+        )
+
+    # Procesar cada sesión
+    for name, fld in pairs:
+        df_a, df_c, wdf, tldf = load_data(fld)
+        if df_a is None or df_a.empty:
+            continue
+
+        df = df_a.copy()
+
+        if "lap_number" not in df.columns and "lap" in df.columns:
+            df["lap_number"] = df["lap"]
+        if not pd.api.types.is_numeric_dtype(df["lap_time"]):
+            df["lap_time"] = df["lap_time"].apply(parse_time_to_seconds)
+        if "timestamp" not in df.columns:
+            if "hour" in df.columns:
+                df["timestamp"] = pd.to_datetime(df["hour"], errors="coerce")
+            else:
+                df["timestamp"] = pd.NaT
+
+        # Meteo normalizada (serie completa)
+        wnorm = _normalize_weather(wdf)
+        if not wnorm.empty:
+            wnorm = wnorm.assign(session=name)
+            wframes.append(wnorm)
+
+            # Enriquecemos las vueltas con meteo cercana (para correlaciones)
+            df = pd.merge_asof(
+                df.sort_values("timestamp"),
+                wnorm.sort_values("timestamp"),
+                on="timestamp",
+                by=None,
+                direction="nearest",
+                tolerance=pd.Timedelta("5min"),
+            )
+        else:
+            for c in ("track_temp", "wind_direction", "wind_speed"):
+                if c not in df.columns:
+                    df[c] = np.nan
+
+        keep = [c for c in [
+            "lap_number", "lap_time", "timestamp", "number", "team", "top_speed",
+            "track_temp", "wind_direction", "wind_speed"
+        ] if c in df.columns]
+        df = df[keep].rename(columns={"lap_number": "lap"})
+
+        if not df.empty:
+            best = df.groupby("number")["lap_time"].transform("min")
+            df = df[df["lap_time"] <= best * 1.20].copy()
+
+        df["session"] = name
+        frames.append(df)
+
+    if not frames:
+        raise PreventUpdate
+
+    points  = pd.concat(frames,  ignore_index=True)
+    weather = pd.concat(wframes, ignore_index=True) if wframes else pd.DataFrame(
+        columns=["timestamp", "track_temp", "wind_direction", "wind_speed", "session"]
+    )
+
+    # Guardamos AMBOS en el store
+    return {
+        "points":  points.to_json(orient="split", date_format="iso"),
+        "weather": weather.to_json(orient="split", date_format="iso"),
+    }
 
 @app.callback(
     Output("tab-content", "children"),
@@ -1465,10 +1821,182 @@ def update_tab_content(n_clicks, tab, kpi_cfg,
         content = html.Div(graphs)
     elif tab == "tab-control":
         content = html.Div()
+    elif tab == "tab-compare":
+        # UI de comparación multi-sesión (dinámica)
+        content = html.Div([
+            # Controles generales
+            html.Div([
+                html.Label("Nº de sesiones a comparar", style={"marginRight": "10px"}),
+
+                # Slider (ancho en el contenedor)
+                html.Div(
+                    dcc.Slider(
+                        id="n-sessions", min=2, max=6, step=1, value=2,
+                        marks={i: str(i) for i in range(2, 7)},
+                        tooltip={"placement": "bottom"},
+                        persistence=True, persistence_type="session",   # ← mantiene valor
+                    ),
+                    style={"width": "320px"}
+                ),
+
+                html.Button("Cargar sesiones", id="load-compare-btn", style={"marginLeft": "12px"}),
+            ], style={"display": "flex", "alignItems": "center", "gap": "10px", "flexWrap": "wrap"}),
+
+            # Pickers dinámicos (se generan según el slider)
+            html.Div(id="session-pickers", style={"marginTop": "10px"}),
+
+            # Opciones de visualización
+            html.Div([
+                html.Label("Eje X:", style={"marginRight": "6px"}),
+                dcc.RadioItems(
+                    id="multi-xaxis",
+                    options=[{"label": "Hora", "value": "timestamp"},
+                            {"label": "Vuelta", "value": "lap"}],
+                    value="timestamp",
+                    inline=True,
+                    persistence=True, persistence_type="session",          # ← mantiene valor
+                ),
+
+                html.Label("Filtrar vueltas > best +", style={"margin": "0 6px 0 16px"}),
+
+                # Slider (ancho en el contenedor)
+                html.Div(
+                    dcc.Slider(
+                        id="multi-fast-thr", min=0.0, max=0.30, step=0.01, value=0.20,
+                        marks={0.0: "0%", 0.1: "10%", 0.2: "20%", 0.3: "30%"},
+                        tooltip={"placement": "bottom"},
+                        persistence=True, persistence_type="session",      # ← mantiene valor
+                    ),
+                    style={"width": "260px"}
+                ),
+
+                dcc.Checklist(
+                    id="multi-trend",
+                    options=[{"label": "Trendline por sesión (OLS)", "value": "ols"}],
+                    value=[],
+                    style={"marginLeft": "16px"},
+                    persistence=True, persistence_type="session",          # ← mantiene valor
+                ),
+
+            ], style={"display": "flex", "alignItems": "center", "gap": "10px", "flexWrap": "wrap", "marginTop": "6px"}),
+
+            # Área de salida de gráficos
+            html.Div(id="compare-output", style={"marginTop": "12px"}),
+        ], style={"padding": "15px"})
+
+
     else:
         content = html.Div()
 
+
+
     return (content, data, data, team_opts, teams_out, driver_opts, drivers_out)
+
+@app.callback(
+    Output("compare-output", "children"),
+    Input("compare-store", "data"),
+    Input("result-tabs", "value"),      # ← para repintar al volver a la pestaña
+    Input("multi-xaxis", "value"),
+    Input("multi-trend", "value"),
+    Input("multi-fast-thr", "value"),
+    prevent_initial_call=False,         # ← permite render inicial si ya hay datos
+)
+
+def _render_multi(data_store, active_tab, xaxis, trend_opts, thr):
+    if active_tab != "tab-compare":
+        raise PreventUpdate
+    if not data_store:
+        return html.Div("Carga sesiones con el botón «Cargar sesiones».", style={"opacity": 0.7})
+
+    # ── Deserializar store (compat: string o dict) ─────────────────────────
+    if isinstance(data_store, str):
+        points = pd.read_json(StringIO(data_store), orient="split")
+        weather = pd.DataFrame()
+    else:
+        points  = pd.read_json(StringIO(data_store.get("points","{}")),  orient="split")
+        weather = pd.read_json(StringIO(data_store.get("weather","{}")), orient="split")
+
+    children = []
+
+    # ── Laps: filtros y gráficos base ──────────────────────────────────────
+    if not points.empty:
+        thr = float(thr or 0.20)
+        best = points.groupby(["session", "number"])["lap_time"].transform("min")
+        points = points[points["lap_time"] <= best * (1 + thr)].copy()
+        x = "timestamp" if xaxis == "timestamp" else "lap"
+        points = points.sort_values(x)
+
+        trendline = "ols" if ("ols" in (trend_opts or [])) and HAS_STATSMODELS else None
+
+        fig_lt = px.scatter(
+            points, x=x, y="lap_time", color="session",
+            hover_data=["number", "team"],
+            trendline=trendline,
+            title=f"Lap time vs {'Hora' if x=='timestamp' else 'Vuelta'} (por sesión)",
+            labels={"lap_time": "Tiempo (s)", "lap": "Vuelta", "timestamp": "Hora"},
+        )
+        children.append(dcc.Graph(figure=fig_lt))
+
+        if "top_speed" in points.columns:
+            fig_ts = px.scatter(
+                points, x=x, y="top_speed", color="session",
+                hover_data=["number", "team"],
+                trendline=trendline,
+                title=f"Top speed vs {'Hora' if x=='timestamp' else 'Vuelta'} (por sesión)",
+                labels={"top_speed": "Top speed (km/h)"},
+            )
+            children.append(dcc.Graph(figure=fig_ts))
+
+        # Evolución (mínimo móvil) — usa ‘s’ (minúscula) para evitar warning
+        if "timestamp" in points.columns and points["timestamp"].notna().any():
+            p_evo = points[["session", "timestamp", "lap_time"]].dropna()
+            curves = []
+            for sess, g in p_evo.groupby("session"):
+                g = g.set_index("timestamp").sort_index()
+                r = g["lap_time"].resample("15s").min().rolling("4min", min_periods=1).min()
+                curves.append(r.reset_index().assign(session=sess, rolling_min=lambda d: d["lap_time"]))
+            evo = pd.concat(curves, ignore_index=True) if curves else pd.DataFrame()
+            if not evo.empty:
+                fig_evo = px.line(
+                    evo, x="timestamp", y="rolling_min", color="session",
+                    title="Evolución de pista · mínimo móvil (4 min)",
+                    labels={"rolling_min": "Lap time (s)", "timestamp": "Hora"},
+                )
+                children.append(dcc.Graph(figure=fig_evo))
+
+    # ── Meteo: usar serie completa del store (si existe) ───────────────────
+    if not weather.empty and weather["timestamp"].notna().any():
+        weather = weather.sort_values("timestamp")
+
+        if "track_temp" in weather.columns and weather["track_temp"].notna().any():
+            fig_temp = px.line(
+                weather, x="timestamp", y="track_temp", color="session",
+                title="Temperatura de pista vs Hora (comparación por sesión)",
+                labels={"track_temp": "°C", "timestamp": "Hora"},
+            )
+            children.append(dcc.Graph(figure=fig_temp))
+
+        if "wind_speed" in weather.columns and weather["wind_speed"].notna().any():
+            fig_wind = px.line(
+                weather, x="timestamp", y="wind_speed", color="session",
+                title="Viento (velocidad) vs Hora",
+                labels={"wind_speed": "km/h", "timestamp": "Hora"},
+            )
+            children.append(dcc.Graph(figure=fig_wind))
+
+        if "wind_direction" in weather.columns and weather["wind_direction"].notna().any():
+            fig_wdir = px.scatter(
+                weather, x="timestamp", y="wind_direction", color="session",
+                title="Dirección del viento vs Hora",
+                labels={"wind_direction": "°", "timestamp": "Hora"},
+                opacity=0.6,
+            )
+            fig_wdir.update_yaxes(range=[0, 360])
+            children.append(dcc.Graph(figure=fig_wdir))
+
+    if not children:
+        return html.Div("No hay datos para mostrar.", style={"opacity": 0.7})
+    return html.Div(children)
 
 @app.callback(
     Output("download-report", "data"),
