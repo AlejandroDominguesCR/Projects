@@ -73,7 +73,6 @@ BODY_CSS  = "font-family:sans-serif;margin:0"
 FIG_HEIGHT = 480                                      # Plotly (px)
 STYLE_HEIGHT = f"{FIG_HEIGHT}px"                      # CSS
 
-
 app = dash.Dash(__name__)
 app.layout = html.Div([html.H3("Resultados no cargados")])
 server = app.server
@@ -110,36 +109,46 @@ def launch_dash(sol, post, setup_name="Setup"):
         graphs = []
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
-        spring_travel = smooth_signal(post['travel_rel']) * 1000
-        travel = post['z_s']*1000
+        spring_travel = (post['z_wheel']) * 1000
+        travel = smooth_signal(post['damper_travel'])*1000
         wheel_f = post['f_wheel']          # shape (4, N)
         grip_mask = post['grip_limited_lateral_mask']  # (N,)
         wheel_ld = post['wheel_load']       # (4,N)
         wheel_names = ["FL", "FR", "RL", "RR"]
 
         #v_damper = smooth_signal(post['v_damper'])
-        travel_filtered = smooth_signal(travel)
-        h0_static = float(sol.y[0][0])               # primera muestra = equilibrio
-        heave_mm  = (sol.y[0] - h0_static) * 1000    # pasa a mm
-        heave_ax_f = smooth_signal(post['heave_front'] * 1000)   # mm
-        heave_ax_r = smooth_signal(post['heave_rear']  * 1000)   # mm
-        rh = smooth_signal(post['RH']*1000)   # mm
+        heave_mm  = post['h']*1000 #(sol.y[0]) * 1000    # pasa a mm
+        heave_ax_f = smooth_signal(post['dyn_hF'] * 1000)   # mm
+        heave_ax_r = smooth_signal(post['dyn_hR']  * 1000)   # mm
+        rh = smooth_signal(post['travel_rel']*1000)   # mm
         heave_filtered = smooth_signal(heave_mm)
         pitch_filtered = smooth_signal(np.degrees(sol.y[2]))
         roll_filtered = smooth_signal(np.degrees(sol.y[4]))
-        wheel_f_filtered = smooth_signal(wheel_f)
-        spring_force_filtered = smooth_signal(post['f_spring'])
-        damper_force_filtered = smooth_signal(post['f_damper'])
-        arb_force_filtered = smooth_signal(post['f_arb'])
+        spring_force_filtered = (post['f_spring'])
+        damper_force_filtered = (post['f_damper'])
+        arb_force_filtered = (post['f_arb'])
+        f_bump_filtered  = (post['f_arb'])
 
         # Travel absoluto por rueda
         fig = go.Figure([
-            go.Scatter(x=distance, y=spring_travel[0], name="Spring Travel FL"),
-            go.Scatter(x=distance, y=spring_travel[1], name="Spring Travel FR"),
-            go.Scatter(x=distance, y=spring_travel[2], name="Spring Travel RL"),
-            go.Scatter(x=distance, y=spring_travel[3], name="Spring Travel RR"),
+            go.Scatter(x=distance, y=spring_travel[0], name="Potencia  FL"),
+            go.Scatter(x=distance, y=spring_travel[1], name="Potencia FR"),
+            go.Scatter(x=distance, y=spring_travel[2], name="Potencia RL"),
+            go.Scatter(x=distance, y=spring_travel[3], name="Potencia RR"),
         ])
-        fig.update_layout(title="Travel [mm]", xaxis_title="Distance [m]", yaxis_title="Travel [mm]")
+        fig.update_layout(title="Spring Travel [mm]", xaxis_title="Distance [m]", yaxis_title="Travel [mm]")
+        graphs.append(html.Div(
+            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
+            style=CARD_STYLE))
+        
+                # Travel absoluto por rueda
+        fig = go.Figure([
+            go.Scatter(x=distance, y=travel[0], name="damper Travel FL"),
+            go.Scatter(x=distance, y=travel[1], name="damper Travel FR"),
+            go.Scatter(x=distance, y=travel[2], name="damper Travel RL"),
+            go.Scatter(x=distance, y=travel[3], name="damper Travel RR"),
+        ])
+        fig.update_layout(title="Damper Travel [mm]", xaxis_title="Distance [m]", yaxis_title="Travel [mm]")
         graphs.append(html.Div(
             dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
             style=CARD_STYLE))
@@ -156,8 +165,8 @@ def launch_dash(sol, post, setup_name="Setup"):
             dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
             style=CARD_STYLE))
         fig = go.Figure([
-            go.Scatter(x=distance, y=heave_ax_f, name="Heave Front [mm]"),
-            go.Scatter(x=distance, y=heave_ax_r, name="Heave Rear [mm]")
+            go.Scatter(x=distance, y=heave_ax_f, name="h Front [mm]"),
+            go.Scatter(x=distance, y=heave_ax_r, name="h Rear [mm]")
         ])
         fig.update_layout(title="Heave per Axle (ΔRH) [mm]",
                           xaxis_title="Distance [m]",
@@ -168,7 +177,7 @@ def launch_dash(sol, post, setup_name="Setup"):
 
         # Pitch (filtrado)
         fig = go.Figure([
-            go.Scatter(x=distance, y=pitch_filtered, name="Pitch [°]")
+            go.Scatter(x=distance, y=heave_filtered, name="Heave [°]")
         ])
         fig.update_layout(title="Pitch Motion (Filtered)", xaxis_title="Distance [m]", yaxis_title="Pitch [°]")
         graphs.append(html.Div(
@@ -234,12 +243,12 @@ def launch_dash(sol, post, setup_name="Setup"):
         
         # === Bumpstop Forces por rueda ===
         fig = go.Figure([
-            go.Scatter(x=distance, y=post['f_bump'][0], name="Bumpstop FL"),
-            go.Scatter(x=distance, y=post['f_bump'][1], name="Bumpstop FR"),
-            go.Scatter(x=distance, y=post['f_bump'][2], name="Bumpstop RL"),
-            go.Scatter(x=distance, y=post['f_bump'][3], name="Bumpstop RR"),
+            go.Scatter(x=distance, y=post['f_tire'][0], name=" FL"),
+            go.Scatter(x=distance, y=post['f_tire'][1], name=" FR"),
+            go.Scatter(x=distance, y=post['f_tire'][2], name=" RL"),
+            go.Scatter(x=distance, y=post['f_tire'][3], name=" RR"),
         ])
-        fig.update_layout(title="Bumpstop Force per Wheel [N]", xaxis_title="Distance [m]", yaxis_title="Force [N]")
+        fig.update_layout(title="Force per Wheel [N]", xaxis_title="Distance [m]", yaxis_title="Force [N]")
         graphs.append(html.Div(
             dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
             style=CARD_STYLE))
@@ -260,10 +269,10 @@ def launch_dash(sol, post, setup_name="Setup"):
             style=CARD_STYLE))
 
         fig = go.Figure([
-            go.Scatter(x=distance, y=damper_force_filtered[0], name="Damper FL"),
-            go.Scatter(x=distance, y=damper_force_filtered[1], name="Damper FR"),
-            go.Scatter(x=distance, y=damper_force_filtered[2], name="Damper RL"),
-            go.Scatter(x=distance, y=damper_force_filtered[3], name="Damper RR"),
+            go.Scatter(x=distance, y=f_bump_filtered[0], name="dyn FL"),
+            go.Scatter(x=distance, y=f_bump_filtered[1], name="dyn FR"),
+            go.Scatter(x=distance, y=f_bump_filtered[2], name="dyn RL"),
+            go.Scatter(x=distance, y=f_bump_filtered[3], name="dyn RR"),
         ])
         fig.update_layout(
             title="Damper Force per Wheel [N]",
@@ -274,31 +283,6 @@ def launch_dash(sol, post, setup_name="Setup"):
             dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
             style=CARD_STYLE))
 
-        fig = go.Figure([
-            go.Scatter(x=distance, y=arb_force_filtered[0], name="ARB FL"),
-            go.Scatter(x=distance, y=arb_force_filtered[1], name="ARB FR"),
-            go.Scatter(x=distance, y=arb_force_filtered[2], name="ARB RL"),
-            go.Scatter(x=distance, y=arb_force_filtered[3], name="ARB RR"),
-        ])
-        fig.update_layout(
-            title="ARB Force per Wheel [N]",
-            xaxis_title="Distance [m]",
-            yaxis_title="Force [N]"
-        )
-        graphs.append(html.Div(
-            dcc.Graph(figure=fig, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
-            style=CARD_STYLE))
-        if "arb_torque_front" in post:
-            fig_arb = go.Figure([
-                go.Scatter(x=distance, y=post["arb_torque_front"], name="Front ARB"),
-                go.Scatter(x=distance, y=post["arb_torque_rear"],  name="Rear ARB")
-            ])
-            fig_arb.update_layout(title="Anti-roll Bar Torque [Nm]", xaxis_title="Distance [m]", yaxis_title="Torque [Nm]")
-            graphs.append(html.Div(
-                dcc.Graph(figure=fig_arb, config=GRAPH_CFG, style={"height": STANDARD_HEIGHT}),
-                style=CARD_STYLE))
-
-        
         app.layout = html.Div([
             html.H1(f"Resultados 7-Post Rig: {setup_name}"),
             html.Div(graphs, style=GRID_STYLE)
@@ -1435,15 +1419,12 @@ def export_full_report(setups, export_path="export_full_report.html"):
         ztrk_in = np.vstack(track['z_tracks'])   # (4,N) en m
 
         # === 2) Re-muestreo / garantía de longitud ==================================
-        # solve_ivp puede devolver sol.t idéntico a t_in si se integró en esos nodos;
-        # por robustez interpolamos todos los inputs al tiempo de la solución.
         t = sol.t
         vx  = np.interp(t, t_in, vx_in) * 3.6
         ax  = np.interp(t, t_in, ax_in) / 9.81
         ay  = np.interp(t, t_in, ay_in) / 9.81
         thr = np.interp(t, t_in, thr_in)
         brk = np.interp(t, t_in, brk_in)
-        ztrk = np.vstack([np.interp(t, t_in, ztrk_in[i]) for i in range(4)])
 
         # Distancia integrada (trapecios)
         dt = np.gradient(t)
@@ -1459,33 +1440,23 @@ def export_full_report(setups, export_path="export_full_report.html"):
         roll       = sol.y[4]                 # rad
         roll_rate  = sol.y[5]
 
-        # Unsprung (índices como en postprocess_7dof)
-        zu_idx    = [8, 6, 10, 12]
-        zudot_idx = [9, 7, 11, 13]
-        zu     = np.stack([sol.y[i] for i in zu_idx])      # (4,N)
-        zudot  = np.stack([sol.y[i] for i in zudot_idx])   # (4,N)
-
         # === 4) Canales de salida del postprocesado =================================
         # (Todos tienen forma (4,N) salvo los listados como escalares/1D)
         trv     = post['travel']            # (4,N) m (neg = compresión)
         dmp_trv = post['damper_travel']     # (4,N) m
-        mext    = post['margen_ext']        # (4,N) m
-        mcomp   = post['margen_comp']       # (4,N) m
         Fspr    = post['f_spring']          # (4,N) N
         Fdmp    = post['f_damper']          # (4,N) N
         Fbump   = post['f_bump']            # (4,N) N
         Farb    = post['f_arb']             # (4,N) N
-        Ftire   = post['f_tire']            # (4,N) N
         Wload   = post['wheel_load']        # (4,N) N  (asegúrate: si venía en "kg", multiplica por 9.81)
-        # Si tu versión de post devolviera wheel_load en "kg", descomenta:
-        #Wload = Wload * 9.81
 
         FzAeroF = post.get('Fz_aero_front', np.zeros_like(t))
         FzAeroR = post.get('Fz_aero_rear',  np.zeros_like(t))
         
         # heave por eje ya viene en mm en post:
-        RH_F_mm = np.mean(post['RH'][0:2], axis=0) * 1000  # Front axle
-        RH_R_mm = np.mean(post['RH'][2:4], axis=0) * 1000  # Rear  axle
+
+        RH_front = post["RH_front"]*1000 #dyn_hF
+        RH_rear  = post["RH_rear"]*1000  #dyn_hR
 
         # Máscaras grip
         gl_lat   = post.get('grip_limited_lateral_mask', np.zeros_like(t, dtype=bool))
@@ -1502,32 +1473,22 @@ def export_full_report(setups, export_path="export_full_report.html"):
             "Ay": ay,
             "throttle": thr,
             "brake": brk,
-            "ztrk_FL_mm": ztrk[0]*1000, "ztrk_FR_mm": ztrk[1]*1000,
-            "ztrk_RL_mm": ztrk[2]*1000, "ztrk_RR_mm": ztrk[3]*1000,
 
             # ----- Estados chasis -----
             "heave_mm": heave*1000,
             "heave_rate_mps": heave_rate,
-            "heave_front_mm": heave_front,
-            "heave_rear_mm": heave_rear,
+            "Front_heave": heave_front,
+            "Rear_heave": heave_rear,
             "pitch_rad": pitch, "pitch_deg": np.degrees(pitch),
             "pitch_rate_rps": pitch_rate,
             "roll_rad": roll, "roll_deg": np.degrees(roll),
             "roll_rate_rps": roll_rate,
 
-            # ----- Unsprung abs -----
-            "zu_FL_m": zu[0], "zu_FR_m": zu[1], "zu_RL_m": zu[2], "zu_RR_m": zu[3],
-            "zudot_FL_mps": zudot[0], "zudot_FR_mps": zudot[1], "zudot_RL_mps": zudot[2], "zudot_RR_mps": zudot[3],
-
             # ----- Travels (relativos; compresión negativa) -----
             "travel_FL_mm": trv[0]*1000, "travel_FR_mm": trv[1]*1000,
             "travel_RL_mm": trv[2]*1000, "travel_RR_mm": trv[3]*1000,
-            "damper_FL_mm": dmp_trv[0]*1000, "damper_FR_mm": dmp_trv[1]*1000,
-            "damper_RL_mm": dmp_trv[2]*1000, "damper_RR_mm": dmp_trv[3]*1000,
-            "margenExt_FL_mm": mext[0]*1000, "margenExt_FR_mm": mext[1]*1000,
-            "margenExt_RL_mm": mext[2]*1000, "margenExt_RR_mm": mext[3]*1000,
-            "margenComp_FL_mm": mcomp[0]*1000, "margenComp_FR_mm": mcomp[1]*1000,
-            "margenComp_RL_mm": mcomp[2]*1000, "margenComp_RR_mm": mcomp[3]*1000,
+            "FL_Damper": dmp_trv[0]*1000, "FR_Damper": dmp_trv[1]*1000,
+            "RL_Damper": dmp_trv[2]*1000, "RR_Damper": dmp_trv[3]*1000,
 
             # ----- Fuerzas suspensión -----
             "Fspring_FL_N": Fspr[0], "Fspring_FR_N": Fspr[1],
@@ -1538,20 +1499,16 @@ def export_full_report(setups, export_path="export_full_report.html"):
             "Fdamper_RL_N": Fdmp[2], "Fdamper_RR_N": Fdmp[3],
             "Farb_FL_N": Farb[0], "Farb_FR_N": Farb[1],
             "Farb_RL_N": Farb[2], "Farb_RR_N": Farb[3],
-            "ARB_torque_front_Nm": post.get("arb_torque_front", np.zeros_like(t)),
-            "ARB_torque_rear_Nm":  post.get("arb_torque_rear",  np.zeros_like(t)),
 
             # ----- Fuerza neumático & wheel load -----
-            "Ftire_FL_N": Ftire[0], "Ftire_FR_N": Ftire[1],
-            "Ftire_RL_N": Ftire[2], "Ftire_RR_N": Ftire[3],
-            "WheelLoad_FL_N": Wload[0], "WheelLoad_FR_N": Wload[1],
-            "WheelLoad_RL_N": Wload[2], "WheelLoad_RR_N": Wload[3],
+            "FL_Load": Wload[0], "FR_Load": Wload[1],
+            "RL_Load": Wload[2], "RR_Load": Wload[3],
 
             # ----- Aero -----
-            "FzAeroFront_N": -FzAeroF,
-            "FzAeroRear_N":  -FzAeroR,
-            "RH_F_mm": RH_F_mm,
-            "RH_R_mm": RH_R_mm,
+            "F_AeroLoad": -FzAeroF/9.81,
+            "R_AeroLoad":  -FzAeroR/9.81,
+            "F_RH": RH_front,
+            "R_RH": RH_rear,
 
             # ----- Máscaras grip -----
             "GripLat_mask":   gl_lat.astype(int),

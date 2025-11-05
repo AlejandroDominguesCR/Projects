@@ -53,7 +53,7 @@ def make_drs_func(t, raw, *, open_pct=95, close_pct=5, tau=0.05):
                     fill_value=(frac[0], frac[-1]))
 
 def parse_json_setup(json_data):
-    import numpy as np
+
     # Extrae masas y parámetros globales
     m_car = json_data["config"]["chassis"]["carRunningMass"]["mCar"]
     wbal_f = json_data["config"]["chassis"]["carRunningMass"]["rWeightBalF"]
@@ -71,6 +71,7 @@ def parse_json_setup(json_data):
     # Masas por esquina 
     ms_f = ((m_car * wbal_f)/ 2) - mHubF
     ms_r = ((m_car * (1 - wbal_f) )/ 2) - mHubR
+
     mu_f = mHubF 
     mu_r = mHubR 
 
@@ -85,8 +86,8 @@ def parse_json_setup(json_data):
     damper_r = json_data["config"]["suspension"]["rear"]["internal"]["damper"]
 
     # Neumático (ejemplo)
-    kt_f = 373100 #276500
-    kt_r = 397900 #295000 #397900  #282100, 269000, 
+    kt_f = 376000 #276500
+    kt_r = 295000 #397900 
 
     hRideF = json_data["config"]["chassis"].get("hRideFSetup")
     hRideR = json_data["config"]["chassis"].get("hRideRSetup")
@@ -95,15 +96,10 @@ def parse_json_setup(json_data):
     # Esquinas: FL, FR, RL, RR
     params = []
     
-    #stroke_FL = 0.029 #
-    #stroke_FR = 0.029 #
-    #stroke_RL = 0.059 #
-    #stroke_RR = 0.059 #
-
-    stroke_FL = 0.01965
-    stroke_FR = 0.01965
-    stroke_RL = 0.0305
-    stroke_RR = 0.0305
+    stroke_FL = 0.059 
+    stroke_FR = 0.059 
+    stroke_RL = 0.059 
+    stroke_RR = 0.059 
 
     for i, (ms, mu, spring, bump, damper, kt, stroke) in enumerate([
         (ms_f, mu_f, spring_f, bump_f, damper_f, kt_f, stroke_FL),  # FL
@@ -128,37 +124,47 @@ def parse_json_setup(json_data):
             damper_v_comp = np.array([0.0])
 
         # --- Añadir curva muelle+bumpstop para el recorrido máximo ---
-        spring_travel = np.linspace(0, stroke, 100)
-        kSpring = spring["kSpring"]
-        FSpringPreload = spring.get("FSpringPreload", 0)
-        spring_force = (kSpring * spring_travel) + FSpringPreload
-        bump_x = np.array(bump["xData"])
-        bump_f = np.array(bump["FData"])
-        bump_gap = bump["xFreeGap"]
+        spring_travel = np.linspace(0.0, stroke, 100)   # [m] pistón, 0 = top-out, stroke = bottom-out
+
+        kSpring = float(spring["kSpring"])              # [N/m]
+        FSpringPreload = float(spring.get("FSpringPreload", 0.0))  # [N]
+        spring_force = kSpring * spring_travel + FSpringPreload     # [N] muelle (en pistón)
+
+        # --- Bumpstop ---
+        bump_x   = np.asarray(bump["xData"], dtype=float)   # [m] pistón
+        bump_f   = np.asarray(bump["FData"], dtype=float)   # [N] fuerza bump (pistón)
+        bump_gap = float(bump["xFreeGap"])                  # [m] gap libre en pistón
+
         bump_force = np.zeros_like(spring_travel)
-        bump_indices = spring_travel > bump_gap
-        bump_force[bump_indices] = np.interp(spring_travel[bump_indices] - bump_gap, bump_x, bump_f, left=0, right=bump_f[-1])
+        mask = spring_travel >= bump_gap
+        # carrera de bump = compresión desde top-out menos el gap libre
+        bump_force[mask] = np.interp(
+            spring_travel[mask] - bump_gap,  # [m]
+            bump_x,                          # [m]
+            bump_f,                          # [N]
+            left=0.0,
+            right=bump_f[-1]
+        )
+
         total_force = spring_force + bump_force
+
         p = {
-            "ms": ms,
-            "mu": mu,
+            "ms": ms, "mu": mu, "kt": kt,
             "kSpring": kSpring,
-            "spring_x": spring_travel,
-            "spring_f": spring_force,
-            "bump_f_interp": bump_force,
-            "spring_bump_total_f": total_force,
-            "bump_x": bump_x,
-            "bump_f": bump_f,
-            "bump_gap": bump_gap,
-            "damper_v": v,
-            "damper_f_ext": damper_f_ext,
+            "stroke": stroke,
+            "FSpringPreload": FSpringPreload,
+            "spring_x": spring_travel,                 # [m] (pistón, desde top-out)
+            "spring_f": spring_force,                  # [N]
+            "bump_x": bump_x,                          # [m]
+            "bump_f": bump_f,                          # [N]
+            "bump_gap": bump_gap,                      # [m]
+            "bump_f_interp": bump_force,               # [N] fuerza vs spring_travel
+            "spring_bump_total_f": total_force,        # [N]
+            "damper_v": v, "damper_f_ext": damper_f_ext,
             "damper_v_ext": damper_v_ext,
             "damper_f_comp": damper_f_comp,
             "damper_v_comp": damper_v_comp,
-            "kt": kt,
-            "stroke": stroke,
-            "FSpringPreload": FSpringPreload
-
+            "origin": "piston_from_topout"             # (meta: eje X = compresión desde top-out)
         }
         params.append(p)
 
@@ -182,29 +188,40 @@ def parse_json_setup(json_data):
     }
 
     global_setup.update({
-        "gap_bumpstop_FL": params[0]["bump_gap"] ,
-        "gap_bumpstop_FR": params[1]["bump_gap"] ,
-        "gap_bumpstop_RL": params[2]["bump_gap"] ,
+        "gap_bumpstop_FL": params[0]["bump_gap"],
+        "gap_bumpstop_FR": params[1]["bump_gap"],
+        "gap_bumpstop_RL": params[2]["bump_gap"],
         "gap_bumpstop_RR": params[3]["bump_gap"] 
     })
 
-    mr_f_wd = 1.491587949 
+    mr_torsion = 1.437 #(0.016950**2)*(1.437**2)*1000
+    mr_f_wd = 1.437 #1.491587949 
     mr_r_wd = 1.32579 
+    mr_arb_f = 0.72
+    mr_arb_r = 1.59
+    arb_dp_w_f = 60 #mm
+    arb_dp_w_r = 146 #mm
 
-    mr_f_rd = (1.491587949 * (np.pi / 180.0))/1000  #mr_wd * mr_rd para sacar el mr_rw, es decir, el paso directo
+    #  Motion ratios 
+    global_setup["MR_torsion"] = mr_torsion
 
-    #  Motion ratios principales
+    global_setup["MR_ARB_F"] = mr_arb_f
+    global_setup["MR_ARB_R"] = mr_arb_r
+    global_setup["ARB_dp_w_f"] = arb_dp_w_f
+    global_setup["ARB_dp_w_r"] = arb_dp_w_r
+
     global_setup["MR_FL"]      = mr_f_wd
     global_setup["MR_FR"]      = mr_f_wd
+
     global_setup["MR_RL"]      = mr_r_wd
     global_setup["MR_RR"]      = mr_r_wd
-    global_setup["MR_FL_rd"]   = mr_f_rd
-    global_setup["MR_FR_rd"]   = mr_f_rd
 
     # ----  ¡NUEVO!  Motion ratio del muelle por esquina ----
-    global_setup["MR_spring_FL"] = global_setup["MR_FL"]   # barra torsión delantera
-    global_setup["MR_spring_FR"] = global_setup["MR_FR"]
-    global_setup["MR_spring_RL"] = global_setup["MR_RL"]      # coil-over trasero
+    global_setup["MR_spring_FL"] = global_setup['MR_torsion']  
+    global_setup["MR_spring_FR"] = global_setup['MR_torsion']
+    global_setup["MR_front_L"] =   global_setup["MR_FL"]
+    global_setup["MR_front_L"] =   global_setup["MR_FR"]
+    global_setup["MR_spring_RL"] = global_setup["MR_RL"]     
     global_setup["MR_spring_RR"] = global_setup["MR_RR"]
 
     for idx, corner in enumerate(("FL","FR","RL","RR")):
@@ -268,24 +285,12 @@ def parse_json_setup(json_data):
     global_setup['aero_DRS'] = aero_poly.get('DRS', {})
     global_setup['tires'] = tires
 
-        # === BRAZO Y RIGIDEZ DE LA BARRA (wheel-rate) ======================
-    def dist(p, q):
-        return ((p[0]-q[0])**2 + (p[1]-q[1])**2 + (p[2]-q[2])**2) ** 0.5
-
-    # 1. Brazo "a" (mm)
-    pts_f = json_data["config"]["suspension"]["front"]["internal"]["pickUpPts"]
-    pts_r = json_data["config"]["suspension"]["rear"]["internal"]["pickUpPts"]
-    aARB_F_mm = dist(pts_f["rARBAxis"], pts_f["rARBRockerPickup"]) * 1000
-    aARB_R_mm = dist(pts_r["rARBAxis"], pts_r["rARBRockerPickup"]) * 1000
-
     # 2. Wheel-rate (N/mm) de la barra para UNA rueda
-    kARB_F_wheel = (2*kARB_F * 1000 / (aARB_F_mm ** 2 * mr_f_wd))
-    kARB_R_wheel = 2*kARB_R * 1000 / (aARB_R_mm ** 2 * mr_r_wd)
+    kARB_F_wheel = (((kARB_F*2000)/(((arb_dp_w_f)**2)*(mr_arb_f**2)))*1000)/(mr_f_wd**2) 
+    kARB_R_wheel = (((kARB_R*2000)/(((arb_dp_w_r)**2)*(mr_arb_r**2)))*1000)/(mr_r_wd**2) 
 
     # 3. Guárdalo en global_setup
     global_setup.update({
-        "aARB_F_mm": aARB_F_mm,
-        "aARB_R_mm": aARB_R_mm,
         "kARB_F_wheel": kARB_F_wheel,
         "kARB_R_wheel": kARB_R_wheel
     })
@@ -300,8 +305,8 @@ def prepare_simple_params(params, global_setup):
 
     from scipy.interpolate import interp1d
 
-    kFL = (params[0]['kSpring']*1.5) / global_setup['MR_spring_FL']**2
-    kFR = (params[1]['kSpring']*1.5) / global_setup['MR_spring_FR']**2
+    kFL = ((params[0]['kSpring']) / global_setup['MR_spring_FL']**2)
+    kFR = ((params[1]['kSpring']) / global_setup['MR_spring_FR']**2)
     kRL = (params[2]['kSpring']) / global_setup['MR_spring_RL']**2
     kRR = (params[3]['kSpring']) / global_setup['MR_spring_RR']**2
 
@@ -310,43 +315,74 @@ def prepare_simple_params(params, global_setup):
     
     # Damper y bumpstop interpoladores
     # --- Corrección: usar compresión y extensión según el signo de la velocidad ---
-    def damper_interp_factory(v_ext, f_ext, v_comp, f_comp, mr_wd):
+    def damper_interp_factory(v_ext, f_ext, v_comp, f_comp, mr_wd, *, scale=1.0):
         from scipy.interpolate import interp1d
-        interp_ext = interp1d(v_ext, f_ext, kind='linear',
-                              fill_value='extrapolate', bounds_error=False)
-        interp_comp = interp1d(v_comp, f_comp, kind='linear',
-                               fill_value='extrapolate', bounds_error=False)
+        interp_ext  = interp1d(v_ext,  f_ext,  kind='linear', fill_value='extrapolate', bounds_error=False)
+        interp_comp = interp1d(v_comp, f_comp, kind='linear', fill_value='extrapolate', bounds_error=False)
+
         def damper_func(v_wheel):
-            # 1) velocidad rueda → velocidad pistón amortiguador
-            v_damper = np.asarray(v_wheel) / mr_wd
-            # 2) fuerza interna en el amortiguador
-            f_int = np.where(v_damper > 0,
-                             interp_comp(v_damper),
-                             interp_ext(v_damper))
-            # 3) fuerza pistón → fuerza rueda
-            return f_int / mr_wd
+            # 1) rueda → pistón
+            v_damper = np.asarray(v_wheel) 
+            # 2) fuerza interna (signo por velocidad)
+            f_int = np.where(v_damper > 0.0, interp_comp(v_damper), interp_ext(v_damper))
+            # 3) pistón → rueda + ganancia
+            return scale * (f_int)
+
         return damper_func
 
     # Llama a la fábrica pasando tu MR damper→wheel ya definido en global_setup
+    damp_scale_front = float(global_setup.get('damp_scale_front', params[0].get('damp_scale', 1)))
+    damp_scale_rear  = float(global_setup.get('damp_scale_rear',  params[2].get('damp_scale', 1)))
+
+    # Damper a rueda con escala (MR del amortiguador)
     damper_front = damper_interp_factory(
         params[0]['damper_v_ext'], params[0]['damper_f_ext'],
         params[0]['damper_v_comp'], params[0]['damper_f_comp'],
-        global_setup['MR_FL']
+        global_setup['MR_FL'],
+        scale=damp_scale_front
     )
     damper_rear  = damper_interp_factory(
         params[2]['damper_v_ext'], params[2]['damper_f_ext'],
         params[2]['damper_v_comp'], params[2]['damper_f_comp'],
-        global_setup['MR_RL']
+        global_setup['MR_RL'],
+        scale=damp_scale_rear
     )
 
-    bumpstop_front_interp = interp1d(params[0]['bump_x'], params[0]['bump_f'], kind='linear', fill_value='extrapolate', bounds_error=False)
-    bumpstop_rear_interp = interp1d(params[2]['bump_x'], params[2]['bump_f'], kind='linear', fill_value='extrapolate', bounds_error=False)
+    scale_bump_F = float(global_setup.get('bump_scale_front', 1))
+    scale_bump_R = float(global_setup.get('bump_scale_rear',  1))
 
-    bumpstop_front = lambda x: np.where(x < 0, 0, bumpstop_front_interp(x))
-    bumpstop_rear = lambda x: np.where(x < 0, 0, bumpstop_rear_interp(x))
+    def make_bump_from_arrays(x_tab, f_tab, scale=1.0):
 
-    k_arb_f = global_setup['kARB_F_wheel'] * 1000  
-    k_arb_r = global_setup['kARB_R_wheel'] * 1000
+        x_tab = np.asarray(x_tab, dtype=float)
+        f_tab = np.asarray(f_tab, dtype=float)
+
+        # Asegura monotonía y punto (0,0)
+        order = np.argsort(x_tab)
+        x_tab = x_tab[order]
+        f_tab = f_tab[order]
+        if x_tab[0] > 0.0:
+            x_tab = np.concatenate(([0.0], x_tab))
+            f_tab = np.concatenate(([0.0], f_tab))
+        else:
+            f_tab[0] = 0.0  # fuerza 0 a comp=0
+
+        from scipy.interpolate import interp1d
+        fx = interp1d(
+            x_tab, f_tab,
+            kind='linear',
+            bounds_error=False,
+            fill_value=(0.0, float(f_tab[-1]))  # extrap <0 → 0, >x_max → f_max
+        )
+        x_max = float(x_tab[-1])
+
+        return lambda comp: scale * fx(np.clip(comp, 0.0, x_max))
+
+    # crea funciones para cada eje (usa FL y RL como referencia de LUT delantera/trasera)
+    bumpstop_front = make_bump_from_arrays(params[0]['bump_x'], params[0]['bump_f'], scale_bump_F)
+    bumpstop_rear  = make_bump_from_arrays(params[2]['bump_x'], params[2]['bump_f'], scale_bump_R)
+
+    k_arb_f = global_setup['kARB_F_wheel']  
+    k_arb_r = global_setup['kARB_R_wheel'] 
 
     # --- Masa suspendida total: suma de las 4 esquinas ---
     ms_total = sum([params[i]['ms'] for i in range(4)])
@@ -359,7 +395,6 @@ def prepare_simple_params(params, global_setup):
     tires = global_setup.get('tires', {})
     tire_front = tires.get('front', {})
     tire_rear = tires.get('rear', {})
-
 
         # ─── 1) Construir el diccionario plano  ───────────────────────────────
     simple_params = {
@@ -395,8 +430,8 @@ def prepare_simple_params(params, global_setup):
         'bump_x_FR': params[1]['bump_x'],
         'bump_x_RL': params[2]['bump_x'],
         'bump_x_RR': params[3]['bump_x'],
-        'k_arb_f': k_arb_f,
-        'k_arb_r': k_arb_r,
+        'k_arb_f': k_arb_f/2,
+        'k_arb_r': k_arb_r/2,
         'stroke_FL': stroke_FL,
         'stroke_FR': stroke_FR,
         'stroke_RL': stroke_RL,
@@ -408,24 +443,17 @@ def prepare_simple_params(params, global_setup):
         'gap_bumpstop_FR': global_setup['gap_bumpstop_FR'],
         'gap_bumpstop_RL': global_setup['gap_bumpstop_RL'],
         'gap_bumpstop_RR': global_setup['gap_bumpstop_RR'],
-        'x_FL_static': params[0]['spring_bump_total_f'][0] / kFL,
-        'x_FR_static': params[1]['spring_bump_total_f'][0] / kFR,
-        'x_RL_static': params[2]['spring_bump_total_f'][0] / kRL,
-        'x_RR_static': params[3]['spring_bump_total_f'][0] / kRR,
         'MR_FL': global_setup['MR_FL'],
         'MR_FR': global_setup['MR_FR'],
         'MR_RL': global_setup['MR_RL'],
         'MR_RR': global_setup['MR_RR'],
-        'FSpringPreload_FL': params[0].get('FSpringPreload', 0.0) / global_setup['MR_FL'],
-        'FSpringPreload_FR': params[1].get('FSpringPreload', 0.0) / global_setup['MR_FR'],
+        'MR_spring_FL': global_setup.get('MR_spring_FL', global_setup.get('MR_torsion', global_setup['MR_FL'])),
+        'MR_spring_FR': global_setup.get('MR_spring_FR', global_setup.get('MR_torsion', global_setup['MR_FR'])),
+        'FSpringPreload_FL': params[0].get('FSpringPreload', 0.0) / global_setup['MR_spring_FL'],
+        'FSpringPreload_FR': params[1].get('FSpringPreload', 0.0) / global_setup['MR_spring_FR'],
         'FSpringPreload_RL': params[2].get('FSpringPreload', 0.0) / global_setup['MR_RL'],
         'FSpringPreload_RR': params[3].get('FSpringPreload', 0.0) / global_setup['MR_RR'],
-    }
-
-    # ─── 2) Límites PROVISIONALES para que compute_static_equilibrium() arranque
-    for corner in ('FL', 'FR', 'RL', 'RR'):
-        simple_params[f'z_topout_{corner}']    = 0.0                              # extens.
-        simple_params[f'z_bottomout_{corner}'] = -simple_params[f'stroke_{corner}']  # compr.
+     }
 
     # ─── 3) Devolver el diccionario plano
     return simple_params
@@ -464,11 +492,21 @@ def simulate_combo(setup_path, track_path, kt_overrides=None):
     pbrake  = track_data['brake']
     drs_signal = track_data['drs_signal'] 
 
+    
+    track_data = retime_track(track_data, fs_target=200.0)  # ← fuerza 200 Hz
+
+    t_vec    = track_data['t']
+    z_tracks = track_data['z_tracks']
+    vx, ax, ay     = track_data['vx'], track_data['ax'], track_data['ay']
+    rpedal, pbrake = track_data['rpedal'], track_data['brake']
+    drs_signal     = track_data['drs_signal']
+
     drs_frac_func = make_drs_func(t_vec, drs_signal)
 
     sol = run_vehicle_model_simple(
         t_vec, z_tracks, vx, ax, ay, rpedal, pbrake,
-        simple_params, drs_func=drs_frac_func)
+        simple_params, drs_func=drs_frac_func,
+    )
     simple_params['track_name'] = Path(track_path).stem
     post = postprocess_7dof(sol, simple_params, z_tracks, t_vec, rpedal, pbrake, vx, ax, ay)
 
@@ -508,13 +546,21 @@ def simulate_dict_combo(setup_data_raw, track_path, setup_label,
     rpedal, pbrake    = track_data['rpedal'], track_data['brake']
     drs_signal        = track_data['drs_signal']
 
+    track_data = retime_track(track_data, fs_target=200.0)  # ← fuerza 200 Hz
+
+    t_vec    = track_data['t']
+    z_tracks = track_data['z_tracks']
+    vx, ax, ay     = track_data['vx'], track_data['ax'], track_data['ay']
+    rpedal, pbrake = track_data['rpedal'], track_data['brake']
+    drs_signal     = track_data['drs_signal']
+
     # —— función DRS continuo (0‑1) ——
     drs_frac_func = make_drs_func(t_vec, drs_signal)
 
     # ── 3) solver dinámico ────────────────────────────────────────────────
     sol = run_vehicle_model_simple(
         t_vec, z_tracks, vx, ax, ay, rpedal, pbrake,
-        simple_params, drs_func=drs_frac_func
+        simple_params, drs_func=drs_frac_func,
     )
 
     # ── 4) post‑proceso de KPIs ────────────────────────────────────────────
@@ -561,7 +607,29 @@ def load_track_channels(track_path):
     data['ay'] = [ay * 9.81 for ay in data['ay']]
     return data
 
+def retime_track(track_data, fs_target=200.0):
+    t_in = np.asarray(track_data['t'], dtype=float)
+    t0, t1 = float(t_in[0]), float(t_in[-1])
+    n = int(np.floor((t1 - t0) * fs_target)) + 1
+    t_out = t0 + np.arange(n) / fs_target
+
+    def _i(x):
+        x = np.asarray(x, dtype=float)
+        return np.interp(t_out, t_in, x)
+
+    return {
+        't': t_out,
+        'vx': _i(track_data['vx']),
+        'ax': _i(track_data['ax']),
+        'ay': _i(track_data['ay']),
+        'rpedal': _i(track_data['rpedal']),
+        'brake': _i(track_data['brake']),
+        'z_tracks': [_i(z) for z in track_data['z_tracks']],
+        'drs_signal': _i(track_data['drs_signal'])
+    }
+
 class SevenPostRigGUI(QWidget):
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("7-Post Rig Simulator")
@@ -1165,6 +1233,7 @@ class SevenPostRigGUI(QWidget):
         self.feedback(f"Sweep aplicado a {param}: {values}", "success")
 
     @staticmethod
+
     def apply_sweep_value(setup_dict, param, val, sweep_type):
         susp = setup_dict['config']['suspension']
         if param == 'kSpring_front':
@@ -1328,35 +1397,6 @@ class SevenPostRigGUI(QWidget):
             visualizer_dash.run_kpi_comparison_in_thread(self.sim_results)
             self.kpi_web_view.load(QUrl("http://127.0.0.1:8051"))
             self.tabs.setCurrentIndex(self.tabs.indexOf(self.results_tab))
-
-        def show_results(self, idx=None):
-            if not hasattr(self, 'sim_results') or self.result_selector.count() == 0:
-                return
-            idx = self.result_selector.currentIndex() if idx is None else idx
-            if idx < 0 or idx >= len(self.sim_results):
-                return
-            sol, post, setup_label, track_path = self.sim_results[idx]
-            setup_name = os.path.basename(setup_label).replace(".json", "") if os.path.splitext(setup_label)[1] else setup_label
-            visualizer_dash.run_in_thread(sol, post, setup_name=setup_name)
-            self.web_view.load(QUrl("http://127.0.0.1:8050"))
-
-        def export_report(self):
-            if not hasattr(self, 'sim_results') or not self.sim_results:
-                self.feedback("⚠️ No hay resultados para exportar.", "warning")
-                return
-            from visualizer_dash import export_full_report
-            export_path, _ = QFileDialog.getSaveFileName(self, "Guardar Reporte HTML", "", "HTML Files (*.html)")
-            if export_path:
-                try:
-                    export_full_report(self.sim_results, export_path)
-                    self.feedback(f"✅ Reporte exportado en {export_path}", "success")
-                except Exception as e:
-                    self.feedback(f"❌ Error al exportar: {str(e)}", "error")
-            
-        def feedback(self, msg, level):
-            color = {"success": "#4e9a06", "warning": "#f6c700", "error": "#d7263d"}.get(level, "#aaa")
-            self.feedback_label.setText(msg)
-            self.feedback_label.setStyleSheet(f"color: {color}; font-weight: bold;")
 
     def show_results(self, idx=None):
         if (not hasattr(self, "sim_results")
