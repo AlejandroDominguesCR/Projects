@@ -109,7 +109,7 @@ def launch_dash(sol, post, setup_name="Setup"):
         graphs = []
         distance = np.cumsum(post['vx']) * np.gradient(sol.t)
 
-        spring_travel = (post['z_wheel']) * 1000
+        spring_travel = (post['p_plot']) * 1000
         travel = smooth_signal(post['damper_travel'])*1000
         wheel_f = post['f_wheel']          # shape (4, N)
         grip_mask = post['grip_limited_lateral_mask']  # (N,)
@@ -131,10 +131,10 @@ def launch_dash(sol, post, setup_name="Setup"):
 
         # Travel absoluto por rueda
         fig = go.Figure([
-            go.Scatter(x=distance, y=spring_travel[0], name="Potencia  FL"),
-            go.Scatter(x=distance, y=spring_travel[1], name="Potencia FR"),
-            go.Scatter(x=distance, y=spring_travel[2], name="Potencia RL"),
-            go.Scatter(x=distance, y=spring_travel[3], name="Potencia RR"),
+            go.Scatter(x=distance, y=spring_travel[0], name=" FL"),
+            go.Scatter(x=distance, y=spring_travel[1], name=" FR"),
+            go.Scatter(x=distance, y=spring_travel[2], name=" RL"),
+            go.Scatter(x=distance, y=spring_travel[3], name=" RR"),
         ])
         fig.update_layout(title="Spring Travel [mm]", xaxis_title="Distance [m]", yaxis_title="Travel [mm]")
         graphs.append(html.Div(
@@ -1420,9 +1420,10 @@ def export_full_report(setups, export_path="export_full_report.html"):
 
         # === 2) Re-muestreo / garantía de longitud ==================================
         t = sol.t
+        g = 9.81
         vx  = np.interp(t, t_in, vx_in) * 3.6
-        ax  = np.interp(t, t_in, ax_in) / 9.81
-        ay  = np.interp(t, t_in, ay_in) / 9.81
+        ax  = np.interp(t, t_in, ax_in) / g
+        ay  = np.interp(t, t_in, ay_in) / g
         thr = np.interp(t, t_in, thr_in)
         brk = np.interp(t, t_in, brk_in)
 
@@ -1485,16 +1486,16 @@ def export_full_report(setups, export_path="export_full_report.html"):
             "roll_rate_rps": roll_rate,
 
             # ----- Travels (relativos; compresión negativa) -----
-            "travel_FL_mm": trv[0]*1000, "travel_FR_mm": trv[1]*1000,
-            "travel_RL_mm": trv[2]*1000, "travel_RR_mm": trv[3]*1000,
+            "FL_Bumprubber_Disp": trv[0]*1000, "FR_Bumprubber_Disp": trv[1]*1000,
+            "RL_Bumprubber_Disp": trv[2]*1000, "RR_Bumprubber_Disp": trv[3]*1000,
             "FL_Damper": dmp_trv[0]*1000, "FR_Damper": dmp_trv[1]*1000,
             "RL_Damper": dmp_trv[2]*1000, "RR_Damper": dmp_trv[3]*1000,
 
             # ----- Fuerzas suspensión -----
             "Fspring_FL_N": Fspr[0], "Fspring_FR_N": Fspr[1],
             "Fspring_RL_N": Fspr[2], "Fspring_RR_N": Fspr[3],
-            "Fbump_FL_N": Fbump[0], "Fbump_FR_N": Fbump[1],
-            "Fbump_RL_N": Fbump[2], "Fbump_RR_N": Fbump[3],
+            "FL_Bumprubber_Force": Fbump[0]/g, "FR_Bumprubber_Force": Fbump[1]/g,
+            "RL_Bumprubber_Force": Fbump[2]/g, "RR_Bumprubber_Force": Fbump[3]/g,
             "Fdamper_FL_N": Fdmp[0], "Fdamper_FR_N": Fdmp[1],
             "Fdamper_RL_N": Fdmp[2], "Fdamper_RR_N": Fdmp[3],
             "Farb_FL_N": Farb[0], "Farb_FR_N": Farb[1],
@@ -1505,8 +1506,8 @@ def export_full_report(setups, export_path="export_full_report.html"):
             "RL_Load": Wload[2], "RR_Load": Wload[3],
 
             # ----- Aero -----
-            "F_AeroLoad": -FzAeroF/9.81,
-            "R_AeroLoad":  -FzAeroR/9.81,
+            "F_AeroLoad": -FzAeroF/g,
+            "R_AeroLoad":  -FzAeroR/g,
             "F_RH": RH_front,
             "R_RH": RH_rear,
 

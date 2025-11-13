@@ -67,6 +67,10 @@ def parse_json_setup(json_data):
     # Extrae rigidez de barra estabilizadora (antiroll bar)
     kARB_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["kAntiRollBar"]
     kARB_R = json_data["config"]["suspension"]["rear"]["internal"]["antiRollBar"]["kAntiRollBar"]
+    ARB_Droplink_width_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["AntiRollBar_droplink_width"]
+    ARB_Droplink_width_R = json_data["config"]["suspension"]["rear"]["internal"]["antiRollBar"]["AntiRollBar_droplink_width"]
+    MR_DA_Linear_F = json_data["config"]["suspension"]["front"]["internal"]["antiRollBar"]["MR_DA_Linear"]
+    MR_DA_Linear_R = json_data["config"]["suspension"]["rear"]["internal"]["antiRollBar"]["MR_DA_Linear"]
     
     # Masas por esquina 
     ms_f = ((m_car * wbal_f)/ 2) - mHubF
@@ -114,14 +118,6 @@ def parse_json_setup(json_data):
         damper_v_ext = v[v < 0]
         damper_f_comp = F[v > 0]
         damper_v_comp = v[v > 0]
-
-        # Si no hay valores negativos/positivos, usar arrays vacíos
-        if damper_f_ext.size == 0:
-            damper_f_ext = np.array([0.0])
-            damper_v_ext = np.array([0.0])
-        if damper_f_comp.size == 0:
-            damper_f_comp = np.array([0.0])
-            damper_v_comp = np.array([0.0])
 
         # --- Añadir curva muelle+bumpstop para el recorrido máximo ---
         spring_travel = np.linspace(0.0, stroke, 100)   # [m] pistón, 0 = top-out, stroke = bottom-out
@@ -182,6 +178,10 @@ def parse_json_setup(json_data):
         'kVerticalSuspensionComplianceR': json_data["config"]["chassis"].get("kVerticalSuspensionComplianceR"),
         'kARB_F': kARB_F,
         'kARB_R': kARB_R,
+        'ARB_Droplink_width_F': ARB_Droplink_width_F,
+        'ARB_Droplink_width_R': ARB_Droplink_width_R,        
+        'MR_DA_Linear_F': MR_DA_Linear_F,
+        'MR_DA_Linear_R': MR_DA_Linear_R,
         'hRideF': hRideF,
         'hRideR': hRideR,
         'zCoG': zCoG
@@ -194,13 +194,13 @@ def parse_json_setup(json_data):
         "gap_bumpstop_RR": params[3]["bump_gap"] 
     })
 
-    mr_torsion = 1.437 #(0.016950**2)*(1.437**2)*1000
+    mr_torsion = 1.437 
     mr_f_wd = 1.437 #1.491587949 
     mr_r_wd = 1.32579 
-    mr_arb_f = 0.72
-    mr_arb_r = 1.59
-    arb_dp_w_f = 60 #mm
-    arb_dp_w_r = 146 #mm
+    mr_arb_f = MR_DA_Linear_F
+    mr_arb_r = MR_DA_Linear_R
+    arb_dp_w_f = ARB_Droplink_width_F
+    arb_dp_w_r = ARB_Droplink_width_R
 
     #  Motion ratios 
     global_setup["MR_torsion"] = mr_torsion
@@ -228,7 +228,6 @@ def parse_json_setup(json_data):
         params[idx]["mr_dw"] = global_setup[f"MR_{corner}"]
 
     chassis = json_data['config']['chassis']
-    tyres = json_data['config']['tyres']
 
     aero = {
         'zCoG': chassis.get('zCoG', 0.0),
@@ -240,22 +239,6 @@ def parse_json_setup(json_data):
         'rUndertrayRear': chassis.get('rUndertrayRear', [0, 0, 0])
     }
 
-    tires = {
-        'front': {
-            'scaling': tyres['front']['SCALING_COEFFICIENTS'],
-            'longitudinal': tyres['front']['LONGITUDINAL_COEFFICIENTS'],
-            'lateral': tyres['front']['LATERAL_COEFFICIENTS'],
-            'dimension': tyres['front']['DIMENSION'],
-            'vertical': tyres['front']['VERTICAL']
-        },
-        'rear': {
-            'scaling': tyres['rear']['SCALING_COEFFICIENTS'],
-            'longitudinal': tyres['rear']['LONGITUDINAL_COEFFICIENTS'],
-            'lateral': tyres['rear']['LATERAL_COEFFICIENTS'],
-            'dimension': tyres['rear']['DIMENSION'],
-            'vertical': tyres['rear']['VERTICAL']
-        }
-    }
 
     global_setup.update({
         "aero_full": aero  # información extendida del undertray
@@ -283,7 +266,6 @@ def parse_json_setup(json_data):
     global_setup['aero_flapAngles'] = aero_poly.get('flapAngles', {})
     global_setup['aero_offsets'] = aero_poly.get('coefficientOffsets', {})
     global_setup['aero_DRS'] = aero_poly.get('DRS', {})
-    global_setup['tires'] = tires
 
     # 2. Wheel-rate (N/mm) de la barra para UNA rueda
     kARB_F_wheel = (((kARB_F*2000)/(((arb_dp_w_f)**2)*(mr_arb_f**2)))*1000)/(mr_f_wd**2) 
@@ -352,11 +334,16 @@ def prepare_simple_params(params, global_setup):
     scale_bump_R = float(global_setup.get('bump_scale_rear',  1))
 
     def make_bump_from_arrays(x_tab, f_tab, scale=1.0):
-
+        """
+        Devuelve una función bump(comp) que:
+        - Si comp <= 0  → 0.0
+        - Si comp > 0   → interpola linealmente la LUT y permite extrapolación (tal cual)
+        No se hace clip a x_max ni saturación superior.
+        """
         x_tab = np.asarray(x_tab, dtype=float)
         f_tab = np.asarray(f_tab, dtype=float)
 
-        # Asegura monotonía y punto (0,0)
+        # Asegura orden y el punto (0,0)
         order = np.argsort(x_tab)
         x_tab = x_tab[order]
         f_tab = f_tab[order]
@@ -371,11 +358,16 @@ def prepare_simple_params(params, global_setup):
             x_tab, f_tab,
             kind='linear',
             bounds_error=False,
-            fill_value=(0.0, float(f_tab[-1]))  # extrap <0 → 0, >x_max → f_max
+            fill_value="extrapolate",   
+            assume_sorted=True
         )
-        x_max = float(x_tab[-1])
 
-        return lambda comp: scale * fx(np.clip(comp, 0.0, x_max))
+        def bump(comp):
+            comp = np.asarray(comp, dtype=float)
+            out = np.where(comp <= 0.0, 0.0, fx(comp))
+            return scale * out
+
+        return bump
 
     # crea funciones para cada eje (usa FL y RL como referencia de LUT delantera/trasera)
     bumpstop_front = make_bump_from_arrays(params[0]['bump_x'], params[0]['bump_f'], scale_bump_F)
@@ -454,6 +446,11 @@ def prepare_simple_params(params, global_setup):
         'FSpringPreload_RL': params[2].get('FSpringPreload', 0.0) / global_setup['MR_RL'],
         'FSpringPreload_RR': params[3].get('FSpringPreload', 0.0) / global_setup['MR_RR'],
      }
+
+    simple_params.update({
+        'ctf': float(global_setup.get('ctf', 2500.0)),  # tire damping front [N·s/m]
+        'ctr': float(global_setup.get('ctr', 2500.0)),  # tire damping rear  [N·s/m]
+    })
 
     # ─── 3) Devolver el diccionario plano
     return simple_params

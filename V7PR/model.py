@@ -23,25 +23,23 @@ def delayed_signal(func_or_val, t_query, tau, t0=0.0):
     return float(func_or_val)
     
 def camber_front_from_height(x_m):
-    # x en metros -> polinomio espera mm
-    x = 1000.0 * float(x_m)
-    # devuelve camber en grados
-    return (-0.000028 * x * x) + (0.006688 * x) - 4.00012
+    # x puede ser escalar o array (m)
+    x = 1000.0 * np.asarray(x_m, dtype=float)   # mm
+    return (-0.000028 * x**2) + (0.006688 * x) - 4.00012  # deg
 
 def camber_rear_from_height(x_m):
-    x = 1000.0 * float(x_m)
-    # devuelve camber en grados
-    return (-0.01861 * x) - 2.00275
+    x = 1000.0 * np.asarray(x_m, dtype=float)   # mm
+    return (-0.01861 * x) - 2.00275  # deg
 
 def rc_front_from_heave(h_axle_m):
-    # h_axle_m en metros → x en mm
-        x_mm = 1000.0 * float(h_axle_m)
-        rc_mm = (-1.3055 * x_mm) + 11.147
-        return rc_mm * 1e-3  # m
+    x_mm = 1000.0 * np.asarray(h_axle_m, dtype=float)
+    rc_mm = (-1.3055 * x_mm) + 11.147
+    return rc_mm * 1e-3  # m
 
 def rc_rear_from_heave(h_axle_m):
-    x_mm = 1000.0 * float(h_axle_m)
-    rc_mm = (1.2037 * x_mm) + 78.
+    x_mm = 1000.0 * np.asarray(h_axle_m, dtype=float)
+    rc_mm = (1.2037 * x_mm) + 78.127
+    return rc_mm * 1e-3  # m
 
 def vehicle_model_simple(t, z, params, ztrack_funcs):
     # Estados: h, hdot, phi, phi_dot, theta, theta_dot,
@@ -139,6 +137,21 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     rc_f = rc_front_from_heave(h_axle_F)  # m
     rc_r = rc_rear_from_heave(h_axle_R)   # m
 
+    # --- al inicio, tras leer ktf/ktr y mHubF/mHubR ---
+    ctf = float(params.get('ctf', 2500.0))
+    ctr = float(params.get('ctr', 2500.0))
+
+    # helper derivada temporal del perfil de pista
+    def ddt(f, t, h=1e-4):
+        return (f(t + h) - f(t - h)) / (2.0*h)
+
+    # velocidades del perfil de pista (en m/s)
+    ztrack_FL_dot = ddt(ztrack_funcs[0], t)
+    ztrack_FR_dot = ddt(ztrack_funcs[1], t)
+    ztrack_RL_dot = ddt(ztrack_funcs[2], t)
+    ztrack_RR_dot = ddt(ztrack_funcs[3], t)
+
+
     # Helper para calcular la fuerza de rueda
     def wheel_force(z_w, z_w_dot,
                     phi_off, theta_off,
@@ -159,7 +172,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         MRs   = (mr_spring)    # MR del muelle
 
         # Travel y velocidad relativos en RUEDA (corrigidos por camber)
-        x_wheel = (z_w + dz_cam) - (phi_off + theta_off + h)            # RUEDA
+        x_wheel = (z_w - dz_cam) - (phi_off + theta_off + h)            # RUEDA
         v_rel_w = z_w_dot - (phi_dot_off + theta_dot_off + hdot)        # RUEDA
 
         # Reparto serie (en RUEDA) -> travel muelle (RUEDA) y a PISTÓN con MR del muelle
@@ -168,7 +181,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
         v_damper_p  = (ratio * v_rel_w) / MRd                            # PISTÓN
 
         # Límites y baseline en PISTÓN (muelle)
-        x_p_clip   = (np.clip(x_spring_p, z_top, z_bot))            # PISTÓN
+        x_p_clip   = (np.clip((x_spring_p/MRs), z_top, z_bot))            # PISTÓN
         baseline_p = x_static / MRs                               # PISTÓN
 
         # Fuerza del muelle (PISTÓN → RUEDA con MR del muelle)
@@ -337,7 +350,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
 
     Kphi_f = ((kFL_eff + kFR_eff) * (tF/2.0)**2) + (2*k_arb_f) * (tF/2.0)**2
     Kphi_r = ((kRL_eff + kRR_eff) * (tR/2.0)**2) + (2*k_arb_r) * (tR/2.0)**2
-    Kphi_tot = Kphi_f + Kphi_r if (Kphi_f + Kphi_r) != 0 else 1e-6
+    Kphi_tot = Kphi_f + Kphi_r 
 
     # par asignado a cada eje y su ΔW elástico correspondiente
     M_lat_f = M_lat_el * (Kphi_f / Kphi_tot)
@@ -358,7 +371,7 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     h_ddot = (F_FL + F_FR + F_RL + F_RR + Fz_aero_tot) / Ms
 
     phi_ddot = (
-        lr * (F_RR + F_RL + Fz_aero_rear) - lf * (F_FR + F_FL + Fz_aero_front) - (h_eff * F_drag) - M_long_el
+        lr * (F_RR + F_RL + Fz_aero_rear) - lf * (F_FR + F_FL + Fz_aero_front) - (h * F_drag) - M_long_el
     ) / Iyy
 
     theta_ddot = (
@@ -366,11 +379,22 @@ def vehicle_model_simple(t, z, params, ztrack_funcs):
     ) / Ixx
     
     # -------------------- masas no suspendidas --------------------
-    zFR_ddot = (-(F_FR + 0.5*Fz_aero_front) + params['ktf'] * (ztrack_FR - zFR)) / mHubF
-    zFL_ddot = (-(F_FL + 0.5*Fz_aero_front) + params['ktf'] * (ztrack_FL - zFL)) / mHubF
-    zRL_ddot = (-(F_RL + 0.5*Fz_aero_rear)  + params['ktr'] * (ztrack_RL - zRL)) / mHubR
-    zRR_ddot = (-(F_RR + 0.5*Fz_aero_rear)  + params['ktr'] * (ztrack_RR - zRR)) / mHubR
+    zFR_ddot = (-(F_FR + 0.5*Fz_aero_front)
+                + params['ktf']*(ztrack_FR - zFR)
+                + ctf*(ztrack_FR_dot - zFRdot)) / mHubF
 
+    zFL_ddot = (-(F_FL + 0.5*Fz_aero_front)
+                + params['ktf']*(ztrack_FL - zFL)
+                + ctf*(ztrack_FL_dot - zFLdot)) / mHubF
+
+    zRL_ddot = (-(F_RL + 0.5*Fz_aero_rear)
+                + params['ktr']*(ztrack_RL - zRL)
+                + ctr*(ztrack_RL_dot - zRLdot)) / mHubR
+
+    zRR_ddot = (-(F_RR + 0.5*Fz_aero_rear)
+                + params['ktr']*(ztrack_RR - zRR)
+                + ctr*(ztrack_RR_dot - zRRdot)) / mHubR
+    
     return [
         hdot,      h_ddot,
         phi_dot,   phi_ddot,
@@ -514,10 +538,10 @@ def compute_static_equilibrium(params, vx=0):
         dz_cam_RR = R_tire * (1.0 - cos(abs(gamma_RR)))
 
         # Travel RUEDA incluyendo camber (coherente con el solver dinámico)
-        x_FR = (zs_FR - (zFR + dz_cam_FR))
-        x_FL = (zs_FL - (zFL + dz_cam_FL))
-        x_RR = (zs_RR - (zRR + dz_cam_RR))
-        x_RL = (zs_RL - (zRL + dz_cam_RL))
+        x_FR = (zs_FR - (zFR - dz_cam_FR))
+        x_FL = (zs_FL - (zFL - dz_cam_FL))
+        x_RR = (zs_RR - (zRR - dz_cam_RR))
+        x_RL = (zs_RL - (zRL - dz_cam_RL))
 
         # Rigidez efectiva muelle + instalación (en RUEDA)
         kFR_eff = 1.0 / (1.0/kFR + 1.0/kinstf)
@@ -622,6 +646,7 @@ def compute_static_equilibrium(params, vx=0):
     print(f"[equil] sag_wheel [mm]: "
           f"FL={params['sag_wheel_FL']*1000:.2f}, FR={params['sag_wheel_FR']*1000:.2f}, "
           f"RL={params['sag_wheel_RL']*1000:.2f}, RR={params['sag_wheel_RR']*1000:.2f}")
+    print(f"Debug Rigideces = kFL = {kFL}, kinstf = {kinstf}, kRL = {kRL}, kinstr = {kinstr}, kFL_eff = {1.0/(1.0/kFL + 1.0/kinstf)}, kRL_eff = {1.0/(1.0/kRL + 1.0/kinstr)}, ratio = {kinstf/(kinstf + kFL)}")
 
     return sol
 
@@ -682,18 +707,19 @@ def run_vehicle_model_simple(t_vec, z_tracks, vx, ax, ay, rpedal, pbrake, params
         params['ay'] = float(ay_fun(ti))
         return vehicle_model_simple(ti, y, params, ztrack_funcs)
 
-    # --- Solver rápido: RK45 bien “tuneado” ---
+        # --- Solver rápido: RK45 bien “tuneado” ---
     sol = solve_ivp(
         rhs,
         (t[0], t[-1]),
         y0,
         t_eval=t,
         method='RK45',
-        rtol=0.001,
-        atol=1e-6,
-        max_step=max(2e-3, 0.5*dt_min),   # paso máx relativo a tu malla
-        first_step=0.5*dt_min             # evita pasos minúsculos al inicio
+        rtol=3e-3,
+        atol=1e-5,
+        max_step=dt_min,     # antes: max(2e-3, 0.5*dt_min)
+        first_step=dt_min    # antes: 0.5*dt_min
     )
+
 
     return sol
 
@@ -729,8 +755,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     theta  = sol.y[4, :]     # roll [rad]
     theta_dot = sol.y[5, :]
 
-    h0   = float(h[0]);  phi0 = float(phi[0])
-
     # Dimensiones del vehículo (en metros)
     wheelbase = params.get('wheelbase')
     tF = params.get('tf')
@@ -756,15 +780,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     phi_off_rear        =  lr * phi
     theta_off_front     =  (tF/2) * theta
     theta_off_rear      =  (tR/2) * theta
-
-    # Posiciones [x, y] de cada rueda en coordenadas del CG (FL, FR, RL, RR)
-    pos = np.array([
-        [-lf,  tF / 2],   # FL
-        [-lf, -tF / 2],   # FR
-        [ lr,  tR / 2],   # RL
-        [ lr, -tR / 2],   # RR
-    ])
-
 
     zt = np.stack(
         [np.interp(t, t_vec, z_tracks[i]) for i in range(n_corners)],
@@ -802,17 +817,36 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
     Wr   = Wtot - Wf
     static = np.array([Wf/2, Wf/2, Wr/2, Wr/2])[:,None]  # (4,1)
  #-------------------------------------------------------------------
+    R_tire = float(params.get('tire_radius', 0.33))  # m
 
-    x_FL_b = zFL - (phi_off_front + theta_off_front + h)
-    x_FR_b = zFR - (phi_off_front - theta_off_front + h)
-    x_RL_b = zRL - (phi_off_rear  + theta_off_rear  + h)
-    x_RR_b = zRR - (phi_off_rear  - theta_off_rear  + h)
+    # Altura del eje por eje (centro del coche, sin ±track)
+    h_axle_F = h - lf * phi + params.get('hRideF')  # 
+    h_axle_R = h + lr * phi + params.get('hRideR')  # 
+
+    # Camber cinemático por eje (grados) y aporte de roll ±theta
+    camber_F_deg = camber_front_from_height(h_axle_F)
+    camber_R_deg = camber_rear_from_height(h_axle_R)
+
+    #camber total respecto al suelo = camber ± roll
+    gamma_FL = np.deg2rad(camber_F_deg - theta)
+    gamma_FR = np.deg2rad(camber_F_deg + theta)
+    gamma_RL = np.deg2rad(camber_R_deg - theta)
+    gamma_RR = np.deg2rad(camber_R_deg + theta)
+
+    # Bajada del centro de rueda por camber (m)
+    dz_cam_FL = R_tire * (1.0 - np.cos(np.abs(gamma_FL)))
+    dz_cam_FR = R_tire * (1.0 - np.cos(np.abs(gamma_FR)))
+    dz_cam_RL = R_tire * (1.0 - np.cos(np.abs(gamma_RL)))
+    dz_cam_RR = R_tire * (1.0 - np.cos(np.abs(gamma_RR)))
+
+    x_FL_b = (zFL-dz_cam_FL) - (phi_off_front + theta_off_front + h)
+    x_FR_b = (zFR-dz_cam_FR) - (phi_off_front - theta_off_front + h)
+    x_RL_b = (zRL-dz_cam_RL) - (phi_off_rear  + theta_off_rear  + h)
+    x_RR_b = (zRR-dz_cam_RR) - (phi_off_rear  - theta_off_rear  + h)
     x_wheel_b = np.vstack([x_FL_b, x_FR_b, x_RL_b, x_RR_b])      # (4,N)
 
     x_spring_p = (x_wheel_b * ratio) + sag_wheel
-#---------------------------------------------------------------------
-
-
+    #---------------------------------------------------------------------
     def _get_lim(name, default):
         return float(params.get(name, default))
     z_top = np.array([
@@ -855,7 +889,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         0.5 * Fz_rear    # RR
     ])  # (4, N)
 
-    dyn_hF = ((h*mr_wd[0]) - (lf) * phi) +  hRideF  # (N,)
+    dyn_hF = ((h*mr_wd[0]) - lf * phi) +  hRideF  # (N,)
     RH_front_c = dyn_hF
 
     dyn_hR = ((h*mr_wd[2]) + lr * phi)  + hRideR  # (N,)
@@ -863,8 +897,18 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
 
     # ---------- 8) Neumático ----------
     ktf = float(params['ktf']); ktr = float(params['ktr'])
-    kt = np.array([ktf, ktf, ktr, ktr])[:,None]
-    f_tire = kt * (-z_wheel)   # (4,N)  (contact patch load ↑ si rueda baja vs pista)
+    ctf = float(params.get('ctf', 2500.0)); ctr = float(params.get('ctr', 2500.0))
+
+    kt = np.array([ktf, ktf, ktr, ktr])[:, None]
+    ct = np.array([ctf, ctf, ctr, ctr])[:, None]
+
+    # velocidades: ẋ_track (derivada respecto a t) y ẋ_wheel ya las tienes (zdFL, ...):
+    zt_dot = np.vstack([np.gradient(zt[i], t) for i in range(4)])   # (4,N)
+
+    v_wheel = np.vstack([zdFL, zdFR, zdRL, zdRR])                   # (4,N)
+
+    # fuerza de “neumático” (modelo Kelvin-Voigt): F = k·Δz + c·Δẋ
+    f_tire = kt*(- z_wheel) + ct*(zt_dot - v_wheel)
     
     preload = np.array([
         params['FSpringPreload_FL'],
@@ -899,11 +943,9 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
 
     damper_travel_x= -(x_spring_p/mr_wd) # (4,N) en DAMPER (negativo = se comprime)
 
-    damper_travel_x = np.vstack([(damper_travel_x[0]), (damper_travel_x[1]), (damper_travel_x[2]),(damper_travel_x[3])])
-
     x_spring = x_wheel_b/mr_wd
 
-    x_p = np.clip(((x_wheel_b * ratio)), z_top, z_bot)  # (4,N)
+    x_p = np.clip(((x_spring_p)/mr_wd), z_top, z_bot)  # (4,N)
     x_w_clip = x_p * mr_wd                # (4,N)
 
     # Fuerza muelle en RUEDA (con clipping)
@@ -915,15 +957,16 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         params['gap_bumpstop_FR'],
         params['gap_bumpstop_RL'],
         params['gap_bumpstop_RR'],
-    ], dtype=float)[:, None]                              # (4,1)
+    ], dtype=float)[:, None]                              # gap de setup en piston
 
-    baseline_p = sag_piston
+    baseline_p = sag_piston #compresion inicial del piston en suspensión estática 
 
     # Compresión POSITIVA y penetración:
-    comp_rel_p  = x_p - baseline_p                        # (4,N)
-    penetration = np.maximum(0.0, comp_rel_p - gap_p)       # (4,N)
+    comp_rel_p   = (x_p) - baseline_p                 # (4, N)  travel relativo
+    bump_disp_p  = comp_rel_p - gap_p               # (4, N)  desplazamiento "bump" firmado (neg = sin contacto)
+    penetration  = np.maximum(0.0, bump_disp_p)     # (4, N)  solo la parte en contacto (>= 0)
 
-    bumpstop_mm_piston = penetration            # (4,N) en mm (FL,FR,RL,RR)
+    bumpstop_mm_piston = bump_disp_p            # (4,N) en mm (FL,FR,RL,RR)
 
     # LUTs en pistón -> fuerza a RUEDA dividiendo por MR
     f_bump = np.zeros_like(x_wheel_b)
@@ -954,7 +997,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         f_arb[2] += +arb_force_rear
         f_arb[3] += -arb_force_rear
    
-    f_arb = smooth_signal(f_arb)
     # ---  Load-transfer inercial ------------------------------------------
     Ms     = params['ms']                        # masa suspendida
     Mu_f   = 2*params['mHubF']                  # hub mass delantera (dos ruedas)
@@ -1017,7 +1059,6 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
                         +dF_lat_geo_r + dF_lat_r + dF_lat_u_r, -dF_lat_geo_r - dF_lat_r - dF_lat_u_r])  # (4,N)
 
     f_dyn = dF_lat + dF_long             #  (+ dF_el si procede)
-    df_lat = smooth_signal(dF_lat)
     # 4d) Fuerza neta en rueda (nunca negativa)
     wheel_load = (-aero + f_tire - dF_lat + static - f_damper ) / 9.81
     wheel_load_std = np.std(wheel_load, axis=1)          # (4,)
@@ -1346,6 +1387,7 @@ def postprocess_7dof(sol, params, z_tracks, t_vec, throttle, brake, vx, ax, ay):
         # --- Resultados auxiliares para Dash/HTML export ---                    
         'z_wheel':            z_wheel,                # (4, N)
         'zs':                 zs,                     # (4, N)
+        'p_plot':             bumpstop_mm_piston,                 # (4, N)
         'x_spring_p':         x_spring_p,             # (4, N)    
         'h':                  h[0]+h,                      # (N,)
         'h_ddot':             np.gradient(sol.y[1], t),   # (N,)
