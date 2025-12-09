@@ -1,0 +1,103 @@
+﻿Nr;Driver;Team;TL_Nr;Camera;Lap;Time;Total_Infractions;TL_After;TL_PREVIOUS
+1;Hudson SCHWARTZ;KCL MP Motorsport;1;Turn 7;13;12:00:45.537;1;no;no
+2;Vivek KANTHAN;Campos Racing;1;Turn 9;7;11:43:09.513;3;no;no
+2;Vivek KANTHAN;Campos Racing;2;Turn 9;14;12:05:11.613;3;no;no
+2;Vivek KANTHAN;Campos Racing;3;Turn 14 Entry;15;12:07:24.920;3;yes;no
+3;Rocco CORONEL;MP Motorsport;1;Turn 9;4;11:37:10.304;2;no;no
+3;Rocco CORONEL;MP Motorsport;2;Turn 7;8;11:43:56.310;2;no;no
+4;Ean EYCKMANS;MP Motorsport;1;Turn 9;3;11:35:08.439;3;no;no
+4;Ean EYCKMANS;MP Motorsport;2;Turn 14 Entry;13;12:03:13.588;3;yes;no
+4;Ean EYCKMANS;MP Motorsport;3;Turn 7;16;12:07:45.231;3;no;no
+6;Aleix PIÑERA;T-Code by Amtog;1;Turn 9;5;11:39:49.778;3;no;no
+6;Aleix PIÑERA;T-Code by Amtog;2;Turn 7;6;11:41:25.605;3;no;no
+6;Aleix PIÑERA;T-Code by Amtog;3;Turn 9;18;12:10:30.076;3;no;no
+9;René LAMMERS;MP Motorsport;1;Turn 9;6;11:41:17.974;5;no;no
+9;René LAMMERS;MP Motorsport;2;Turn 7;7;11:42:52.769;5;no;no
+9;René LAMMERS;MP Motorsport;3;Turn 9;7;11:43:01.731;5;no;no
+9;René LAMMERS;MP Motorsport;4;Turn 14 Entry;12;12:01:29.328;5;yes;no
+9;René LAMMERS;MP Motorsport;5;Turn 14 Entry;13;12:03:12.321;5;yes;no
+9;René LAMMERS;MP Motorsport;6;Turn 7;16;12:08:00.006;5;no;no
+9;René LAMMERS;MP Motorsport;7;Turn 9;16;12:08:08.671;5;no;no
+10;Niklas SCHAUFLER;KCL MP Motorsport;1;Turn 9;15;12:06:14.671;1;no;no
+11;Reno FRANCOT;KCL MP Motorsport;1;Turn 9;2;11:33:26.308;4;no;no
+11;Reno FRANCOT;KCL MP Motorsport;2;Turn 9;3;11:35:11.975;4;no;no
+11;Reno FRANCOT;KCL MP Motorsport;3;Turn 9;13;12:01:40.734;4;no;no
+11;Reno FRANCOT;KCL MP Motorsport;4;Turn 14 Entry;16;12:07:20.123;4;yes;no
+12;Philippe Armand KARRAS;G4 Racing;1;Turn 7;2;11:33:31.466;4;no;no
+12;Philippe Armand KARRAS;G4 Racing;2;Turn 7;5;11:38:48.559;4;no;no
+12;Philippe Armand KARRAS;G4 Racing;3;Turn 9;7;11:42:25.036;4;no;no
+12;Philippe Armand KARRAS;G4 Racing;4;Turn 14 Exit;7;11:42:58.666;4;yes;no
+12;Philippe Armand KARRAS;G4 Racing;5;Turn 14 Entry;13;12:02:05.326;4;yes;no
+17;Nacho TUÑON;Tecnicar by Amtog;1;Turn 9;4;11:38:38.035;4;no;no
+17;Nacho TUÑON;Tecnicar by Amtog;2;Turn 9;7;11:43:51.183;4;no;no
+17;Nacho TUÑON;Tecnicar by Amtog;3;Turn 14 Exit;16;12:08:53.310;4;yes;no
+17;Nacho TUÑON;Tecnicar by Amtog;4;Turn 9;17;12:10:03.487;4;no;no
+19;Matus RYBA;Griffin Core;1;Turn 9;5;11:40:00.237;3;no;no
+19;Matus RYBA;Griffin Core;2;Turn 7;12;12:01:09.164;3;no;no
+19;Matus RYBA;Griffin Core;3;Turn 7;13;12:02:52.833;3;no;no
+22;Juan COTA;MP Motorsport;1;Turn 9;4;11:37:38.707;3;no;no
+22;Juan COTA;MP Motorsport;2;Turn 9;7;11:42:53.170;3;no;no
+22;Juan COTA;MP Motorsport;3;Turn 9;12;12:01:26.738;3;no;no
+23;Jan PRZYROWSKI;Griffin Core;1;Turn 9;13;12:05:14.615;1;no;no
+25;Miki BLASCOS;Monlau Motorsport;1;Turn 9;6;11:40:07.511;4;no;no
+25;Miki BLASCOS;Monlau Motorsport;2;Turn 9;9;11:45:25.912;4;no;no
+25;Miki BLASCOS;Monlau Motorsport;3;Turn 14 Entry;17;12:06:57.191;4;yes;no
+25;Miki BLASCOS;Monlau Motorsport;4;Turn 14 Exit;19;12:10:28.937;4;yes;no
+27;Alexander JACOBY;Monlau Motorsport;1;Turn 9;4;11:36:54.305;4;no;no
+27;Alexander JACOBY;Monlau Motorsport;2;Turn 9;7;11:42:12.032;4;no;no
+27;Alexander JACOBY;Monlau Motorsport;3;Turn 14 Exit;6;11:41:01.373;4;yes;no
+27;Alexander JACOBY;Monlau Motorsport;4;Turn 7;10;11:47:16.902;4;no;no
+32;Wiktor DOBRZANSKI;Tecnicar by Amtog;1;Turn 9;3;11:36:52.509;4;no;no
+32;Wiktor DOBRZANSKI;Tecnicar by Amtog;2;Turn 9;5;11:40:24.769;4;no;no
+32;Wiktor DOBRZANSKI;Tecnicar by Amtog;3;Turn 14 Entry;11;11:59:26.663;4;yes;no
+32;Wiktor DOBRZANSKI;Tecnicar by Amtog;4;Turn 14 Exit;17;12:10:10.712;4;yes;no
+33;Kirill KUTSKOV;Drivex;1;Turn 7;6;11:41:28.683;2;no;no
+33;Kirill KUTSKOV;Drivex;2;Turn 14 Exit;17;12:10:17.263;2;yes;no
+37;Filippo FIORENTINO;Drivex;1;Turn 9;7;11:43:31.510;2;no;no
+37;Filippo FIORENTINO;Drivex;2;Turn 7;16;12:07:44.097;2;no;no
+39;Santino PANETTA;TC Racing;1;Turn 9;2;11:35:15.843;4;no;no
+39;Santino PANETTA;TC Racing;2;Turn 9;5;11:41:52.237;4;no;no
+39;Santino PANETTA;TC Racing;3;Turn 9;14;12:04:47.403;4;no;no
+39;Santino PANETTA;TC Racing;4;Turn 9;17;12:09:57.599;4;no;no
+48;Christopher EL FEGHALI;Drivex;1;Turn 9;1;11:32:42.375;3;no;no
+48;Christopher EL FEGHALI;Drivex;2;Turn 9;3;11:36:17.306;3;no;no
+48;Christopher EL FEGHALI;Drivex;3;Turn 9;16;12:07:07.141;3;no;no
+55;Emma FELBERMAYR;Rodin Motorsport;1;Turn 14 Entry;3;11:36:36.750;4;yes;no
+55;Emma FELBERMAYR;Rodin Motorsport;2;Turn 7;8;11:46:31.224;4;no;no
+55;Emma FELBERMAYR;Rodin Motorsport;3;Turn 9;11;11:51:53.641;4;no;no
+55;Emma FELBERMAYR;Rodin Motorsport;4;Turn 14 Entry;15;12:04:10.917;4;yes;no
+57;Kaiden HIGGINS;DXR;1;Turn 9;6;11:41:30.698;4;no;no
+57;Kaiden HIGGINS;DXR;2;Turn 9;7;11:43:15.241;4;no;no
+57;Kaiden HIGGINS;DXR;3;Turn 7;12;12:02:30.344;4;no;no
+57;Kaiden HIGGINS;DXR;4;Turn 14 Exit;14;12:06:40.115;4;yes;no
+70;Aleksandar BOGUNOVIC;GRS Team;1;Turn 9;17;12:08:10.604;1;no;no
+71;Pablo RICCOBONO;GRS Team;1;Turn 9;4;11:37:21.366;5;no;no
+71;Pablo RICCOBONO;GRS Team;2;Turn 9;5;11:39:06.766;5;no;no
+71;Pablo RICCOBONO;GRS Team;3;Turn 9;7;11:42:37.831;5;no;no
+71;Pablo RICCOBONO;GRS Team;4;Turn 14 Exit;7;11:43:11.980;5;yes;no
+71;Pablo RICCOBONO;GRS Team;5;Turn 14 Exit;8;11:44:57.780;5;yes;no
+71;Pablo RICCOBONO;GRS Team;6;Turn 9;18;12:09:07.738;5;no;no
+78;Alfio SPINA;TC Racing;1;Turn 9;6;11:41:19.569;5;no;no
+78;Alfio SPINA;TC Racing;2;Turn 9;7;11:44:57.308;5;no;no
+78;Alfio SPINA;TC Racing;3;Turn 9;9;11:48:26.711;5;no;no
+78;Alfio SPINA;TC Racing;4;Turn 14 Entry;16;12:08:32.254;5;yes;no
+78;Alfio SPINA;TC Racing;5;Turn 14 Exit;16;12:08:36.850;5;yes;no
+78;Alfio SPINA;TC Racing;6;Turn 14 Exit;17;12:10:20.526;5;yes;no
+81;Noah MONTEIRO;Campos Racing;1;Turn 9;14;12:05:49.677;1;no;no
+88;Rogerio GROTTA;TC Racing;1;Turn 7;4;11:36:51.074;7;no;no
+88;Rogerio GROTTA;TC Racing;2;Turn 9;4;11:37:00.118;7;no;no
+88;Rogerio GROTTA;TC Racing;3;Turn 9;6;11:40:31.703;7;no;no
+88;Rogerio GROTTA;TC Racing;4;Turn 9;7;11:42:16.970;7;no;no
+88;Rogerio GROTTA;TC Racing;5;Turn 14 Exit;8;11:44:36.867;7;yes;no
+88;Rogerio GROTTA;TC Racing;6;Turn 7;14;12:03:14.151;7;no;no
+88;Rogerio GROTTA;TC Racing;7;Turn 9;15;12:05:08.814;7;no;no
+88;Rogerio GROTTA;TC Racing;8;Turn 7;18;12:10:12.488;7;no;no
+91;Santiago BAZTARRICA;Monlau Motorsport;1;Turn 9;4;11:36:44.171;5;no;no
+91;Santiago BAZTARRICA;Monlau Motorsport;2;Turn 9;5;11:38:28.509;5;no;no
+91;Santiago BAZTARRICA;Monlau Motorsport;3;Turn 14 Entry;6;11:40:42.941;5;yes;no
+91;Santiago BAZTARRICA;Monlau Motorsport;4;Turn 9;8;11:43:47.525;5;no;no
+91;Santiago BAZTARRICA;Monlau Motorsport;5;Turn 14 Entry;18;12:07:11.522;5;yes;no
+99;Thomas STRAUVEN;Griffin Core;1;Turn 9;3;11:37:38.707;4;no;no
+99;Thomas STRAUVEN;Griffin Core;2;Turn 9;7;11:44:33.038;4;no;no
+99;Thomas STRAUVEN;Griffin Core;3;Turn 7;8;11:46:07.910;4;no;no
+99;Thomas STRAUVEN;Griffin Core;4;Turn 9;13;12:02:22.079;4;no;no
