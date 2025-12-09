@@ -1,0 +1,65 @@
+﻿Nr;Driver;Team;TL_Nr;Camera;Lap;Time;Total_Infractions;TL_After;TL_PREVIOUS
+1;Hudson SCHWARTZ;KCL MP Motorsport;1;Turn 2;4;11:08:11.092;2;no;no
+1;Hudson SCHWARTZ;KCL MP Motorsport;2;Turn 2;6;11:12:23.142;2;no;no
+2;Vivek KANTHAN;Campos Racing;1;Turn 8;2;11:07:30.996;2;no;no
+2;Vivek KANTHAN;Campos Racing;2;Turn 8;3;11:09:41.652;2;no;no
+4;Ean EYCKMANS;MP Motorsport;1;Turn 2;5;11:09:05.781;1;no;no
+5;Miguel COSTA;Campos Racing;1;Turn 2;4;11:11:36.794;1;no;no
+9;René LAMMERS;MP Motorsport;1;Turn 2;3;11:06:07.577;1;no;no
+10;Niklas SCHAUFLER;KCL MP Motorsport;1;Turn 2;6;11:13:38.887;1;no;no
+11;Reno FRANCOT;KCL MP Motorsport;1;Turn 2;3;11:05:57.766;2;no;no
+11;Reno FRANCOT;KCL MP Motorsport;2;Turn 2;4;11:08:02.718;2;no;no
+17;Nacho TUÑON;Tecnicar by Amtog;1;Turn 2;4;11:11:34.594;2;no;no
+17;Nacho TUÑON;Tecnicar by Amtog;2;Turn 2;5;11:13:47.145;2;no;no
+17;Nacho TUÑON;Tecnicar by Amtog;3;Turn 8;5;11:14:23.473;2;no;no
+22;Juan COTA;MP Motorsport;1;Turn 2;1;11:00:22.489;5;no;no
+22;Juan COTA;MP Motorsport;2;Turn 2;4;11:06:50.178;5;no;no
+22;Juan COTA;MP Motorsport;3;Turn 2;5;11:08:56.705;5;no;no
+22;Juan COTA;MP Motorsport;4;Turn 2;6;11:11:01.128;5;no;no
+22;Juan COTA;MP Motorsport;5;Turn 2;7;11:13:06.215;5;no;no
+23;Jan PRZYROWSKI;Griffin Core;1;Turn 2;4;11:11:07.533;2;no;no
+23;Jan PRZYROWSKI;Griffin Core;2;Turn 2;7;11:17:25.411;2;no;no
+24;Kyuho LEE;Rodin Motorsport;1;Turn 2;3;11:06:24.388;2;no;no
+24;Kyuho LEE;Rodin Motorsport;2;Turn 2;4;11:09:08.182;2;no;no
+25;Francisco MONARCA;Monlau Motorsport;1;Turn 2;3;11:05:50.715;1;no;no
+33;Christopher EL FEGHALI;Drivex;1;Turn 2;2;11:02:53.240;4;no;no
+33;Christopher EL FEGHALI;Drivex;2;Turn 2;5;11:09:20.888;4;no;no
+33;Christopher EL FEGHALI;Drivex;3;Turn 2;6;11:11:26.625;4;no;no
+33;Christopher EL FEGHALI;Drivex;4;Turn 8;6;11:12:01.133;4;no;no
+33;Christopher EL FEGHALI;Drivex;5;Turn 2;8;11:16:49.010;4;no;no
+37;Filippo FIORENTINO;Drivex;1;Turn 2;3;11:06:19.308;1;no;no
+39;Santino PANETTA;TC Racing;1;Turn 8;4;11:11:22.328;1;no;no
+41;Stepan SUSLOV;DXR;1;Turn 2;4;11:07:41.957;2;no;no
+41;Stepan SUSLOV;DXR;2;Turn 2;5;11:09:51.295;2;no;no
+48;Gino TRAPPA;Drivex;1;Turn 2;3;11:05:06.105;4;no;no
+48;Gino TRAPPA;Drivex;2;Turn 2;6;11:11:26.625;4;no;no
+48;Gino TRAPPA;Drivex;3;Turn 8;7;11:14:14.268;4;no;no
+48;Gino TRAPPA;Drivex;4;Turn 2;9;11:18:04.750;4;no;no
+57;Kaiden HIGGINS;DXR;1;Turn 2;4;11:08:19.240;1;no;no
+70;Aleksandar BOGUNOVIC;GRS Team;1;Turn 2;3;11:04:58.103;4;no;no
+70;Aleksandar BOGUNOVIC;GRS Team;2;Turn 17;2;11:04:37.016;4;yes;no
+70;Aleksandar BOGUNOVIC;GRS Team;3;Turn 2;4;11:07:05.694;4;no;no
+70;Aleksandar BOGUNOVIC;GRS Team;4;Turn 2;7;11:13:26.942;4;no;no
+70;Aleksandar BOGUNOVIC;GRS Team;5;Turn 8;7;11:14:02.984;4;no;no
+70;Aleksandar BOGUNOVIC;GRS Team;6;Turn 15;7;11:14:56.987;4;no;no
+71;Daniel DALLAKYAN;GRS Team;1;Turn 15;2;11:05:35.290;5;no;no
+71;Daniel DALLAKYAN;GRS Team;2;Turn 2;4;11:08:23.441;5;no;no
+71;Daniel DALLAKYAN;GRS Team;3;Turn 2;5;11:10:34.536;5;no;no
+71;Daniel DALLAKYAN;GRS Team;4;Turn 15;4;11:09:55.913;5;no;no
+71;Daniel DALLAKYAN;GRS Team;5;Turn 8;5;11:11:10.977;5;no;no
+71;Daniel DALLAKYAN;GRS Team;6;Turn 2;6;11:12:44.132;5;no;no
+71;Daniel DALLAKYAN;GRS Team;7;Turn 2;7;11:14:51.491;5;no;no
+78;Alfio SPINA;TC Racing;1;Turn 15;3;11:06:22.047;3;no;no
+78;Alfio SPINA;TC Racing;2;Turn 2;5;11:09:03.849;3;no;no
+78;Alfio SPINA;TC Racing;3;Turn 2;7;11:13:14.062;3;no;no
+81;Noah MONTEIRO;Campos Racing;1;Turn 2;4;11:11:40.331;3;no;no
+81;Noah MONTEIRO;Campos Racing;2;Turn 2;5;11:13:47.145;3;no;no
+81;Noah MONTEIRO;Campos Racing;3;Turn 2;6;11:15:54.625;3;no;no
+88;Santiago BAZTARRICA;TC Racing;1;Turn 2;3;11:05:07.717;3;no;no
+88;Santiago BAZTARRICA;TC Racing;2;Turn 2;4;11:07:14.839;3;no;no
+88;Santiago BAZTARRICA;TC Racing;3;Turn 2;5;11:09:20.888;3;no;no
+91;Lorenzo CAMPOS;Monlau Motorsport;1;Turn 2;3;11:05:50.715;3;no;no
+91;Lorenzo CAMPOS;Monlau Motorsport;2;Turn 2;4;11:07:57.912;3;no;no
+91;Lorenzo CAMPOS;Monlau Motorsport;3;Turn 2;7;11:14:14.764;3;no;no
+91;Lorenzo CAMPOS;Monlau Motorsport;4;Turn 15;7;11:15:42.770;3;no;no
+99;Thomas STRAUVEN;Griffin Core;1;Turn 2;6;11:15:00.473;1;no;no
